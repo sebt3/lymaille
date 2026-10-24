@@ -18,5 +18,18 @@ Serveur vLLM, modèle `qwen3.8-flash-next`.
 | `preserve_thinking=false` (E, F) | 85 tokens : le paramètre est honoré par `chat_template_kwargs` |
 | `enable_thinking=false` (G) | 1 100 tokens : sans effet sur l'historique |
 
-Qwen3.6 via le provider `smart` n'est pas mesuré (clé d'API requise). Des sources communautaires donnent
-`preserve_thinking` désactivé par défaut dans son gabarit, ce qui diffère de ce modèle.
+## Qwen3.6 via la passerelle `smart` (partiel)
+
+Identifiant `Qwen3.6-35B-A3B`. Forme de la réponse seulement ; l'effet de `preserve_thinking` n'est **pas mesuré** : le script
+dépassait son délai, et la mesure n'est pas nécessaire au cadrage (voir ci-dessous).
+
+| Mesure | Résultat |
+| --- | --- |
+| Champ de raisonnement dans la réponse | `reasoning_content` (vLLM : `reasoning`) |
+| `completion_tokens_details.reasoning_tokens` | absent (`kydah/kydah-ai-proxy#114`) |
+| `context_length` annoncé | 8192, valeur par défaut de la passerelle (`kydah/kydah-ai-proxy#113`) |
+
+Des sources communautaires donnent `preserve_thinking` désactivé par défaut dans le gabarit de Qwen3.6, ce qui diffère de
+`qwen3.8-flash-next`. Le défaut est sans importance pour le design : `lymaille` envoie le mode explicitement
+(`context-window` FR-9). Ce qui reste à vérifier, c'est que la passerelle et le backend de Qwen3.6 honorent
+`chat_template_kwargs` : c'est un test d'intégration (`context-window` AC-5), à écrire avec le code.

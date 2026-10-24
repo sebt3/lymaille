@@ -72,11 +72,12 @@ raison d'être de `agent-sessions#BO-4`.
 
 - **TBD:** consigne au résumeur de citer textuellement les demandes de l'utilisateur, seule donnée non régénérable ; le
   contenu du prompt de résumé reste à rédiger.
-- **TBD:** essai de bout en bout par `rig` du rejeu du raisonnement. Mesuré côté serveur (`spikes/inference-probe`) : le
-  champ renvoyé est `reasoning`, les deux orthographes sont acceptées en entrée, et `preserve_thinking` s'obtient par
-  `chat_template_kwargs`. Lu dans `rig` 0.43, non exécuté : il décode `reasoning` et `reasoning_content`, il fusionne
-  `additional_params` à plat dans le corps, et il ne rejoue un raisonnement que pour son émetteur. Qwen3.6 via le provider
-  `smart` n'est pas mesuré (clé requise).
+- **TBD:** essai de bout en bout du rejeu du raisonnement, à écrire avec le code comme test d'intégration (AC-5). Mesuré côté
+  serveur (`spikes/inference-probe`) : sur vLLM le champ renvoyé est `reasoning`, les deux orthographes sont acceptées en
+  entrée, et `preserve_thinking` s'obtient par `chat_template_kwargs` ; sur la passerelle `smart`, Qwen3.6 renvoie
+  `reasoning_content`. Lu dans `rig` 0.43, non exécuté : il décode les deux champs, il fusionne `additional_params` à plat
+  dans le corps, et il ne rejoue un raisonnement que pour son émetteur. Reste à vérifier que la passerelle et le backend de
+  Qwen3.6 honorent `chat_template_kwargs`.
 
 ## Acceptation
 
