@@ -62,8 +62,9 @@ raison d'être de `agent-sessions#BO-4`.
 - **FR-9 - MUST:** Le raisonnement (`thinking`) fait partie de l'historique stocké. Un profil de modèle déclare son mode de
   rejeu : aucun, intra-tour (entre appels d'outils d'un même tour) ou tous les tours (`preserve_thinking`). Le raisonnement
   rejoué compte dans `SESSION` et est fourni au résumeur, qui en tire les décisions et leurs raisons ; non rejoué, il
-  n'est conservé que pour l'audit.
-    - **Source:** user instruction, 2026-10-24 ; https://github.com/earendil-works/pi/issues/3325 ;
+  n'est conservé que pour l'audit. Le mode est transmis explicitement au serveur d'inférence
+  (`chat_template_kwargs`), jamais déduit du défaut du gabarit, qui varie d'un modèle à l'autre.
+    - **Source:** user instruction, 2026-10-24 ; Observed in: spikes/inference-probe ; https://github.com/earendil-works/pi/issues/3325 ;
       https://docs.fireworks.ai/guides/reasoning.md
     - **Verified by:** `AC-5`
 
@@ -71,9 +72,11 @@ raison d'être de `agent-sessions#BO-4`.
 
 - **TBD:** consigne au résumeur de citer textuellement les demandes de l'utilisateur, seule donnée non régénérable ; le
   contenu du prompt de résumé reste à rédiger.
-- **TBD:** transmission du rejeu du raisonnement. Observé dans `rig` 0.43 : le raisonnement est un `AssistantContent::Reasoning`
-  scellé, rejoué seulement s'il a été émis par le même service, et `additional_params` est fusionné dans le corps de la
-  requête (voie possible pour `chat_template_kwargs`) ; à vérifier par un essai réel avec llama.cpp.
+- **TBD:** essai de bout en bout par `rig` du rejeu du raisonnement. Mesuré côté serveur (`spikes/inference-probe`) : le
+  champ renvoyé est `reasoning`, les deux orthographes sont acceptées en entrée, et `preserve_thinking` s'obtient par
+  `chat_template_kwargs`. Lu dans `rig` 0.43, non exécuté : il décode `reasoning` et `reasoning_content`, il fusionne
+  `additional_params` à plat dans le corps, et il ne rejoue un raisonnement que pour son émetteur. Qwen3.6 via le provider
+  `smart` n'est pas mesuré (clé requise).
 
 ## Acceptation
 

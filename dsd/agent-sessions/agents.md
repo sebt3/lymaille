@@ -58,9 +58,11 @@ et ce que l'agent consomme.
   un fournisseur directement.
     - **Source:** user instruction, 2026-10-24
 
-- **TBD:** détection des modèles : `list_models` existe dans `rig` 0.43 sur les clients OpenAI, Anthropic, Ollama, Copilot et
-  Gemini, et llama.cpp passe par un dialecte OpenAI-compatible sans client dédié (Observed in: rig-core 0.43.0,
-  `src/client`) ; à vérifier pour llama.cpp, et comportement quand un modèle référencé n'est pas détecté.
+- **TBD:** détection des modèles. `list_models` existe dans `rig` 0.43 sur les clients OpenAI, Anthropic, Ollama, Copilot et
+  Gemini (Observed in: rig-core 0.43.0, `src/client`), et `ModelInfo` porte `context_length` et `max_output_tokens`
+  optionnels. vLLM annonce `max_model_len` dans `/v1/models` (262 144 pour `qwen3.8-flash-next`, Observed in:
+  spikes/inference-probe) ; que `rig` le reporte dans `context_length` reste à vérifier, sinon le profil de modèle le
+  surcharge (FR-7). Comportement quand un modèle référencé n'est pas détecté : à décider.
 
 ## Questions ouvertes
 

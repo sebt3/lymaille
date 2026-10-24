@@ -5,7 +5,7 @@
 Le domaine couvre la conduite d'un LLM comme agent de travail durable : une session conserve son historique, un espace
 de travail programmable (scratchpad Rhai), des mémoires et une todo ; elle découvre à la demande les outils, skills et
 sous-agents que sa définition d'agent lui accorde. Une librairie Rust pure, la crate `lymaille`, réalise ce domaine. Elle est destinée à
-remplacer l'inférence actuelle de vanyline et à fournir à myriad-core des étapes de workflow pilotées par un LLM.
+remplacer l'inférence actuelle de vanyline et à fournir à miryad-core des étapes de workflow pilotées par un LLM.
 
 Statut du document : cadrage initial complet au 2026-10-24. Les points restants sont marqués `TBD`, dans les Open Issues
 ou dans la Solution concernée.
@@ -14,7 +14,7 @@ ou dans la Solution concernée.
 
 La librairie garantit un seul tour actif par session au sein d'un processus (NFR-2), et rien au-delà : elle ne détecte
 aucun conflit entre processus (CON-7). C'est à l'hôte de garantir qu'une session n'est active que dans un seul processus
-à la fois. L'agent Matrix y satisfait par l'unicité que Matrix fournit et que myriad-core implémente ; vanyline devra
+à la fois. L'agent Matrix y satisfait par l'unicité que Matrix fournit et que miryad-core implémente ; vanyline devra
 traiter ce point de son côté. Voir `session`, DEC-1.
 
 ## Objectif et problème
@@ -27,7 +27,7 @@ réutilise d'un environnement cible à l'autre.
 ## Objectifs métier
 
 - **BO-1:** Une seule librairie sert les sessions interactives (vanyline, agent Matrix) et les étapes LLM autonomes d'un
-  workflow (myriad-core).
+  workflow (miryad-core).
     - **Source:** user instruction, 2026-10-24
 
 - **BO-2:** Le contexte initial du LLM est connu, petit et constant ; les capacités se découvrent à la demande.
@@ -51,7 +51,7 @@ Hors périmètre, par décision :
 
 - le stockage (la librairie définit des traits, l'hôte les implémente) ;
 - toute interface utilisateur ;
-- le moteur de workflow (offert par myriad-core ; le module de gestion de workflows est fourni par l'hôte) ;
+- le moteur de workflow (offert par miryad-core ; le module de gestion de workflows est fourni par l'hôte) ;
 - la détention durable des secrets (la librairie ne les persiste ni ne les divulgue, voir CON-3) ;
 - le module de connaissance (RAG) et un espace de Memory partagé entre agent principal et sous-agents, idées réservées
   hors du premier jalon (voir `modules` et `delegation`) ;
@@ -67,18 +67,18 @@ Source: user instruction, 2026-10-24
   Memory.
 - **Agent principal (LLM) :** conduit une session, peut déléguer.
 - **Sous-agent (LLM) :** exécute une tâche déléguée de façon autonome.
-- **Hôte :** application qui embarque la librairie (vanyline, myriad-core, application de réception d'alertes avec agent
+- **Hôte :** application qui embarque la librairie (vanyline, miryad-core, application de réception d'alertes avec agent
   Matrix). Il implémente les traits de stockage, résout les références vers les connexions, alimente les événements.
 - **Auteur de toolset :** humain ou LLM (hors de sa propre session) qui écrit des toolsets et des skills.
 
 ## État actuel et état cible
 
-- **Actuel :** vanyline dispose d'une solution d'inférence propre ; myriad-core, qui offre le moteur de workflow, n'a
+- **Actuel :** vanyline dispose d'une solution d'inférence propre ; miryad-core, qui offre le moteur de workflow, n'a
   pas d'étape LLM. L'analyse d'impact sur vanyline se fera depuis son propre workspace, une fois la librairie
   existante ; elle n'est pas un objet de ce domaine.
-- **Cible :** myriad-core, moteur de workflow, utilise cette librairie pour offrir des étapes LLM ; vanyline utilise
-  myriad-core et la librairie, et offre à l'agent principal un module de gestion de workflows ; une application de
-  réception d'événements alertmanager s'appuie sur myriad-core et expose un agent via Matrix.
+- **Cible :** miryad-core, moteur de workflow, utilise cette librairie pour offrir des étapes LLM ; vanyline utilise
+  miryad-core et la librairie, et offre à l'agent principal un module de gestion de workflows ; une application de
+  réception d'événements alertmanager s'appuie sur miryad-core et expose un agent via Matrix.
     - **Source:** user instruction, 2026-10-24
 
 ## Glossaire
@@ -257,7 +257,7 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
 - **DEC-4 - Le run batch est l'unité de base**
     - **Decision:** un sous-agent est un run batch autonome ; une session interactive est la même mécanique avec un humain
       dans la boucle.
-    - **Consequences:** myriad-core utilise un run batch comme étape de workflow ; une sortie structurée est
+    - **Consequences:** miryad-core utilise un run batch comme étape de workflow ; une sortie structurée est
       nécessaire (voir `delegation`).
     - **Source:** user instruction, 2026-10-24
 

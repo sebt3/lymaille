@@ -33,7 +33,8 @@ reste possible sur cette base.
 **Exigences de lymaille.** `agent-sessions#BR-2`, `agent-sessions#CON-3`, `agent-sessions#AC-1`.
 
 **Vérification.** Un test de `lymaille` construit un moteur avec le groupe pur seul : `json_encode` répond, `get_env` et
-`sleep` sont introuvables.
+`sleep` sont introuvables. Côté `vynil-core`, un `Scenario` verrouille l'appartenance de chaque fonction à son groupe, comme
+`new_restricted` l'est déjà.
 
 ## Nice to have
 
@@ -58,10 +59,12 @@ accorde les modules `http`, `k8s`, `s3` ou `oci` de `vynil-core` : les appels MC
 prenne effet.
 Observed in: `spikes/rhai-1-25` (`persistence`, S5).
 
-### N4 — Surface publique documentée et verrouillée
+### N4 — Feature Cargo `metadata`
 
-Documenter les enregistreurs de M1 comme API publique et verrouiller l'appartenance de chaque fonction à son groupe par un
-`Scenario`, comme `new_restricted` l'est déjà.
+Exposer une feature `metadata` de `vynil-core` qui active `rhai/metadata`, pour que les consommateurs obtiennent
+signatures et commentaires de documentation des fonctions sans déclarer eux-mêmes la feature sur `rhai`. Coût faible.
+Aujourd'hui `lymaille` la déclare sur sa propre dépendance `rhai`, et elle s'unifie avec celle de `vynil-core`
+(Observed in: `spikes/vynil-core-surface`).
 
 ## Aucune action sur vynil-core
 
@@ -72,8 +75,6 @@ Documenter les enregistreurs de M1 comme API publique et verrouiller l'appartena
   `lymaille` l'utilise, et n'appelle ni `register_helper_dir` ni `engine_mut`.
 - **Moteur** : `Script.engine` et `Script.ctx` sont publics. `lymaille` pose lui-même `on_progress` (annulation),
   `set_max_string_size` et assimilés, `set_module_resolver` et `register_static_module` (toolsets stockés par trait).
-- **Feature `metadata`** : `lymaille` la déclare sur sa propre dépendance `rhai` ; elle s'unifie avec celle de `vynil-core`
-  (Observed in: `spikes/vynil-core-surface`).
 - **Introspection** : l'API de Rhai (`gen_fn_metadata_to_json`, `Scope::iter`) suffit ; le filtrage des dépendances de
   toolset et la recherche lexicale sont à la charge de `lymaille`.
 - **Formatage** : `json_encode`, `json_decode`, `yaml_encode` et `yaml_decode` existent ; le tableau aligné et la
