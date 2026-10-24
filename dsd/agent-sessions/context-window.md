@@ -58,10 +58,18 @@ raison d'être de `agent-sessions#BO-4`.
   fournisseur ne l'est pas. La valeur est surchargeable par définition d'agent.
     - **Source:** user instruction, 2026-10-24
 
+- **FR-9 - MUST:** Le raisonnement (`thinking`) fait partie de l'historique stocké. Un profil de modèle déclare son mode de
+  rejeu : aucun, intra-tour (entre appels d'outils d'un même tour) ou tous les tours (`preserve_thinking`). Le raisonnement
+  rejoué compte dans `SESSION` et est fourni au résumeur, qui en tire les décisions et leurs raisons ; non rejoué, il
+  n'est conservé que pour l'audit.
+    - **Source:** user instruction, 2026-10-24 ; https://github.com/earendil-works/pi/issues/3325 ;
+      https://docs.fireworks.ai/guides/reasoning.md
+    - **Verified by:** `AC-5`
+
 ## Questions ouvertes
 
-- **TBD:** contenu de raisonnement (`thinking`) des tours précédents : proposition, ne pas le renvoyer au modèle ni le
-  compter dans `SESSION`, sauf si le profil de modèle l'exige.
+- **TBD:** transmission du rejeu du raisonnement par `rig` : champ `reasoning_content` des messages ou paramètre de gabarit
+  (`chat_template_kwargs`), selon le serveur d'inférence ; à vérifier dans `rig`.
 - **TBD:** nombre de derniers messages conservés intacts par la stratégie par défaut (FR-7).
 - **TBD:** interaction avec le cache de préfixe des fournisseurs (stabilité de l'ordre des messages).
 
@@ -76,6 +84,8 @@ raison d'être de `agent-sessions#BO-4`.
   démarrer avec un message qui nomme la cause.
 - **AC-4:** Une compaction par la stratégie par défaut supprime d'abord les anciens résultats de `rhai_pad`, laisse intacts
   les derniers messages, et remplace le reste par un résumé produit par le LLM de l'agent.
+- **AC-5:** Avec un profil en mode `preserve_thinking`, le raisonnement des tours précédents est renvoyé au modèle, compté
+  dans `SESSION` et fourni au résumeur ; avec le mode aucun, il est stocké mais absent de la requête.
 
 ## Réalisation SpecDD
 

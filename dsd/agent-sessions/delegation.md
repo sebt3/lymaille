@@ -30,7 +30,8 @@ sous-agents prédéfinis.
 
 - **FR-4 - MUST:** Un run de sous-agent rend un statut et un résultat conforme à un JSON Schema déclaré par sa
   définition, de sorte qu'un workflow puisse en dépendre. Le sous-agent rend son résultat par une fonction Rhai ; si la
-  validation échoue, l'erreur lui est renvoyée pour qu'il corrige dans le même run. S'il ne peut pas aboutir, il rend un
+  validation échoue, l'erreur lui est renvoyée pour qu'il corrige dans le même run, trois fois au plus par défaut (valeur surchargeable par
+  définition de sous-agent). S'il ne peut pas aboutir, il rend un
   échec explicite qui dit ce qui manque.
     - **Source:** agent-sessions#DEC-4; user instruction, 2026-10-24
     - **Verified by:** `AC-2`
@@ -64,6 +65,17 @@ sous-agents prédéfinis.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-5`
 
+- **FR-12 - MUST:** À la restauration d'une session, une échéance de minuteur manquée se déclenche une fois, immédiatement,
+  avec son retard ; un minuteur périodique saute les occurrences manquées et se réarme à la prochaine.
+    - **Source:** user instruction, 2026-10-24
+    - **Verified by:** `AC-6`
+
+- **FR-13 - MUST:** Le décompte des requêtes en cours vers un moteur est local au processus par défaut ; un trait optionnel
+  permet à l'hôte de fournir un décompte partagé. La capacité annoncée au contexte initial est un instantané, que le LLM peut
+  relire par une fonction d'introspection.
+    - **Source:** user instruction, 2026-10-24
+    - **Verified by:** `AC-7`
+
 ## Extension réservée : Memory partagée
 
 Idée consignée, hors du premier jalon et sans exigence : le besoin n'est pas avéré et c'est lui qui déterminera les choix le
@@ -77,12 +89,6 @@ Source: user instruction, 2026-10-24
 
 ## Questions ouvertes
 
-- **TBD:** minuteurs : ré-armement à la restauration d'une session et traitement d'une échéance manquée pendant
-  l'indisponibilité de l'hôte.
-- **TBD:** capacité de parallélisation : décompte partagé entre processus (réplicas) et entre profils d'un même moteur ;
-  fraîcheur de la valeur du contexte initial pendant une session longue (fonction d'introspection pour la relire).
-- **TBD:** nombre de corrections accordées à un sous-agent dont le résultat est invalide, sachant que la librairie
-  n'interrompt pas d'elle-même un run (`agent-sessions#FR-5`).
 
 ## Acceptation
 
@@ -94,6 +100,12 @@ Source: user instruction, 2026-10-24
   refuse n'injecte rien.
 - **AC-5:** Avec un profil limité à 8 requêtes simultanées dont 2 consommées au démarrage, l'agent principal reçoit une
   capacité annoncée de 5 sous-agents ; une neuvième requête simultanée est mise en file.
+- **AC-6:** Une session restaurée après l'échéance d'un minuteur reçoit un seul événement qui porte le retard ; un minuteur
+  périodique manqué plusieurs fois se réarme sans rejouer les occurrences manquées.
+- **AC-7:** Avec un décompte partagé fourni par l'hôte, la capacité annoncée tient compte des requêtes d'un autre processus, et
+  la fonction d'introspection rend la valeur à jour.
+- **AC-8:** Un sous-agent dont les trois corrections successives restent invalides vis-à-vis du JSON Schema fait échouer le run
+  avec la liste des erreurs de validation.
 
 ## Réalisation SpecDD
 

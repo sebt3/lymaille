@@ -49,7 +49,7 @@ et ce que l'agent consomme.
 
 - **FR-7 - MUST:** Un profil de modèle est une entité nommée, de niveau utilisateur ou projet et stockée par un trait,
   qui désigne un fournisseur et un modèle et peut surcharger les métadonnées détectées : taille maximale de contexte,
-  support des appels d'outils, paramètres d'échantillonnage, indice de tokenisation, nombre maximal de requêtes simultanées. Le profil résolu est la détection
+  support des appels d'outils, paramètres d'échantillonnage, indice de tokenisation, nombre maximal de requêtes simultanées, mode de rejeu du raisonnement. Le profil résolu est la détection
   recouverte par les surcharges ; la surcharge l'emporte toujours.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-2`
