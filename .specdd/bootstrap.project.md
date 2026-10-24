@@ -19,6 +19,8 @@ racine à la création du squelette du crate.
   Une tâche n'est terminée que lorsque `scripts/check` passe. Il n'y a pas de succès partiel.
 - **Ne jamais modifier** `[workspace.lints]` du `Cargo.toml`, `clippy.toml`, `rustfmt.toml`, `deny.toml`,
   `rust-toolchain.toml` ni `scripts/check`. Si un lint semble faux, s'arrêter et le signaler.
+  Aucun contrôle automatique ne l'empêche : le relecteur final (le développeur principal) examine tout diff qui touche ces
+  fichiers.
 - **Jamais `#[allow(...)]`** : `clippy::allow_attributes` le refuse. La seule dérogation est `#[expect(lint, reason = "...")]`,
   avec une raison précise, sur l'élément le plus étroit possible. Un `expect` devenu inutile fait échouer la compilation.
 - **Les `disallowed_*` de `clippy.toml` encodent l'architecture** (`CON-1`, `CON-3`, `NFR-1`, `FR-4` de `dsd/agent-sessions.md`) :
