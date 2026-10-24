@@ -76,8 +76,8 @@ raison d'être de `agent-sessions#BO-4`.
   serveur (`spikes/inference-probe`) : sur vLLM le champ renvoyé est `reasoning`, les deux orthographes sont acceptées en
   entrée, et `preserve_thinking` s'obtient par `chat_template_kwargs` ; sur la passerelle `smart`, Qwen3.6 renvoie
   `reasoning_content`. Lu dans `rig` 0.43, non exécuté : il décode les deux champs, il fusionne `additional_params` à plat
-  dans le corps, et il ne rejoue un raisonnement que pour son émetteur. Reste à vérifier que la passerelle et le backend de
-  Qwen3.6 honorent `chat_template_kwargs`.
+  dans le corps, et il ne rejoue un raisonnement que pour son émetteur. La passerelle `smart` relaie `chat_template_kwargs` et `reasoning_tokens` (mesuré avec
+  `qwen3.8-flash-next`) ; reste à vérifier que le backend de Qwen3.6 honore `chat_template_kwargs`.
 
 ## Acceptation
 

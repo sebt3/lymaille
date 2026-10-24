@@ -18,6 +18,15 @@ Serveur vLLM, modèle `qwen3.8-flash-next`.
 | `preserve_thinking=false` (E, F) | 85 tokens : le paramètre est honoré par `chat_template_kwargs` |
 | `enable_thinking=false` (G) | 1 100 tokens : sans effet sur l'historique |
 
+## Même modèle via la passerelle `smart` (`qwen3.8-flash-next`)
+
+| Mesure | Direct vLLM | Via la passerelle |
+| --- | --- | --- |
+| `completion_tokens_details.reasoning_tokens` | 52 | 55 : relayé |
+| Aucun raisonnement dans l'historique (A) | 89 | 89 |
+| Raisonnement rejoué, défaut (B) | 1 140 | 1 140 |
+| `preserve_thinking=false` (F) | 85 | 85 : `chat_template_kwargs` traverse la passerelle |
+
 ## Qwen3.6 via la passerelle `smart` (partiel)
 
 Identifiant `Qwen3.6-35B-A3B`. Forme de la réponse seulement ; l'effet de `preserve_thinking` n'est **pas mesuré** : le script
@@ -26,10 +35,10 @@ dépassait son délai, et la mesure n'est pas nécessaire au cadrage (voir ci-de
 | Mesure | Résultat |
 | --- | --- |
 | Champ de raisonnement dans la réponse | `reasoning_content` (vLLM : `reasoning`) |
-| `completion_tokens_details.reasoning_tokens` | absent (`kydah/kydah-ai-proxy#114`) |
+| `completion_tokens_details.reasoning_tokens` | absent : c'est le backend, la passerelle le relaie pour un autre modèle (`kydah/kydah-ai-proxy#114`, fermée) |
 | `context_length` annoncé | 8192, valeur par défaut de la passerelle (`kydah/kydah-ai-proxy#113`) |
 
 Des sources communautaires donnent `preserve_thinking` désactivé par défaut dans le gabarit de Qwen3.6, ce qui diffère de
 `qwen3.8-flash-next`. Le défaut est sans importance pour le design : `lymaille` envoie le mode explicitement
-(`context-window` FR-9). Ce qui reste à vérifier, c'est que la passerelle et le backend de Qwen3.6 honorent
-`chat_template_kwargs` : c'est un test d'intégration (`context-window` AC-5), à écrire avec le code.
+(`context-window` FR-9). Ce qui reste à vérifier, c'est que le backend de Qwen3.6 honore `chat_template_kwargs` (la passerelle le laisse passer) :
+c'est un test d'intégration (`context-window` AC-5), à écrire avec le code.
