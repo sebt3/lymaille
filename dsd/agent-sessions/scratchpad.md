@@ -114,9 +114,8 @@ Mesurés par les programmes de `spikes/rhai-1-25`, avec les features de `vynil-c
 
 ## Questions ouvertes
 
-- **TBD:** hook de progression du moteur pour l'annulation (`agent-sessions#FR-4`) et la durée maximale d'un script
-  (FR-4) ; `vynil-core` n'en pose aucun et son `sleep` bloque le thread sans point d'annulation (Observed in:
-  vynil-core `src/engine.rs`).
+- **TBD:** hook de progression du moteur pour l'annulation (`agent-sessions#FR-4`) : `vynil-core` n'en pose aucun et son
+  `sleep` bloque le thread sans point d'annulation (Observed in: vynil-core `src/engine.rs`).
 - **TBD:** accord des capacités à l'exécution, par agent : prérequis côté `vynil-core` (voir domaine, shopping-list). Tant
   qu'il n'est pas levé, `get_env` et `sleep` restent accessibles au LLM dans le moteur de `vynil-core`.
 - **TBD:** évolutions de `vynil-core` : introspection du scope, des modules et des fonctions ; modules non fichiers ;
