@@ -46,6 +46,18 @@ d'extension pour les modules fournis par l'hôte.
   workflows de vanyline ; ils sont soumis à la même règle d'accord par définition d'agent.
     - **Source:** user instruction, 2026-10-24
 
+- **FR-9 - MUST:** Quand un serveur MCP devient injoignable en cours de run, la librairie tente de se reconnecter quelques
+  fois avec un backoff court (3 essais, 1 s puis doublement, par défaut), émet un événement par tentative, reste
+  annulable, puis rend une erreur Rhai explicite à l'appelant. La connexion se rétablit paresseusement à l'appel suivant.
+    - **Source:** user instruction, 2026-10-24
+    - **Verified by:** `AC-4`
+
+- **FR-10 - MUST:** Chaque tool MCP devient une fonction Rhai à un paramètre map, validé contre le JSON Schema du tool avant
+  l'appel ; la documentation introspectable de la fonction reprend ce schéma, et le retour est le JSON converti en
+  `Dynamic`.
+    - **Source:** user instruction, 2026-10-24
+    - **Verified by:** `AC-5`
+
 ## Extension réservée : connaissance
 
 Hors du premier jalon et sans exigence, le besoin n'étant pas avéré. Principe consigné : un module Rhai optionnel de
@@ -57,8 +69,6 @@ Source: user instruction, 2026-10-24
 
 ## Questions ouvertes
 
-- **TBD:** typage des arguments et valeurs de retour des fonctions générées à partir des schémas MCP.
-- **TBD:** reconnexion et gestion d'erreur réseau d'un MCP au milieu d'un run.
 
 ## Acceptation
 
@@ -67,6 +77,10 @@ Source: user instruction, 2026-10-24
   lecture seule sur le niveau utilisateur ne peut pas la modifier.
 - **AC-3:** Avec un serveur MCP simulé exposant deux tools, la session voit un module à deux fonctions documentées par les
   descriptions MCP.
+- **AC-4:** Avec un serveur MCP simulé qui coupe la connexion, l'appel rend une erreur Rhai explicite après les tentatives
+  de reconnexion, un événement par tentative, et l'appel suivant rétablit la connexion.
+- **AC-5:** Un appel de fonction MCP avec un argument invalide pour le JSON Schema du tool échoue avant tout appel réseau, et
+  la documentation introspectée de la fonction contient le schéma.
 
 ## Réalisation SpecDD
 

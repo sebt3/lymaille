@@ -63,7 +63,6 @@ et ce que l'agent consomme.
 
 ## Questions ouvertes
 
-- **TBD:** version d'une définition d'agent et compatibilité avec les sessions existantes.
 
 ## Acceptation
 

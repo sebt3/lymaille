@@ -21,15 +21,13 @@ non-interruption sur le temps.
 
 - **FR-2 - MUST:** L'état persisté d'une session comprend l'historique, les variables du scratchpad (sérialisation
   serde), le texte source des fonctions définies, la todo, les watchers, les Memory de niveau session, les compteurs de tokens, la
-  référence à l'agent et au ToolsetContext (jamais de secret, `agent-sessions#CON-3`), une version de format et la
+  référence à l'agent avec l'empreinte de sa définition et au ToolsetContext (jamais de secret, `agent-sessions#CON-3`), une version de format et la
   version de chaque toolset utilisé.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-1`
 
 - **FR-3 - MUST:** À la restauration, les fonctions sont recompilées depuis leur source ; une définition qui échoue
   n'empêche pas la restauration du reste, et la liste des définitions cassées est signalée au LLM par un message système.
-  Un changement de version majeure d'un toolset depuis la sauvegarde est signalé au LLM par le même message système.
-  Seule une incompatibilité majeure de version de format refuse la restauration.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-2`
 
@@ -60,6 +58,13 @@ non-interruption sur le temps.
     - **Source:** user instruction, 2026-10-24 ; Observed in: spikes/rhai-1-25 (`persistence`, S8)
     - **Verified by:** `AC-5`
 
+- **FR-10 - MUST:** Une session se restaure toujours avec les définitions courantes. Un message système signale au LLM ce qui
+  a changé depuis la sauvegarde : une version majeure de toolset différente, une définition d'agent dont l'empreinte
+  diffère de celle enregistrée, un toolset plus ancien que celui de la sauvegarde. Les évolutions mineures du format de
+  session n'ajoutent que des champs optionnels ; seule une version majeure incompatible refuse la restauration.
+    - **Source:** user instruction, 2026-10-24
+    - **Verified by:** `AC-6`
+
 ## Décisions
 
 - **DEC-1 - Collisions d'écriture laissées au stockage**
@@ -74,8 +79,6 @@ non-interruption sur le temps.
 ## Questions ouvertes
 
 - **TBD:** inventaire des types `Dynamic` à étiqueter au-delà de `char` et `blob` (horodatages, décimaux selon les features).
-- **TBD:** politique de migration de format entre versions mineures.
-- **TBD:** restauration d'une session sauvegardée avec une version de toolset plus récente que celle installée.
 - **TBD:** délai initial et facteur de croissance du backoff d'inférence. Proposition : 1 s, doublement à chaque réessai,
   jusqu'au plafond de cinq minutes fixé par `agent-sessions#FR-6`.
 
@@ -90,6 +93,8 @@ non-interruption sur le temps.
   tronqués au plafond de rendu et sans aucun secret.
 - **AC-5:** Une session portant un `char`, un `blob` et un entier, sauvegardée puis restaurée, rend des valeurs du même type
   que l'original.
+- **AC-6:** Une session restaurée après modification de sa définition d'agent, ou avec un toolset d'une autre version
+  majeure, reçoit un message système qui nomme le changement et reprend avec les définitions courantes.
 
 ## Réalisation SpecDD
 
