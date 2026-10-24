@@ -41,7 +41,7 @@ uniquement) s'appliquent.
   stocke par un trait ; il ne contient que des références, pas de secret.
     - **Source:** user instruction, 2026-10-24 ; agent-sessions#CON-3
 
-- **FR-6 - MUST:** Le prompt système et le texte des skills sont des templates Handlebars rendus avec les données du
+- **FR-6 - MUST:** Le prompt système, ainsi que le corps et la description des skills, sont des templates Handlebars rendus avec les données du
   ToolsetContext et des métadonnées de session figées au rendu (identifiant d'agent, date de début, toolsets accordés avec leur
   description et, pour un agent principal, capacité de sous-agents parallélisables, `agent-sessions/delegation#FR-11`),
   y compris des sections conditionnelles selon la présence d'un rôle. Le prompt système est rendu une
@@ -89,13 +89,17 @@ uniquement) s'appliquent.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-6`
 
+- **FR-14 - MUST:** Un toolset désigne un ContextType par son nom et une version minimale (`cluster@1.2`), compatible avec
+  toute version de même majeure égale ou supérieure.
+    - **Source:** user instruction, 2026-10-24
+    - **Verified by:** `AC-7`
+
+- **FR-15 - MUST:** Un skill peut porter des documents annexes nommés, stockés avec lui par le même trait et lus à la demande
+  par une fonction d'introspection ; ils ne sont jamais préchargés dans la fenêtre.
+    - **Source:** user instruction, 2026-10-24
+
 ## Questions ouvertes
 
-- **TBD:** fichiers annexes d'un skill (`references/`, `scripts/`, `assets/` de la spécification Agent Skills) : le skill
-  étant un objet et non un répertoire, l'équivalent (documents annexes lus à la demande) reste à définir.
-- **TBD:** la `description` du frontmatter est-elle aussi rendue par Handlebars ?
-- **TBD:** version d'un ContextType exigée par un toolset. Proposition : le toolset désigne une version majeure, compatible
-  avec toute mineure ultérieure.
 
 ## Acceptation
 
@@ -110,6 +114,8 @@ uniquement) s'appliquent.
   majeure.
 - **AC-6:** Un type qui en inclut un autre exige les champs et rôles des deux ; ajouter un champ optionnel à un type
   appelle une version mineure, en ajouter un requis une version majeure.
+- **AC-7:** Un toolset qui exige `cluster@1.2` est compatible avec un contexte de type en 1.3, et incompatible avec 1.1
+  et avec 2.0.
 
 ## Réalisation SpecDD
 

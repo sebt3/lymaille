@@ -166,9 +166,10 @@ Le mot « contexte » n'apparaît jamais seul dans les documents de ce domaine :
   sur le temps écoulé ou le nombre de tokens.
     - **Source:** user instruction, 2026-10-24
 
-- **FR-6 - MUST:** Une erreur du moteur d'inférence n'interrompt pas la session : la librairie réessaie avec un backoff
-  croissant plafonné à cinq minutes, sans limite de nombre, et chaque réessai produit un événement. Seule l'annulation
-  par l'hôte y met fin.
+- **FR-6 - MUST:** Une erreur transitoire du moteur d'inférence (réseau, délai, 429, 5xx) n'interrompt pas la session : la
+  librairie réessaie avec un backoff croissant plafonné à cinq minutes, sans limite de nombre, et chaque réessai produit
+  un événement ; seule l'annulation par l'hôte y met fin. Une erreur permanente (400, 401, 403, 404) fait échouer le tour
+  avec une erreur explicite et un événement, la session restant intacte et reprenable.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-8`
 
@@ -314,7 +315,8 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
 
 - **Rhai est un langage de niche.** Le modèle doit déjà le connaître, ce qui borne la cible à la classe de Qwen3.6 et
   au-delà (voir Périmètre). Mitigation : introspection, skills avec exemples, messages d'erreur utiles, fonctions de
-  formatage fournies. `TBD` : jeu de tâches de référence pour mesurer cette qualité.
+  formatage fournies. Un petit jeu de tâches de référence, versionné dans le dépôt et exécuté à la demande contre un modèle réel hors CI, mesure
+  le taux de réussite.
 - **Injection de prompt.** Le contenu d'alertes et de logs est non fiable et atteint des agents pouvant agir. Mitigation :
   capacités étroites (BR-2, BR-7). Les toolsets d'écriture sont à concevoir en connaissance de ce risque.
 - **Dérive du vocabulaire du ToolsetContext.** Un nom de rôle ou de paramètre inventé sans déclaration casse la
@@ -341,6 +343,8 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
   dans l'état persisté, les événements, les journaux ni les messages renvoyés au LLM.
 - **AC-8:** Avec un fournisseur simulé qui échoue deux fois puis répond, le tour aboutit, la session reste intacte, et
   deux événements de réessai à délais croissants ont été émis.
+- **AC-9:** Avec un fournisseur simulé qui répond 404 (modèle introuvable), le tour échoue sans réessai, avec une erreur
+  explicite et un événement, et la session reste reprenable.
 
 ## Open Issues
 

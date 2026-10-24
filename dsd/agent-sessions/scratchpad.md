@@ -41,7 +41,8 @@ et closures. `agent-sessions#CON-2` place le moteur dans `vynil-core`.
 - **FR-5 - MUST:** Le résultat d'un script est une valeur `Dynamic` (chaîne ou objet structuré) dont le rendu renvoyé au
   LLM est plafonné en caractères, à 8 000 par défaut, valeur surchargeable par définition d'agent. Une sortie tronquée
   conserve son début et sa fin, porte au milieu un avis explicite indiquant la troncature et la taille d'origine, et
-  invite à extraire la partie utile depuis une variable.
+  invite à extraire la partie utile depuis une variable. Un `Dynamic` non textuel est rendu par défaut en JSON
+  compact.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-4`
 
@@ -56,7 +57,7 @@ et closures. `agent-sessions#CON-2` place le moteur dans `vynil-core`.
     - **Verified by:** `AC-8`
 
 - **FR-8 - MUST:** La librairie met à disposition du LLM des fonctions de formatage (conversion d'un `Dynamic` en texte,
-  JSON ou tableau, extraction, troncature) ; le format de ce qui revient dans la session reste le choix du LLM.
+  JSON ou tableau aligné à partir d'une liste de maps, extraction, troncature début et fin) ; le format de ce qui revient dans la session reste le choix du LLM.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-5`
 
@@ -120,9 +121,6 @@ Mesurés par les programmes de `spikes/rhai-1-25`, avec les features de `vynil-c
   qu'il n'est pas levé, `get_env` et `sleep` restent accessibles au LLM dans le moteur de `vynil-core`.
 - **TBD:** évolutions de `vynil-core` : introspection du scope, des modules et des fonctions ; modules non fichiers ;
   export des métadonnées et doc-comments.
-- **TBD:** compléter les fonctions de formatage (FR-8). Observé dans `vynil-core` : `json_encode`, `json_decode`,
-  `yaml_encode`, `yaml_decode` ; à inventorier au-delà : rendu en tableau, troncature.
-- **TBD:** rendu par défaut d'un `Dynamic` non textuel (JSON compact ou indenté).
 
 ## Acceptation
 

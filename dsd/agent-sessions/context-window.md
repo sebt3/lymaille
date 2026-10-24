@@ -48,9 +48,10 @@ raison d'être de `agent-sessions#BO-4`.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-3`
 
-- **FR-7 - MUST:** La stratégie fournie par défaut élague d'abord les anciens résultats de `rhai_pad`, puis fait résumer par
-  le LLM de l'agent tout ce qui précède les derniers messages, qui restent intacts ; d'autres stratégies se branchent
-  par le trait de FR-3.
+- **FR-7 - MUST:** La stratégie fournie par défaut fait résumer par le LLM de l'agent la session intégrale, sans élagage ni
+  extrait conservé : le modèle décide de ce qui compte. La session qui suit se compose du prompt système, inchangé,
+  suivi de la sortie de la compaction. La compaction n'a jamais lieu entre un `tool_call` et son résultat. D'autres
+  stratégies se branchent par le trait de FR-3.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-4`
 
@@ -68,11 +69,11 @@ raison d'être de `agent-sessions#BO-4`.
 
 ## Questions ouvertes
 
+- **TBD:** consigne au résumeur de citer textuellement les demandes de l'utilisateur, seule donnée non régénérable ; le
+  contenu du prompt de résumé reste à rédiger.
 - **TBD:** transmission du rejeu du raisonnement. Observé dans `rig` 0.43 : le raisonnement est un `AssistantContent::Reasoning`
   scellé, rejoué seulement s'il a été émis par le même service, et `additional_params` est fusionné dans le corps de la
   requête (voie possible pour `chat_template_kwargs`) ; à vérifier par un essai réel avec llama.cpp.
-- **TBD:** nombre de derniers messages conservés intacts par la stratégie par défaut (FR-7).
-- **TBD:** interaction avec le cache de préfixe des fournisseurs (stabilité de l'ordre des messages).
 
 ## Acceptation
 
@@ -83,8 +84,9 @@ raison d'être de `agent-sessions#BO-4`.
   scratchpad ni à la todo, et le résumé contient le digest de FR-4 s'il est retenu.
 - **AC-3:** Avec un modèle dont `MAX - PROMPT - 2 * OUT` est inférieur à la taille du prompt système, la session refuse de
   démarrer avec un message qui nomme la cause.
-- **AC-4:** Une compaction par la stratégie par défaut supprime d'abord les anciens résultats de `rhai_pad`, laisse intacts
-  les derniers messages, et remplace le reste par un résumé produit par le LLM de l'agent.
+- **AC-4:** Une compaction par la stratégie par défaut envoie au résumeur la session intégrale (raisonnement compris s'il est
+  rejoué) ; la session qui suit se compose du prompt système inchangé puis du résumé, et aucune compaction n'intervient
+  entre un `tool_call` et son résultat.
 - **AC-5:** Avec un profil en mode `preserve_thinking`, le raisonnement des tours précédents est renvoyé au modèle, compté
   dans `SESSION` et fourni au résumeur ; avec le mode aucun, il est stocké mais absent de la requête.
 

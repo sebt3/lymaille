@@ -40,8 +40,8 @@ non-interruption sur le temps.
 - **FR-6 - SHOULD:** Un tour qui dépasse un délai configurable émet un événement `Overrun` sans être interrompu.
     - **Source:** agent-sessions#FR-5
 
-- **FR-7 - MUST:** Pendant le backoff qui suit une erreur du moteur d'inférence (`agent-sessions#FR-6`), le tour reste
-  annulable et l'historique n'est pas altéré par l'appel échoué.
+- **FR-7 - MUST:** Pendant le backoff qui suit une erreur transitoire du moteur d'inférence (`agent-sessions#FR-6`), le tour reste
+  annulable et l'historique n'est pas altéré par l'appel échoué. Le backoff démarre à 1 s et double à chaque réessai.
     - **Source:** agent-sessions#FR-6, agent-sessions#FR-4
     - **Verified by:** `AC-3`
 
@@ -79,8 +79,6 @@ non-interruption sur le temps.
 ## Questions ouvertes
 
 - **TBD:** inventaire des types `Dynamic` à étiqueter au-delà de `char` et `blob` (horodatages, décimaux selon les features).
-- **TBD:** délai initial et facteur de croissance du backoff d'inférence. Proposition : 1 s, doublement à chaque réessai,
-  jusqu'au plafond de cinq minutes fixé par `agent-sessions#FR-6`.
 
 ## Acceptation
 
