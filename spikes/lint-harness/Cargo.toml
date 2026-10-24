@@ -2,9 +2,9 @@
 name = "lint-harness-spike"
 version = "0.0.0"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.95.0"
 description = "Test bench for the strict lint configuration of lymaille."
-license = "Apache-2.0"
+license = "BSD-3-Clause"
 repository = "https://github.com/sebt3/lymaille"
 readme = "README.md"
 keywords = ["lint", "harness"]

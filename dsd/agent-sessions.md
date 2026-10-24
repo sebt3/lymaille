@@ -69,6 +69,8 @@ Source: user instruction, 2026-10-24
 - **Sous-agent (LLM) :** exécute une tâche déléguée de façon autonome.
 - **Hôte :** application qui embarque la librairie (vanyline, miryad-core, application de réception d'alertes avec agent
   Matrix). Il implémente les traits de stockage, résout les références vers les connexions, alimente les événements.
+- **Agent de développement :** un LLM (Qwen3.8) écrit tout le code de la librairie. Le harnais de qualité (cargo, clippy et
+  leurs configurations) est sa seule garde.
 - **Auteur de toolset :** humain ou LLM (hors de sa propre session) qui écrit des toolsets et des skills.
 
 ## État actuel et état cible
@@ -182,6 +184,14 @@ Le mot « contexte » n'apparaît jamais seul dans les documents de ce domaine :
   session.
     - **Source:** user instruction, 2026-10-24 (« si on fait de l'async, les store doivent être sous mutex »)
 
+- **NFR-3 - MUST:** Le code passe sans exception injustifiée le harnais de qualité, point d'entrée `scripts/check` : formatage,
+  clippy avec les groupes `all`, `pedantic`, `nursery` et `cargo` et une sélection de lints `restriction`, tous en `deny`,
+  lints rustc et rustdoc, tests, plancher de couverture de 90 % des lignes et audit des dépendances. Les tests de mutation
+  tournent périodiquement et avant chaque jalon. La configuration ne se contourne pas : aucun `#[allow]`, seulement
+  `#[expect]` avec une raison.
+    - **Source:** user instruction, 2026-10-24
+    - **Verified by:** `AC-10`
+
 - **CON-1:** La librairie est pure : elle n'effectue aucune E/S de stockage persistant et définit des traits que l'hôte
   implémente (session, Memory, ToolsetContext, définitions d'agents et de projets, toolsets, skills). Elle possède en
   revanche les connexions MCP et celles aux moteurs d'inférence.
@@ -206,6 +216,12 @@ Le mot « contexte » n'apparaît jamais seul dans les documents de ce domaine :
   manipule mécaniquement les secrets qu'elles exigent. Aucun transport local (socket, entrée et sortie standard) n'est
   pris en charge.
     - **Source:** user instruction, 2026-10-24 (« uniquement remote, pas de socket supporté »)
+
+- **CON-8:** La librairie est publiée sous licence BSD-3-Clause, comme `vynil-core`.
+    - **Source:** user instruction, 2026-10-24
+
+- **CON-9:** Rust édition 2024, version minimale 1.95.0, celle de `rig-core` 0.43.
+    - **Source:** CON-2 ; Observed in: rig-core 0.43.0, `Cargo.toml`
 
 - **CON-6:** Rhai est compilé avec la feature `sync`, et les appels asynchrones (MCP, moteurs d'inférence) faits depuis
   un script passent par un pont bloquant qui exige un runtime tokio multi-thread fourni par l'hôte.
@@ -345,8 +361,15 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
   deux événements de réessai à délais croissants ont été émis.
 - **AC-9:** Avec un fournisseur simulé qui répond 404 (modèle introuvable), le tour échoue sans réessai, avec une erreur
   explicite et un événement, et la session reste reprenable.
+- **AC-10:** `scripts/check` passe sur toute la base de code, et chaque lint critique du harnais se déclenche sur une faute
+  volontaire, vérifié par un script (modèle : `spikes/lint-harness/check.sh`).
 
 ## Open Issues
+
+- **TBD:** compléter le harnais : installer `cargo-deny` et `cargo-mutants` (absents de la machine de développement), écrire
+  `deny.toml` (licences, avis de sécurité, sources) et `scripts/mutants`, déclarer les doublons de versions inévitables dans
+  `allowed-duplicate-crates` avec une raison, et reporter dans le dépôt le mécanisme de canaris de
+  `spikes/lint-harness`.
 
 - **TBD:** réaliser la shopping-list de `vynil-core` avant de coder : `docs/vynil-core-shopping-list.md`. Un seul Must
   (enregistrement granulaire du socle commun, additif : `vynil-org/vynil-core#18`), quatre Nice (`#19` à `#22`).

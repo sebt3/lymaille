@@ -1,0 +1,5 @@
+# Stable-only options: `cargo fmt` gives the same result for a human, an agent and CI, with no nightly drift.
+max_width = 110
+newline_style = "Unix"
+use_field_init_shorthand = true
+use_try_shorthand = true
