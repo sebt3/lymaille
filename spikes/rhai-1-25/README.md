@@ -1,0 +1,11 @@
+# Spikes Rhai 1.25.1
+
+Vérifications de comportements de Rhai sur lesquels s'appuient les documents de `dsd/`. Version et features
+(`sync`, `serde`, `internals`) alignées sur `vynil-core`, plus `metadata`. Ces programmes jettent, ils ne font pas partie
+de la librairie.
+
+- `persistence` : `Send + Sync`, sérialisation des valeurs du scope (closures, `char`, `blob`), AST non sérialisable,
+  métadonnées de fonctions, limites de taille, annulation par `on_progress`, introspection, partage du moteur.
+- `scope_visibility` : visibilité des variables du scope pour les fonctions définies par script.
+
+Lancer : `CARGO_TARGET_DIR=~/.cache/cargo-target/lymaille-spike cargo run --bin persistence`
