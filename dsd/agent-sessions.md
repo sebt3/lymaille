@@ -348,8 +348,8 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
 
 ## Open Issues
 
-- **TBD:** réaliser la shopping-list de `vynil-core` avant de coder : `docs/vynil-core-shopping-list.md`. Un seul Must (enregistrement
-  granulaire du socle commun, additif), le reste est confort ou déjà couvert.
+- **TBD:** réaliser la shopping-list de `vynil-core` avant de coder : `docs/vynil-core-shopping-list.md`. Un seul Must
+  (enregistrement granulaire du socle commun, additif : `vynil-org/vynil-core#18`), quatre Nice (`#19` à `#22`).
 
 ## Références
 

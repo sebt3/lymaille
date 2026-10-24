@@ -63,6 +63,9 @@ et ce que l'agent consomme.
   optionnels. vLLM annonce `max_model_len` dans `/v1/models` (262 144 pour `qwen3.8-flash-next`, Observed in:
   spikes/inference-probe) ; que `rig` le reporte dans `context_length` reste à vérifier, sinon le profil de modèle le
   surcharge (FR-7). Comportement quand un modèle référencé n'est pas détecté : à décider.
+  Une passerelle de l'écosystème annonce `context_length: 8192` pour presque tous ses modèles, dont `qwen3.8-flash-next` que
+  vLLM déclare à 262 144 (signalé : `kydah/kydah-ai-proxy#113`) : la détection ne suffit pas, la surcharge du profil
+  (FR-7) est nécessaire, pas seulement prévue.
 
 ## Questions ouvertes
 
