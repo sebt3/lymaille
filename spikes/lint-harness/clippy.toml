@@ -1,0 +1,54 @@
+# Tighter thresholds than the defaults.
+too-many-lines-threshold = 80
+too-many-arguments-threshold = 5
+cognitive-complexity-threshold = 15
+excessive-nesting-threshold = 4
+type-complexity-threshold = 150
+max-fn-params-bools = 2
+max-struct-bools = 2
+
+# New crate: lints that suggest a public API change stay active.
+avoid-breaking-exported-api = false
+
+# Tests may fail loudly.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
+allow-print-in-tests = true
+allow-dbg-in-tests = true
+
+doc-valid-idents = ["Rhai", "MCP", "SpecDD", "Handlebars", "OpenAI", "..", "vLLM", "llama.cpp"]
+
+# Architecture constraints of the design, enforced by the compiler.
+# Each exception is a `#[expect(clippy::disallowed_methods, reason = "...")]` at the single permitted place.
+disallowed-methods = [
+  # CON-1: the library performs no storage I/O; it defines traits that the host implements.
+  { path = "std::fs::read", reason = "CON-1: no storage I/O, go through a trait" },
+  { path = "std::fs::read_to_string", reason = "CON-1: no storage I/O, go through a trait" },
+  { path = "std::fs::write", reason = "CON-1: no storage I/O, go through a trait" },
+  { path = "std::fs::read_dir", reason = "CON-1: no storage I/O, go through a trait" },
+  { path = "std::fs::create_dir_all", reason = "CON-1: no storage I/O, go through a trait" },
+  { path = "std::fs::remove_file", reason = "CON-1: no storage I/O, go through a trait" },
+  { path = "std::fs::File::open", reason = "CON-1: no storage I/O, go through a trait" },
+  { path = "std::fs::File::create", reason = "CON-1: no storage I/O, go through a trait" },
+  { path = "tokio::fs::read", reason = "CON-1: no storage I/O, go through a trait" },
+  { path = "tokio::fs::read_to_string", reason = "CON-1: no storage I/O, go through a trait" },
+  { path = "tokio::fs::write", reason = "CON-1: no storage I/O, go through a trait" },
+  # CON-3: the library never reads the process environment (secrets).
+  { path = "std::env::var", reason = "CON-3: never read the process environment" },
+  { path = "std::env::var_os", reason = "CON-3: never read the process environment" },
+  { path = "std::env::vars", reason = "CON-3: never read the process environment" },
+  { path = "std::env::vars_os", reason = "CON-3: never read the process environment" },
+  # NFR-1: testable without a real clock; time goes through an injected trait.
+  { path = "std::time::SystemTime::now", reason = "NFR-1: inject a clock" },
+  { path = "std::time::Instant::now", reason = "NFR-1: inject a clock" },
+  # No blocking wait outside cancellation points.
+  { path = "std::thread::sleep", reason = "blocks a thread with no cancellation point (FR-4)" },
+]
+disallowed-types = [
+  { path = "std::process::Command", reason = "CON-1: the library never spawns a process" },
+  { path = "tokio::process::Command", reason = "CON-1: the library never spawns a process" },
+  { path = "std::net::TcpStream", reason = "CON-5: connections go through the HTTPS client" },
+  { path = "std::os::unix::net::UnixStream", reason = "CON-5: no local transport" },
+]
