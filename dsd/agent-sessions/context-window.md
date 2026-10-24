@@ -50,7 +50,7 @@ raison d'être de `agent-sessions#BO-4`.
 
 - **FR-7 - MUST:** La stratégie fournie par défaut fait résumer par le LLM de l'agent la session intégrale, sans élagage ni
   extrait conservé : le modèle décide de ce qui compte. La session qui suit se compose du prompt système, inchangé,
-  suivi de la sortie de la compaction. La compaction n'a jamais lieu entre un `tool_call` et son résultat. D'autres
+  suivi de la sortie de la compaction, et marque une frontière de segment (`agent-sessions/session#FR-12`). La compaction n'a jamais lieu entre un `tool_call` et son résultat. D'autres
   stratégies se branchent par le trait de FR-3.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-4`

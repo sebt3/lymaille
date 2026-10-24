@@ -55,6 +55,7 @@ Hors périmètre, par décision :
 - la détention durable des secrets (la librairie ne les persiste ni ne les divulgue, voir CON-3) ;
 - le module de connaissance (RAG) et un espace de Memory partagé entre agent principal et sous-agents, idées réservées
   hors du premier jalon (voir `modules` et `delegation`) ;
+- l'export de données d'entraînement (LoRA), extension réservée : seule la capture des données est exigée (voir `session`) ;
 - les budgets de tokens et de temps appliqués de force (voir DEC-7) ;
 - les petits modèles (SLM) : la cible est la classe de Qwen3.6 et au-delà, assez capable pour écrire du Rhai et assez
   fiable pour agir en autonomie ; un besoin SLM avéré rouvrira la question.
@@ -325,6 +326,18 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
       partagé, écartés car le vocabulaire dériverait.
     - **Consequences:** un contexte peut satisfaire plusieurs types ; les types sont des entités nommées stockées par
       trait (voir `toolsets`) ; l'interface de l'hôte peut ne proposer que les contextes compatibles avec un agent.
+    - **Source:** user instruction, 2026-10-24
+
+- **DEC-12 - Capturer maintenant, exporter plus tard**
+    - **Context:** une LoRA pourrait un jour apprendre à écrire du Rhai et le protocole de `rhai_pad` à partir de sessions réelles.
+      Le besoin n'est pas avéré, mais ce qui n'a pas été conservé ne se rattrape pas : prompt tel qu'envoyé, sorties telles que
+      le modèle les a reçues, signaux de qualité.
+    - **Decision:** la session conserve ces données (`session` FR-11 à FR-13) ; l'export, son format, son tri et sa
+      confidentialité restent une extension réservée.
+    - **Alternatives:** concevoir l'export complet maintenant, écarté car il s'écrirait sans trace réelle ni essai
+      d'entraînement ; ne rien conserver, écarté car la capture est la seule partie coûteuse à rattraper.
+    - **Consequences:** quelques champs de plus à persister par segment ; l'export se greffera ensuite sans changer le
+      format de session.
     - **Source:** user instruction, 2026-10-24
 
 ## Risques

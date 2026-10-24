@@ -65,6 +65,27 @@ non-interruption sur le temps.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-6`
 
+- **FR-11 - MUST:** Au début de chaque segment de contexte (début de session, sortie de compaction, restauration), la session
+  persiste le contexte tel que le modèle l'a reçu : le prompt système rendu, la définition du tool `rhai_pad` et le profil
+  de modèle résolu (identifiant et mode de rejeu du raisonnement). Une restauration qui re-rend le prompt avec des
+  définitions plus récentes (FR-10) ne remplace pas ce qui a été envoyé auparavant.
+    - **Source:** user instruction, 2026-10-24 ; agent-sessions#DEC-12 ; ASSUMPTION: contenu déduit de ce qu'exigerait un export
+      fidèle, à confirmer
+    - **Verified by:** `AC-7`
+
+- **FR-12 - MUST:** L'historique persisté garde chaque message tel que le modèle l'a reçu ou produit : sortie de `rhai_pad`
+  après plafonnement et troncature, raisonnement avec son émetteur, appels d'outils. Les frontières de segment
+  (compaction, restauration) y sont marquées.
+    - **Source:** user instruction, 2026-10-24 ; agent-sessions#DEC-12
+    - **Verified by:** `AC-7`
+
+- **FR-13 - MUST:** Chaque tour et chaque run enregistre des signaux de qualité exploitables après coup : issue (résultat
+  valide, échec ou annulation), nombre d'erreurs Rhai et de corrections, sous-agent et étape de workflow concernés, versions
+  de toolsets et profil de modèle.
+    - **Source:** user instruction, 2026-10-24 ; agent-sessions#DEC-12 ; ASSUMPTION: liste des signaux déduite d'une analyse
+      de la sélection de données, à confirmer
+    - **Verified by:** `AC-8`
+
 ## Décisions
 
 - **DEC-1 - Collisions d'écriture laissées au stockage**
@@ -75,6 +96,25 @@ non-interruption sur le temps.
       conflit entre processus. Avec plusieurs réplicas, deux processus peuvent charger la même session et le dernier
       `save` l'emporte : l'unicité d'une session entre processus est garantie par l'hôte (`agent-sessions#CON-7`).
     - **Source:** user instruction, 2026-10-24
+
+## Extension réservée : export de données d'entraînement
+
+Idée consignée, hors du premier jalon et sans exigence d'export : le besoin d'une LoRA n'est pas avéré. Seule la capture
+(FR-11 à FR-13) est exigée, parce qu'elle est coûteuse à rattraper alors que l'export se greffe ensuite sans rien casser.
+Les données capturées restent soumises à `agent-sessions#CON-3` et à la persistance par traits de `agent-sessions#CON-1`.
+
+Pistes pour le jour où le besoin se confirmera :
+
+- l'unité d'une ligne serait un segment de contexte, avec un indicateur « entraînable » sur chaque message produit par le
+  modèle ;
+- la crate attacherait les signaux de qualité (FR-13) et laisserait l'hôte filtrer ;
+- l'export serait un opt-in par session, avec le masquage des secrets et un hook de rédaction fourni par l'hôte ;
+- le format serait une structure neutre de type chat (messages, raisonnement, appels d'outils, définition de `rhai_pad`), le
+  gabarit du modèle cible étant appliqué par l'outil d'entraînement ;
+- avant tout entraînement, mesurer le taux de réussite du modèle de base sur le jeu de tâches de référence, qui ne doit pas
+  servir d'entraînement.
+
+Source: user instruction, 2026-10-24
 
 ## Questions ouvertes
 
@@ -93,6 +133,11 @@ non-interruption sur le temps.
   que l'original.
 - **AC-6:** Une session restaurée après modification de sa définition d'agent, ou avec un toolset d'une autre version
   majeure, reçoit un message système qui nomme le changement et reprend avec les définitions courantes.
+- **AC-7:** Une session compactée puis restaurée après modification de l'agent permet de reconstituer, pour chaque segment, le
+  prompt système, la définition du tool et le profil de modèle tels qu'ils ont été envoyés, ainsi que les sorties de `rhai_pad`
+  telles que le modèle les a reçues.
+- **AC-8:** Un run batch de sous-agent dont la sortie est invalide puis corrigée enregistre l'issue finale, le nombre d'erreurs et
+  de corrections, l'étape de workflow et les versions de toolsets.
 
 ## Réalisation SpecDD
 
