@@ -97,6 +97,9 @@ Mesurés par les programmes de `spikes/rhai-1-25`, avec les features de `vynil-c
 
 - Avec `sync`, `Engine`, `AST`, `Scope` et `Dynamic` sont `Send + Sync`, et un moteur partagé entre threads fonctionne.
 - L'`AST` n'est pas sérialisable : la persistance des fonctions passe par leur texte source (DEC-1).
+- `vynil-core` enregistre d'office `get_env`, `sleep` et `log_*` ; avec les features `fs`, `shell` ou `password` du processus,
+  il enregistre aussi les accès fichiers et `shell_run`. Le moteur est public, donc `on_progress` et les limites de taille se
+  posent depuis `lymaille` (`docs/vynil-core-shopping-list.md`).
 - `AST::iter_functions` rend nom, paramètres, accès et commentaires de documentation des fonctions. Rhai ne type pas
   statiquement : un contrat de toolset se réduit à des noms et des paramètres (`toolsets`, FR-10).
 - Un pointeur de fonction ou une closure se sérialise **sans erreur** en chaîne, ou en tableau s'il capture ; relue, la
@@ -114,12 +117,6 @@ Mesurés par les programmes de `spikes/rhai-1-25`, avec les features de `vynil-c
 
 ## Questions ouvertes
 
-- **TBD:** hook de progression du moteur pour l'annulation (`agent-sessions#FR-4`) : `vynil-core` n'en pose aucun et son
-  `sleep` bloque le thread sans point d'annulation (Observed in: vynil-core `src/engine.rs`).
-- **TBD:** accord des capacités à l'exécution, par agent : prérequis côté `vynil-core` (voir domaine, shopping-list). Tant
-  qu'il n'est pas levé, `get_env` et `sleep` restent accessibles au LLM dans le moteur de `vynil-core`.
-- **TBD:** évolutions de `vynil-core` : introspection du scope, des modules et des fonctions ; modules non fichiers ;
-  export des métadonnées et doc-comments.
 
 ## Acceptation
 

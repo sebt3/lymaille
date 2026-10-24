@@ -1,0 +1,13 @@
+[package]
+name = "spike-vynil-core-surface"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Chemin relatif : suppose vynil-core cloné à côté de lymaille (~/projets/vynil/vynil-core).
+[dependencies]
+vynil-core = { path = "../../../vynil/vynil-core", default-features = false, features = ["rhai"] }
+rhai = { version = "1.20", features = ["metadata"] }
+
+[features]
+ambient = ["vynil-core/fs", "vynil-core/shell", "vynil-core/password"]
