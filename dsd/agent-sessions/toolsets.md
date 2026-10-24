@@ -81,14 +81,20 @@ uniquement) s'appliquent.
   contrat extrait et la version déclarée (signature changée sans version changée).
     - **Source:** user instruction, 2026-10-24 ; déduit de FR-11
 
+- **FR-13 - MUST:** Un ContextType décrit ses paramètres par un JSON Schema et ses rôles MCP par une liste de noms,
+  obligatoires ou optionnels ; il peut en inclure d'autres ; il porte une version sémantique : l'ajout d'un champ ou d'un
+  rôle optionnel est une version mineure, l'ajout d'un champ requis ou un retrait est une version majeure.
+    - **Source:** user instruction, 2026-10-24
+    - **Verified by:** `AC-6`
+
 ## Questions ouvertes
 
 - **TBD:** fichiers annexes d'un skill (`references/`, `scripts/`, `assets/` de la spécification Agent Skills) : le skill
   étant un objet et non un répertoire, l'équivalent (documents annexes lus à la demande) reste à définir.
 - **TBD:** la `description` du frontmatter est-elle aussi rendue par Handlebars ?
 - **TBD:** faisabilité de la résolution privée des dépendances dans `vynil-core`.
-- **TBD:** forme d'un ContextType : champs typés, valeurs par défaut, composition de types, et règle d'évolution d'un type
-  sans casser les toolsets qui l'exigent.
+- **TBD:** version d'un ContextType exigée par un toolset. Proposition : le toolset désigne une version majeure, compatible
+  avec toute mineure ultérieure.
 
 ## Acceptation
 
@@ -101,6 +107,8 @@ uniquement) s'appliquent.
 - **AC-5:** Ajouter une fonction à un toolset change son contrat extrait et appelle une version mineure ; changer le
   corps d'une fonction ou sa documentation laisse le contrat extrait identique ; retirer une fonction appelle une version
   majeure.
+- **AC-6:** Un type qui en inclut un autre exige les champs et rôles des deux ; ajouter un champ optionnel à un type
+  appelle une version mineure, en ajouter un requis une version majeure.
 
 ## Réalisation SpecDD
 

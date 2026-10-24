@@ -54,6 +54,12 @@ non-interruption sur le temps.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-4`
 
+- **FR-9 - MUST:** Le format de session étiquette le type réel des valeurs que JSON ne distingue pas (`char`, `blob` et
+  tout autre type identifié), pour une restauration fidèle. Une valeur non sérialisable est exclue avec l'avertissement de
+  `agent-sessions/scratchpad#FR-7`.
+    - **Source:** user instruction, 2026-10-24 ; Observed in: spikes/rhai-1-25 (`persistence`, S8)
+    - **Verified by:** `AC-5`
+
 ## Décisions
 
 - **DEC-1 - Collisions d'écriture laissées au stockage**
@@ -67,6 +73,7 @@ non-interruption sur le temps.
 
 ## Questions ouvertes
 
+- **TBD:** inventaire des types `Dynamic` à étiqueter au-delà de `char` et `blob` (horodatages, décimaux selon les features).
 - **TBD:** politique de migration de format entre versions mineures.
 - **TBD:** restauration d'une session sauvegardée avec une version de toolset plus récente que celle installée.
 - **TBD:** délai initial et facteur de croissance du backoff d'inférence. Proposition : 1 s, doublement à chaque réessai,
@@ -81,6 +88,8 @@ non-interruption sur le temps.
 - **AC-3:** Une annulation émise pendant un backoff termine le tour sans ajouter de message d'erreur à l'historique.
 - **AC-4:** Un script qui appelle un MCP authentifié produit un événement de script et un événement d'appel MCP,
   tronqués au plafond de rendu et sans aucun secret.
+- **AC-5:** Une session portant un `char`, un `blob` et un entier, sauvegardée puis restaurée, rend des valeurs du même type
+  que l'original.
 
 ## Réalisation SpecDD
 

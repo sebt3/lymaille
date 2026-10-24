@@ -116,13 +116,10 @@ Mesurés par les programmes de `spikes/rhai-1-25`, avec les features de `vynil-c
 - **TBD:** hook de progression du moteur pour l'annulation (`agent-sessions#FR-4`) et la durée maximale d'un script
   (FR-4) ; `vynil-core` n'en pose aucun et son `sleep` bloque le thread sans point d'annulation (Observed in:
   vynil-core `src/engine.rs`).
-- **TBD:** accord des capacités à l'exécution, par agent : dans `vynil-core`, `fs`, `shell` et `password` sont des
-  features de compilation (communes à tout le processus) et `get_env` est toujours enregistré ; le LLM aurait un accès
-  hors de ses modules accordés (voir domaine, modifications de vynil-core).
+- **TBD:** accord des capacités à l'exécution, par agent : prérequis côté `vynil-core` (voir domaine, shopping-list). Tant
+  qu'il n'est pas levé, `get_env` et `sleep` restent accessibles au LLM dans le moteur de `vynil-core`.
 - **TBD:** évolutions de `vynil-core` : introspection du scope, des modules et des fonctions ; modules non fichiers ;
   export des métadonnées et doc-comments.
-- **TBD:** fidélité de la persistance : `char` et `blob` reviennent en chaîne et en tableau (autres types `Dynamic` non
-  testés). Étiqueter les types à la sérialisation, convertir ou documenter ?
 - **TBD:** compléter les fonctions de formatage (FR-8). Observé dans `vynil-core` : `json_encode`, `json_decode`,
   `yaml_encode`, `yaml_decode` ; à inventorier au-delà : rendu en tableau, troncature.
 - **TBD:** rendu par défaut d'un `Dynamic` non textuel (JSON compact ou indenté).

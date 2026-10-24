@@ -53,7 +53,8 @@ Hors périmètre, par décision :
 - toute interface utilisateur ;
 - le moteur de workflow (offert par myriad-core ; le module de gestion de workflows est fourni par l'hôte) ;
 - la détention durable des secrets (la librairie ne les persiste ni ne les divulgue, voir CON-3) ;
-- le module de connaissance (RAG), extension réservée hors du premier jalon (voir `modules`) ;
+- le module de connaissance (RAG) et un espace de Memory partagé entre agent principal et sous-agents, idées réservées
+  hors du premier jalon (voir `modules` et `delegation`) ;
 - les budgets de tokens et de temps appliqués de force (voir DEC-7) ;
 - les petits modèles (SLM) : la cible est la classe de Qwen3.6 et au-delà, assez capable pour écrire du Rhai et assez
   fiable pour agir en autonomie ; un besoin SLM avéré rouvrira la question.
@@ -318,11 +319,10 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
   capacités étroites (BR-2, BR-7). Les toolsets d'écriture sont à concevoir en connaissance de ce risque.
 - **Dérive du vocabulaire du ToolsetContext.** Un nom de rôle ou de paramètre inventé sans déclaration casse la
   portabilité entre environnements. Mitigation : les ContextType nommés (DEC-11).
-- **Espace de Memory partagé entre agent principal et sous-agents** (envisagé, non décidé). Une Memory que des sous-agents
-  exposés à du contenu non fiable écrivent et que l'agent principal lit ouvre un canal d'influence qui contourne la
-  séparation des privilèges de BR-2 ; des sous-agents parallèles y écrivent en concurrence ; un sous-agent qui dépend d'un
-  état partagé perd la reproductibilité d'un batch. `TBD` : décider si cet espace existe et sous quelles garanties (voir
-  `delegation`).
+- **Espace de Memory partagé entre agent principal et sous-agents** (idée réservée, non décidée). Une Memory que des
+  sous-agents exposés à du contenu non fiable écrivent et que l'agent principal lit ouvrirait un canal d'influence qui
+  contourne la séparation des privilèges de BR-2, avec des écritures concurrentes de sous-agents parallèles et la perte
+  de reproductibilité d'un batch. Hors du premier jalon : le besoin décidera (voir `delegation`).
 
 ## Critères d'acceptation
 
@@ -344,11 +344,13 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
 
 ## Open Issues
 
-- **TBD:** modifications à faire dans vynil-core (introspection, modules non fichiers, métadonnées et doc-comments des
-  fonctions avec la feature Rhai `metadata`, absente aujourd'hui, résolution privée des dépendances de toolset) ; un moteur dont chaque capacité s'accorde à l'exécution, par
-  agent (observé : `fs`, `shell` et `password` sont des features de compilation, donc communes à tous les agents du
-  processus, et `get_env` est enregistré sans condition, ce qui contredit BR-2 et CON-3) ; un hook de progression pour
-  l'annulation et la durée maximale d'un script ; inventaire de ce qu'il offre déjà en formatage.
+- **TBD:** modifications à faire dans vynil-core (shopping-list) : introspection du scope, des modules et des fonctions ;
+  modules non fichiers ; feature Rhai `metadata`, absente aujourd'hui, pour exporter signatures et doc-comments ;
+  résolution privée des dépendances de toolset ; hook de progression pour l'annulation ; accord des capacités par agent
+  à l'exécution. Sur ce dernier point, la migration de toutes les fonctions de `vynil-core` vers des modules optionnels
+  est envisagée mais casserait les interfaces de kuberest et de vynil ; si `get_env` n'est pas retirable en l'état,
+  c'est une issue de `vynil-core`, prérequis à la conformité de lymaille avec BR-2 et CON-3. Palliatif à vérifier :
+  neutraliser une fonction en la réenregistrant sous le même nom dans le moteur de lymaille.
 ## Références
 
 - Méthode : https://specdd.ai/llms.txt et le plugin DSD (`.specdd/plugins/github.com/specdd/specdd/dsd/plugin.md`).

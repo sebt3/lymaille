@@ -64,15 +64,23 @@ sous-agents prédéfinis.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-5`
 
+## Extension réservée : Memory partagée
+
+Idée consignée, hors du premier jalon et sans exigence : le besoin n'est pas avéré et c'est lui qui déterminera les choix le
+moment venu. Un sous-agent a aujourd'hui sa propre Memory de session (FR-3) et ne communique avec son parent que par son
+résultat structuré (FR-4). Si l'idée est reprise, les risques à traiter sont l'influence d'un sous-agent exposé à du
+contenu non fiable sur l'agent principal (contournement de `agent-sessions#BR-2`), les écritures concurrentes de
+sous-agents parallèles et la perte de reproductibilité d'un batch. Piste prudente : lecture seule d'un instantané de la
+Memory de session du parent.
+
+Source: user instruction, 2026-10-24
+
 ## Questions ouvertes
 
 - **TBD:** minuteurs : ré-armement à la restauration d'une session et traitement d'une échéance manquée pendant
   l'indisponibilité de l'hôte.
 - **TBD:** capacité de parallélisation : décompte partagé entre processus (réplicas) et entre profils d'un même moteur ;
   fraîcheur de la valeur du contexte initial pendant une session longue (fonction d'introspection pour la relire).
-- **TBD:** espace de Memory partagé entre agent principal et sous-agents (voir domaine, Risques). Proposition prudente de
-  départ : lecture seule d'un instantané de la Memory de session du parent, écritures du sous-agent privées, retour par
-  le résultat structuré.
 - **TBD:** nombre de corrections accordées à un sous-agent dont le résultat est invalide, sachant que la librairie
   n'interrompt pas d'elle-même un run (`agent-sessions#FR-5`).
 
