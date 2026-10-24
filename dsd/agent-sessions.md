@@ -346,11 +346,12 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
 
 - **TBD:** modifications à faire dans vynil-core (shopping-list) : introspection du scope, des modules et des fonctions ;
   modules non fichiers ; feature Rhai `metadata`, absente aujourd'hui, pour exporter signatures et doc-comments ;
-  résolution privée des dépendances de toolset ; hook de progression pour l'annulation ; accord des capacités par agent
+  (la résolution privée des dépendances de toolset est validée par spike, elle suppose ces modules non fichiers) ;
+  hook de progression pour l'annulation ; accord des capacités par agent
   à l'exécution. Sur ce dernier point, la migration de toutes les fonctions de `vynil-core` vers des modules optionnels
   est envisagée mais casserait les interfaces de kuberest et de vynil ; si `get_env` n'est pas retirable en l'état,
-  c'est une issue de `vynil-core`, prérequis à la conformité de lymaille avec BR-2 et CON-3. Palliatif à vérifier :
-  neutraliser une fonction en la réenregistrant sous le même nom dans le moteur de lymaille.
+  c'est une issue de `vynil-core`, prérequis à la conformité de lymaille avec BR-2 et CON-3.
+
 ## Références
 
 - Méthode : https://specdd.ai/llms.txt et le plugin DSD (`.specdd/plugins/github.com/specdd/specdd/dsd/plugin.md`).

@@ -58,8 +58,9 @@ et ce que l'agent consomme.
   un fournisseur directement.
     - **Source:** user instruction, 2026-10-24
 
-- **TBD:** détection des modèles : liste de modèles disponible selon le type de fournisseur `rig`, et comportement quand
-  un modèle référencé n'est plus détecté.
+- **TBD:** détection des modèles : `list_models` existe dans `rig` 0.43 sur les clients OpenAI, Anthropic, Ollama, Copilot et
+  Gemini, et llama.cpp passe par un dialecte OpenAI-compatible sans client dédié (Observed in: rig-core 0.43.0,
+  `src/client`) ; à vérifier pour llama.cpp, et comportement quand un modèle référencé n'est pas détecté.
 
 ## Questions ouvertes
 

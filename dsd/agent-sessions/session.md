@@ -19,7 +19,7 @@ non-interruption sur le temps.
     - **Source:** agent-sessions#CON-1
     - **Verified by:** `AC-1`
 
-- **FR-2 - MUST:** L'état persisté d'une session comprend l'historique, les variables du scratchpad (sérialisation
+- **FR-2 - MUST:** L'état persisté d'une session comprend l'historique (raisonnement compris, avec l'émetteur qui seul peut le rejouer), les variables du scratchpad (sérialisation
   serde), le texte source des fonctions définies, la todo, les watchers, les Memory de niveau session, les compteurs de tokens, la
   référence à l'agent avec l'empreinte de sa définition et au ToolsetContext (jamais de secret, `agent-sessions#CON-3`), une version de format et la
   version de chaque toolset utilisé.

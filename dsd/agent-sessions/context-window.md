@@ -68,8 +68,9 @@ raison d'être de `agent-sessions#BO-4`.
 
 ## Questions ouvertes
 
-- **TBD:** transmission du rejeu du raisonnement par `rig` : champ `reasoning_content` des messages ou paramètre de gabarit
-  (`chat_template_kwargs`), selon le serveur d'inférence ; à vérifier dans `rig`.
+- **TBD:** transmission du rejeu du raisonnement. Observé dans `rig` 0.43 : le raisonnement est un `AssistantContent::Reasoning`
+  scellé, rejoué seulement s'il a été émis par le même service, et `additional_params` est fusionné dans le corps de la
+  requête (voie possible pour `chat_template_kwargs`) ; à vérifier par un essai réel avec llama.cpp.
 - **TBD:** nombre de derniers messages conservés intacts par la stratégie par défaut (FR-7).
 - **TBD:** interaction avec le cache de préfixe des fournisseurs (stabilité de l'ordre des messages).
 

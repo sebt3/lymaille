@@ -20,7 +20,9 @@ uniquement) s'appliquent.
 
 - **FR-2 - MUST:** Les dépendances d'un toolset envers d'autres modules lui sont accessibles sans l'être au LLM : elles
   n'apparaissent ni dans le scope, ni dans l'introspection, sauf si la définition d'agent les accorde.
-    - **Source:** user instruction, 2026-10-24
+    - **Source:** user instruction, 2026-10-24 ; Observed in: spikes/rhai-1-25 (`private_dependencies`) : les appels sont
+      bloqués, mais l'export brut des métadonnées de Rhai expose les dépendances en sous-module du toolset ; l'introspection
+      de la librairie doit donc les filtrer
     - **Verified by:** `AC-1`
 
 - **FR-3 - MUST:** Le ToolsetContext est un jeu plat de paramètres nommés et de liaisons de rôles, avec une section
@@ -92,7 +94,6 @@ uniquement) s'appliquent.
 - **TBD:** fichiers annexes d'un skill (`references/`, `scripts/`, `assets/` de la spécification Agent Skills) : le skill
   étant un objet et non un répertoire, l'équivalent (documents annexes lus à la demande) reste à définir.
 - **TBD:** la `description` du frontmatter est-elle aussi rendue par Handlebars ?
-- **TBD:** faisabilité de la résolution privée des dépendances dans `vynil-core`.
 - **TBD:** version d'un ContextType exigée par un toolset. Proposition : le toolset désigne une version majeure, compatible
   avec toute mineure ultérieure.
 
