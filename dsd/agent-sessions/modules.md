@@ -19,8 +19,10 @@ d'extension pour les modules fournis par l'hôte.
     - **Verified by:** `AC-1`
 
 - **FR-2 - MUST:** Un module Memory crée, lit, modifie, supprime et liste des Memory sur les niveaux utilisateur, projet et
-  session ; une Memory a un identifiant, un titre et un corps ; la clé est le niveau et l'identifiant.
-    - **Source:** user instruction, 2026-10-24
+  session ; une Memory a un identifiant, un titre et un corps ; la clé est le niveau et l'identifiant. Les trois niveaux
+  passent par le même trait de stockage, le niveau session étant qualifié par l'identifiant de la session : l'état
+  persisté de la session ne contient pas de Memory.
+    - **Source:** user instruction, 2026-10-24 ; stockage unique, user instruction, 2026-10-25
     - **Verified by:** `AC-2`
 
 - **FR-3 - MUST:** La liste des Memory ne rend que l'identifiant et le titre ; le corps se lit à la demande.
@@ -35,7 +37,8 @@ d'extension pour les modules fournis par l'hôte.
 
 - **FR-6 - MUST:** Pour chaque rôle MCP lié par le ToolsetContext, la librairie ouvre la connexion, génère un module Rhai
   à partir des tools du serveur (les descriptions MCP servant de documentation des fonctions) et rétablit la
-  connexion à la restauration ; les serveurs sont distants, en HTTPS (`agent-sessions#CON-5`).
+  connexion à la restauration ; les serveurs sont distants (`agent-sessions#CON-5`). Le module porte le nom du rôle
+  (`loki::query`).
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-3`
 
@@ -54,9 +57,11 @@ d'extension pour les modules fournis par l'hôte.
 
 - **FR-10 - MUST:** Chaque tool MCP devient une fonction Rhai à un paramètre map, validé contre le JSON Schema du tool avant
   l'appel ; la documentation introspectable de la fonction reprend ce schéma, et le retour est le JSON converti en
-  `Dynamic`.
-    - **Source:** user instruction, 2026-10-24
-    - **Verified by:** `AC-5`
+  `Dynamic`. Le nom de la fonction est celui du tool dont chaque caractère invalide dans un identifiant Rhai devient `_`
+  (`loki.query` donne `loki_query`) ; deux tools d'un même serveur qui aboutissent au même nom font échouer le chargement
+  du module avec une erreur explicite. Le nom MCP d'origine figure dans la documentation de la fonction.
+    - **Source:** user instruction, 2026-10-24 ; nommage, user instruction, 2026-10-25
+    - **Verified by:** `AC-5`, `AC-6`
 
 ## Extension réservée : connaissance
 
@@ -81,6 +86,8 @@ Source: user instruction, 2026-10-24
   de reconnexion, un événement par tentative, et l'appel suivant rétablit la connexion.
 - **AC-5:** Un appel de fonction MCP avec un argument invalide pour le JSON Schema du tool échoue avant tout appel réseau, et
   la documentation introspectée de la fonction contient le schéma.
+- **AC-6:** Un serveur MCP simulé exposant `loki.query` et `get-pods` sous le rôle `grafana` donne `grafana::loki_query` et
+  `grafana::get_pods`, documentées avec leur nom d'origine ; un serveur exposant `a.b` et `a_b` fait échouer le chargement.
 
 ## Réalisation SpecDD
 

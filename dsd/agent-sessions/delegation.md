@@ -30,11 +30,11 @@ sous-agents prédéfinis.
 
 - **FR-4 - MUST:** Un run de sous-agent rend un statut et un résultat conforme à un JSON Schema déclaré par sa
   définition, de sorte qu'un workflow puisse en dépendre. Le sous-agent rend son résultat par une fonction Rhai ; si la
-  validation échoue, l'erreur lui est renvoyée pour qu'il corrige dans le même run, trois fois au plus par défaut (valeur surchargeable par
-  définition de sous-agent). S'il ne peut pas aboutir, il rend un
-  échec explicite qui dit ce qui manque.
+  validation échoue, l'erreur lui est renvoyée pour qu'il corrige dans le même run : trois corrections au plus après la
+  première tentative par défaut, soit quatre résultats soumis (valeur surchargeable par définition de sous-agent). S'il
+  ne peut pas aboutir, il rend un échec explicite qui dit ce qui manque.
     - **Source:** agent-sessions#DEC-4; user instruction, 2026-10-24
-    - **Verified by:** `AC-2`
+    - **Verified by:** `AC-2`, `AC-8`
 
 - **FR-6 - MUST:** La délégation rend un handle ; la fin du sous-agent est un événement, et une attente synchrone n'est
   qu'un sucre au-dessus.
@@ -45,9 +45,12 @@ sous-agents prédéfinis.
     - **Source:** agent-sessions#FR-4
 
 - **FR-8 - MUST:** Un watcher est une souscription déclarative (source d'événement, filtre exprimé comme prédicat Rhai)
-  dont la seule action est d'injecter une notification dans le tour suivant ou de demander à l'hôte d'en lancer un. Les watchers sont persistés avec la session.
-    - **Source:** user instruction, 2026-10-24
-    - **Verified by:** `AC-4`
+  dont la seule action est d'injecter une notification dans le tour suivant ou de demander à l'hôte d'en lancer un. Les
+  watchers sont persistés avec la session. Le prédicat est une expression évaluée dans un moteur isolé, avec le seul
+  groupe pur de `vynil-core` et l'événement pour unique entrée : ni scope de session, ni module accordé, ni fonction
+  définie par le LLM. Il ne peut donc produire aucun effet de bord ni toucher l'état d'un tour en cours.
+    - **Source:** user instruction, 2026-10-24 ; isolement du prédicat, user instruction, 2026-10-25
+    - **Verified by:** `AC-4`, `AC-9`
 
 - **FR-9 - MUST:** Les sources d'événements se branchent par un trait ; l'hôte les alimente par un appel de notification.
     - **Source:** user instruction, 2026-10-24
@@ -76,16 +79,35 @@ sous-agents prédéfinis.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-7`
 
-## Extension réservée : Memory partagée
+- **FR-14 - MUST:** La session d'un sous-agent est persistée par le trait de session comme toute autre session, et la
+  session principale persiste les handles de ses runs de sous-agents en cours. À la restauration de la session principale,
+  un run qui n'est pas terminé n'est pas repris d'office : il produit un événement de fin au statut « interrompu », qui
+  porte la référence de sa session, et l'agent principal peut le relancer en reprenant cette session sauvegardée.
+    - **Source:** user instruction, 2026-10-25
+    - **Verified by:** `AC-10`
 
-Idée consignée, hors du premier jalon et sans exigence : le besoin n'est pas avéré et c'est lui qui déterminera les choix le
-moment venu. Un sous-agent a aujourd'hui sa propre Memory de session (FR-3) et ne communique avec son parent que par son
-résultat structuré (FR-4). Si l'idée est reprise, les risques à traiter sont l'influence d'un sous-agent exposé à du
-contenu non fiable sur l'agent principal (contournement de `agent-sessions#BR-2`), les écritures concurrentes de
-sous-agents parallèles et la perte de reproductibilité d'un batch. Piste prudente : lecture seule d'un instantané de la
-Memory de session du parent.
+## Idée réservée : MessageBoard
 
-Source: user instruction, 2026-10-24
+Idée consignée, sans cas d'usage identifié ni exigence : elle reste une idée. Un sous-agent a aujourd'hui sa propre Memory
+de session (FR-3) et ne communique avec son parent que par son résultat structuré (FR-4).
+
+Une Memory partagée entre agents a été écartée : espace modifiable, elle cumule écritures concurrentes de sous-agents
+parallèles, perte de reproductibilité d'un batch, et une autorité de « fait établi » qui amplifie l'influence d'un
+sous-agent exposé à du contenu non fiable (`agent-sessions#BR-2`).
+
+L'alternative consignée est un MessageBoard : un journal en ajout seul de messages (date et heure, auteur, texte). Points
+relevés le 2026-10-25 :
+
+- l'ajout seul supprime les conflits d'écriture, et le journal se rejoue, s'audite et se projette à l'humain ;
+- l'auteur et la date sont posés par la librairie, jamais déclarés par l'agent, faute de quoi la provenance ne vaut rien ;
+- un tableau par arbre de session (principal et sous-agents), persisté avec la session principale, hors fenêtre ;
+- lecture par curseur, un nouveau message alimentant une source d'événements pour les watchers (FR-10) ;
+- taille de message plafonnée, pour ne pas contourner le plafond de rendu ;
+- le canal d'influence demeure, plus large que le résultat structuré puisque le texte est libre et circule pendant le run ;
+- un sous-agent qui lit le tableau perd la reproductibilité de son batch : piste, ne lui laisser lire que les messages de
+  son parent.
+
+Source: user instruction, 2026-10-25
 
 ## Questions ouvertes
 
@@ -104,8 +126,13 @@ Source: user instruction, 2026-10-24
   périodique manqué plusieurs fois se réarme sans rejouer les occurrences manquées.
 - **AC-7:** Avec un décompte partagé fourni par l'hôte, la capacité annoncée tient compte des requêtes d'un autre processus, et
   la fonction d'introspection rend la valeur à jour.
-- **AC-8:** Un sous-agent dont les trois corrections successives restent invalides vis-à-vis du JSON Schema fait échouer le run
-  avec la liste des erreurs de validation.
+- **AC-8:** Un sous-agent dont la première tentative et les trois corrections successives restent invalides vis-à-vis du
+  JSON Schema fait échouer le run avec la liste des erreurs de validation.
+- **AC-9:** Un prédicat de watcher qui tente d'appeler une fonction de module, de lire une variable du scope de session ou
+  d'appeler une fonction définie par le LLM échoue sans effet de bord ; l'échec est signalé par un événement et le watcher
+  n'injecte rien.
+- **AC-10:** Une session principale restaurée alors qu'un sous-agent était en cours reçoit un événement « interrompu » qui
+  référence la session du sous-agent ; une relance reprend cette session avec son scratchpad et sa todo.
 
 ## Réalisation SpecDD
 

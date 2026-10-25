@@ -10,13 +10,6 @@ remplacer l'inférence actuelle de vanyline et à fournir à miryad-core des ét
 Statut du document : cadrage initial complet au 2026-10-24. Les points restants sont marqués `TBD`, dans les Open Issues
 ou dans la Solution concernée.
 
-## Responsabilité de l'hôte sur l'unicité des sessions
-
-La librairie garantit un seul tour actif par session au sein d'un processus (NFR-2), et rien au-delà : elle ne détecte
-aucun conflit entre processus (CON-7). C'est à l'hôte de garantir qu'une session n'est active que dans un seul processus
-à la fois. L'agent Matrix y satisfait par l'unicité que Matrix fournit et que miryad-core implémente ; vanyline devra
-traiter ce point de son côté. Voir `session`, DEC-1.
-
 ## Objectif et problème
 
 Les solutions d'agent usuelles chargent des dizaines de milliers de tokens de définitions d'outils au démarrage, perdent
@@ -33,7 +26,7 @@ réutilise d'un environnement cible à l'autre.
 - **BO-2:** Le contexte initial du LLM est connu, petit et constant ; les capacités se découvrent à la demande.
     - **Source:** user instruction, 2026-10-24
 
-- **BO-3:** Un même espace de travail (fonctions et skills) s'utilise sur plusieurs environnements cibles sans être
+- **BO-3:** Un même outillage (fonctions et skills) s'utilise sur plusieurs environnements cibles sans être
   réécrit ; l'utilisateur choisit l'agent et l'environnement au démarrage.
     - **Source:** user instruction, 2026-10-24
 
@@ -53,12 +46,13 @@ Hors périmètre, par décision :
 - toute interface utilisateur ;
 - le moteur de workflow (offert par miryad-core ; le module de gestion de workflows est fourni par l'hôte) ;
 - la détention durable des secrets (la librairie ne les persiste ni ne les divulgue, voir CON-3) ;
-- le module de connaissance (RAG) et un espace de Memory partagé entre agent principal et sous-agents, idées réservées
-  hors du premier jalon (voir `modules` et `delegation`) ;
+- le module de connaissance (RAG) et la communication entre agents d'une même session (MessageBoard), idées réservées
+  hors du premier jalon (voir `modules` et `delegation`) ; une Memory partagée entre agents a été écartée ;
 - l'export de données d'entraînement (LoRA), extension réservée : seule la capture des données est exigée (voir `session`) ;
 - les budgets de tokens et de temps appliqués de force (voir DEC-7) ;
-- les petits modèles (SLM) : la cible est la classe de Qwen3.6 et au-delà, assez capable pour écrire du Rhai et assez
-  fiable pour agir en autonomie ; un besoin SLM avéré rouvrira la question.
+- les petits modèles (SLM) : la cible est un modèle assez capable pour écrire du Rhai et assez fiable pour agir en
+  autonomie ; un besoin SLM avéré rouvrira la question. Aucun modèle n'est désigné ici : les modèles disponibles changent
+  plus vite que ce document, et le jeu de tâches de référence (Risques) dit si un modèle convient.
 
 Source: user instruction, 2026-10-24
 
@@ -70,8 +64,8 @@ Source: user instruction, 2026-10-24
 - **Sous-agent (LLM) :** exécute une tâche déléguée de façon autonome.
 - **Hôte :** application qui embarque la librairie (vanyline, miryad-core, application de réception d'alertes avec agent
   Matrix). Il implémente les traits de stockage, résout les références vers les connexions, alimente les événements.
-- **Agent de développement :** un LLM (Qwen3.8) écrit tout le code de la librairie. Le harnais de qualité (cargo, clippy et
-  leurs configurations) est sa seule garde.
+- **Agent de développement :** un LLM local écrit tout le code de la librairie. Le harnais de qualité (cargo, clippy et
+  leurs configurations) est sa garde mécanique ; un relecteur final contrôle les diffs sur les fichiers du harnais.
 - **Auteur de toolset :** humain ou LLM (hors de sa propre session) qui écrit des toolsets et des skills.
 
 ## État actuel et état cible
@@ -149,9 +143,9 @@ Le mot « contexte » n'apparaît jamais seul dans les documents de ce domaine :
 
 ## Exigences fonctionnelles transverses
 
-- **FR-1 - MUST:** Le LLM interagit avec la librairie par un seul tool natif, `rhai_pad`, qui exécute du Rhai ; le
-  contexte initial ne contient aucune autre définition de tool.
-    - **Source:** user instruction, 2026-10-24
+- **FR-1 - MUST:** Le LLM interagit avec la librairie par deux tools natifs : `rhai_pad`, qui exécute du Rhai, et `skill`,
+  qui liste et lit les skills sans passer par Rhai ; le contexte initial ne contient aucune autre définition de tool.
+    - **Source:** user instruction, 2026-10-24 ; tool `skill`, user instruction, 2026-10-25
     - **Verified by:** `AC-6`
 
 - **FR-2 - MUST:** Le LLM découvre par introspection Rhai ce qui est disponible : variables du scope, modules, fonctions
@@ -172,9 +166,11 @@ Le mot « contexte » n'apparaît jamais seul dans les documents de ce domaine :
 - **FR-6 - MUST:** Une erreur transitoire du moteur d'inférence (réseau, délai, 429, 5xx) n'interrompt pas la session : la
   librairie réessaie avec un backoff croissant plafonné à cinq minutes, sans limite de nombre, et chaque réessai produit
   un événement ; seule l'annulation par l'hôte y met fin. Une erreur permanente (400, 401, 403, 404) fait échouer le tour
-  avec une erreur explicite et un événement, la session restant intacte et reprenable.
-    - **Source:** user instruction, 2026-10-24
-    - **Verified by:** `AC-8`
+  avec une erreur explicite et un événement, la session restant intacte et reprenable. Un 400 de dépassement de contexte
+  est classé comme tel dans l'erreur et l'événement : il signale une taille de contexte fausse dans le profil de modèle ou
+  une estimation erronée, puisque la compaction automatique doit l'empêcher (`agent-sessions/context-window#FR-2`).
+    - **Source:** user instruction, 2026-10-24 ; classement du dépassement de contexte, user instruction, 2026-10-25
+    - **Verified by:** `AC-8`, `AC-9`, `AC-11`
 
 ## Qualité, sécurité et contraintes
 
@@ -197,15 +193,18 @@ Le mot « contexte » n'apparaît jamais seul dans les documents de ce domaine :
   implémente (session, Memory, ToolsetContext, définitions d'agents et de projets, toolsets, skills). Elle possède en
   revanche les connexions MCP et celles aux moteurs d'inférence.
     - **Source:** user instruction, 2026-10-24
+    - **Verified by:** `AC-3`
 
 - **CON-2:** Rust ; `rig` pour l'abstraction LLM ; `vynil-core` pour le moteur Rhai, qui peut évoluer selon les besoins
   de la librairie.
     - **Source:** user instruction, 2026-10-24
 
-- **CON-3:** La librairie ne divulgue jamais de secret : ni dans l'état persisté, ni dans l'historique, les événements,
-  les journaux, les messages d'erreur ou les sorties renvoyées au LLM. Un ToolsetContext ne contient que des références
-  que l'hôte résout en endpoint et authentification.
-    - **Source:** user instruction, 2026-10-24
+- **CON-3:** La librairie ne divulgue jamais un secret qu'elle détient (authentifications que l'hôte résout pour les
+  moteurs d'inférence et les serveurs MCP) : ni dans l'état persisté, ni dans l'historique, les événements, les journaux,
+  les messages d'erreur ou les sorties renvoyées au LLM. Un ToolsetContext ne contient que des références que l'hôte
+  résout en endpoint et authentification. Une donnée sensible renvoyée par un serveur MCP n'est pas identifiable comme
+  telle, MCP ne déclarant pas ce qui est secret : sa maîtrise relève de la conception du toolset (BR-7).
+    - **Source:** user instruction, 2026-10-24 ; périmètre précisé, user instruction, 2026-10-25
     - **Verified by:** `AC-7`
 
 - **CON-4:** En Rhai, une fonction définie par script ne voit pas les variables du scope mais reçoit ses arguments, et une
@@ -213,24 +212,29 @@ Le mot « contexte » n'apparaît jamais seul dans les documents de ce domaine :
   appelable. Ces limites sont documentées pour le LLM et pour les auteurs de toolsets.
     - **Source:** user instruction, 2026-10-24 ; Observed in: spikes/rhai-1-25 (`scope_visibility`, `persistence`)
 
-- **CON-5:** Les connexions aux moteurs d'inférence et aux serveurs MCP sont uniquement distantes, en HTTPS ; la librairie
-  manipule mécaniquement les secrets qu'elles exigent. Aucun transport local (socket, entrée et sortie standard) n'est
-  pris en charge.
-    - **Source:** user instruction, 2026-10-24 (« uniquement remote, pas de socket supporté »)
+- **CON-5:** Les connexions aux moteurs d'inférence et aux serveurs MCP sont uniquement distantes, en HTTPS, ou en HTTP
+  quand l'adresse de destination appartient à une plage privée IPv4 (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) ;
+  la librairie manipule mécaniquement les secrets qu'elles exigent. Aucun transport local (socket, entrée et sortie
+  standard) n'est pris en charge. Aucun délai applicatif ne borne une requête, qu'un serveur peut légitimement mettre en file : un pair
+  disparu sans fermer la connexion est détecté par le keepalive TCP, et par le ping HTTP/2 quand la connexion est en h2.
+    - **Source:** user instruction, 2026-10-24 (« uniquement remote, pas de socket supporté ») ; HTTP sur plage privée et
+      keepalive, user instruction, 2026-10-25
+
+- **CON-6:** Rhai est compilé avec la feature `sync`, et les appels asynchrones (MCP, moteurs d'inférence) faits depuis
+  un script passent par un pont bloquant qui exige un runtime tokio multi-thread fourni par l'hôte.
+    - **Source:** user instruction, 2026-10-24 ; pont de référence : vynil-core `src/rt.sdd`
+
+- **CON-7:** L'hôte garantit qu'une session n'est active que dans un seul processus à la fois ; la librairie garantit un
+  seul tour actif par session au sein d'un processus (NFR-2) et ne détecte aucun conflit entre processus. L'agent Matrix y
+  satisfait par l'unicité que Matrix fournit et que miryad-core implémente ; vanyline doit traiter ce point de son côté
+  (voir `session`, DEC-1).
+    - **Source:** user instruction, 2026-10-24
 
 - **CON-8:** La librairie est publiée sous licence BSD-3-Clause, comme `vynil-core`.
     - **Source:** user instruction, 2026-10-24
 
 - **CON-9:** Rust édition 2024, version minimale 1.95.0, celle de `rig-core` 0.43.
     - **Source:** CON-2 ; Observed in: rig-core 0.43.0, `Cargo.toml`
-
-- **CON-6:** Rhai est compilé avec la feature `sync`, et les appels asynchrones (MCP, moteurs d'inférence) faits depuis
-  un script passent par un pont bloquant qui exige un runtime tokio multi-thread fourni par l'hôte.
-    - **Source:** user instruction, 2026-10-24 ; pont de référence : vynil-core `src/rt.sdd`
-
-- **CON-7:** L'hôte garantit qu'une session n'est active que dans un seul processus à la fois ; la librairie ne détecte
-  aucun conflit entre processus.
-    - **Source:** user instruction, 2026-10-24
 
 ## Paysage des Solutions
 
@@ -248,13 +252,17 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
 
 ## Décisions du domaine
 
-- **DEC-1 - Un seul tool natif**
-    - **Context:** définir une trentaine de tools coûte environ 30 000 tokens dont une majorité reste inutilisée.
-    - **Decision:** le LLM n'a qu'un tool d'exécution Rhai ; tout le reste est une fonction découvrable.
-    - **Alternatives:** un tool natif par fonction exposée.
-    - **Consequences:** le contexte de départ est constant ; la qualité dépend de l'introspection, des skills et des
+- **DEC-1 - Un tool d'exécution et un tool de lecture des skills**
+    - **Context:** définir une trentaine de tools coûte environ 30 000 tokens dont une majorité reste inutilisée. Mais si
+      les skills ne se lisent que par Rhai, le skill qui enseigne `rhai_pad` est inaccessible au modèle qui ne sait pas
+      encore s'en servir.
+    - **Decision:** le LLM a un tool d'exécution Rhai et un tool `skill` de lecture des skills ; tout le reste est une
+      fonction découvrable par Rhai. Un skill intégré enseigne `rhai_pad`.
+    - **Alternatives:** un tool natif par fonction exposée ; un seul tool `rhai_pad`, écarté le 2026-10-25 pour la raison
+      ci-dessus ; deux tools de skills (liste et lecture), écarté au profit d'un seul.
+    - **Consequences:** le contexte de départ reste constant ; la qualité dépend de l'introspection, des skills et des
       messages d'erreur, et d'un LLM qui connaît déjà Rhai, ce qui exclut les SLM (voir Périmètre et Risques).
-    - **Source:** user instruction, 2026-10-24
+    - **Source:** user instruction, 2026-10-24 ; révisé, user instruction, 2026-10-25
 
 - **DEC-2 - Sécurité par capacités, sans couche d'approbation**
     - **Context:** un agent déclenché par une alerte agit sans humain présent.
@@ -311,7 +319,7 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
     - **Source:** user instruction, 2026-10-24
 
 - **DEC-10 - Noms**
-    - **Decision:** la crate s'appelle `lymaille` et le tool natif unique `rhai_pad`.
+    - **Decision:** la crate s'appelle `lymaille`, le tool d'exécution `rhai_pad` et le tool de lecture des skills `skill`.
     - **Consequences:** `rhai_pad` évoque la persistance du scratchpad ; le nom `lymaille` était libre sur crates.io au
       2026-10-24.
     - **Source:** user instruction, 2026-10-24
@@ -342,18 +350,20 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
 
 ## Risques
 
-- **Rhai est un langage de niche.** Le modèle doit déjà le connaître, ce qui borne la cible à la classe de Qwen3.6 et
-  au-delà (voir Périmètre). Mitigation : introspection, skills avec exemples, messages d'erreur utiles, fonctions de
+- **Rhai est un langage de niche.** Le modèle doit déjà le connaître, ce qui borne la cible aux modèles assez capables
+  (voir Périmètre). Mitigation : introspection, skills avec exemples, messages d'erreur utiles, fonctions de
   formatage fournies. Un petit jeu de tâches de référence, versionné dans le dépôt et exécuté à la demande contre un modèle réel hors CI, mesure
   le taux de réussite.
 - **Injection de prompt.** Le contenu d'alertes et de logs est non fiable et atteint des agents pouvant agir. Mitigation :
-  capacités étroites (BR-2, BR-7). Les toolsets d'écriture sont à concevoir en connaissance de ce risque.
+  capacités étroites (BR-2, BR-7). Les toolsets d'écriture sont à concevoir en connaissance de ce risque. Le module de
+  création de toolsets n'est accordable qu'à un agent principal sans sous-agent (`toolsets` FR-8) : un agent productif ne
+  peut pas, même par un sous-agent, réécrire le code qu'il fera exécuter.
 - **Dérive du vocabulaire du ToolsetContext.** Un nom de rôle ou de paramètre inventé sans déclaration casse la
   portabilité entre environnements. Mitigation : les ContextType nommés (DEC-11).
-- **Espace de Memory partagé entre agent principal et sous-agents** (idée réservée, non décidée). Une Memory que des
-  sous-agents exposés à du contenu non fiable écrivent et que l'agent principal lit ouvrirait un canal d'influence qui
-  contourne la séparation des privilèges de BR-2, avec des écritures concurrentes de sous-agents parallèles et la perte
-  de reproductibilité d'un batch. Hors du premier jalon : le besoin décidera (voir `delegation`).
+- **Communication entre agents** (idée réservée, non décidée). Tout canal par lequel un sous-agent exposé à du contenu
+  non fiable parle à l'agent principal est un canal d'influence ; le résultat structuré en est déjà un. Une Memory
+  partagée a été écartée pour cette raison, aggravée par les écritures concurrentes et la perte de reproductibilité d'un
+  batch ; l'idée d'un MessageBoard est consignée dans `delegation`.
 
 ## Critères d'acceptation
 
@@ -367,7 +377,7 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
 - **AC-4:** Un run batch d'un sous-agent, lancé sans humain avec un fournisseur simulé, se termine par un résultat
   structuré.
 - **AC-5:** Une Memory de même identifiant existe aux niveaux utilisateur et projet ; chacune se lit indépendamment.
-- **AC-6:** La requête initiale envoyée au fournisseur contient exactement une définition de tool.
+- **AC-6:** La requête initiale envoyée au fournisseur contient exactement deux définitions de tool, `rhai_pad` et `skill`.
 - **AC-7:** Après une session utilisant un serveur MCP et un moteur d'inférence authentifiés, aucun secret n'apparaît
   dans l'état persisté, les événements, les journaux ni les messages renvoyés au LLM.
 - **AC-8:** Avec un fournisseur simulé qui échoue deux fois puis répond, le tour aboutit, la session reste intacte, et
@@ -376,6 +386,8 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
   explicite et un événement, et la session reste reprenable.
 - **AC-10:** `scripts/check` passe sur toute la base de code, et chaque lint critique du harnais se déclenche sur une faute
   volontaire, vérifié par un script (modèle : `spikes/lint-harness/check.sh`).
+- **AC-11:** Avec un fournisseur simulé qui répond 400 pour dépassement de contexte, le tour échoue sans réessai avec une
+  erreur et un événement classés « dépassement de contexte ».
 
 ## Open Issues
 

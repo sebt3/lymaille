@@ -20,16 +20,19 @@ raison d'être de `agent-sessions#BO-4`.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-1`
 
-- **FR-2 - MUST:** La compaction se déclenche dès que `MAX - PROMPT - SESSION - 2 * OUT < 0`, avec :
+- **FR-2 - MUST:** Avant chaque requête d'inférence, la compaction se déclenche si `MAX - PROMPT - SESSION - 2R - T < 0`,
+  avec :
     - `MAX` : la taille maximale de contexte du modèle, issue du profil de modèle résolu ;
     - `PROMPT` : la taille du prompt de demande de résumé ;
-    - `SESSION` : la taille courante de la session envoyée au modèle ;
-    - `OUT` : le maximum entre le plafond de rendu d'une sortie de `rhai_pad` (en caractères, converti en tokens à raison de
-      2,5 caractères par token par défaut, valeur surchargeable) et la taille maximale d'une réponse du LLM.
+    - `SESSION` : la taille de la session qui serait envoyée au modèle ;
+    - `R` : la taille maximale d'une réponse du LLM, raisonnement compris ;
+    - `T` : le plafond de rendu d'une sortie de `rhai_pad` ou de `skill` (`agent-sessions/scratchpad#FR-5`, `agent-sessions/toolsets#FR-18`, en caractères), converti en
+      tokens à raison de 2,5 caractères par token par défaut, valeur surchargeable.
 
-  La condition est évaluée après chaque message ajouté à la session. Elle garantit qu'un dernier ajout de taille `OUT`
-  laisse la place de demander le résumé et d'en recevoir la réponse.
-    - **Source:** user instruction, 2026-10-24
+  Le pire cas couvert est une réponse qui est un appel d'outil (`R`), suivie de son résultat (`T`), puis de la demande de
+  résumé (`PROMPT`) et de sa réponse (`R`). Avant une requête, l'historique se termine par un message utilisateur ou un
+  résultat d'outil : la compaction ne tombe donc jamais entre un `tool_call` et son résultat.
+    - **Source:** user instruction, 2026-10-24 ; révisé le 2026-10-25 (évaluation avant requête, `R` et `T` distincts)
     - **Verified by:** `AC-2`
 
 - **FR-3 - MUST:** La production du résumé et le choix de ce qui est compacté passent par des traits remplaçables par
@@ -43,14 +46,20 @@ raison d'être de `agent-sessions#BO-4`.
 - **FR-5 - MUST NOT:** Le contenu de la todo et des Memory n'est pas réinjecté dans la fenêtre à chaque tour.
     - **Source:** user instruction, 2026-10-24
 
-- **FR-6 - MUST:** Si `MAX - PROMPT - 2 * OUT` ne laisse pas la place au prompt système et aux définitions de base, la
-  session ne démarre pas et un message explicite indique la cause.
-    - **Source:** user instruction, 2026-10-24
+- **FR-6 - MUST:** La session ne démarre pas si `SYS > MAX - PROMPT - 3R - T`, `SYS` étant la taille du prompt système
+  rendu et des définitions des tools natifs ; un message explicite indique la cause. Après une compaction, la session vaut au
+  plus `SYS + R` : cette condition garantit qu'elle ne redéclenche pas aussitôt la compaction de FR-2.
+    - **Source:** user instruction, 2026-10-24 ; révisé le 2026-10-25 (absence de boucle de compaction)
     - **Verified by:** `AC-3`
+
+- **FR-10 - MUST:** Un message utilisateur qui, ajouté à la session vide de tout échange (`SYS` seul), rendrait FR-2
+  négative est refusé avec une erreur explicite rendue à l'hôte, sans compaction ni appel au modèle.
+    - **Source:** user instruction, 2026-10-25
+    - **Verified by:** `AC-6`
 
 - **FR-7 - MUST:** La stratégie fournie par défaut fait résumer par le LLM de l'agent la session intégrale, sans élagage ni
   extrait conservé : le modèle décide de ce qui compte. La session qui suit se compose du prompt système, inchangé,
-  suivi de la sortie de la compaction, et marque une frontière de segment (`agent-sessions/session#FR-12`). La compaction n'a jamais lieu entre un `tool_call` et son résultat. D'autres
+  suivi de la sortie de la compaction, et marque une frontière de segment (`agent-sessions/session#FR-12`). D'autres
   stratégies se branchent par le trait de FR-3.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-4`
@@ -83,16 +92,21 @@ raison d'être de `agent-sessions#BO-4`.
 
 - **AC-1:** Avec un fournisseur simulé rapportant des usages connus, le taux de remplissage exposé à l'hôte correspond
   à la valeur attendue.
-- **AC-2:** Avec `MAX`, `PROMPT` et `OUT` connus, la compaction ne se déclenche pas tant que
-  `MAX - PROMPT - SESSION - 2 * OUT >= 0` et se déclenche dès que cette valeur devient négative ; elle ne touche ni au
-  scratchpad ni à la todo, et le résumé contient le digest de FR-4 s'il est retenu.
-- **AC-3:** Avec un modèle dont `MAX - PROMPT - 2 * OUT` est inférieur à la taille du prompt système, la session refuse de
-  démarrer avec un message qui nomme la cause.
+- **AC-2:** Avec `MAX`, `PROMPT`, `R` et `T` connus, aucune compaction n'a lieu tant que
+  `MAX - PROMPT - SESSION - 2R - T >= 0` avant une requête, et elle a lieu avant la requête dès que cette valeur devient
+  négative ; un fournisseur simulé qui rend un appel d'outil de taille `R` puis un résultat de taille `T` laisse toujours
+  la place à la demande de résumé et à sa réponse. La compaction ne touche ni au scratchpad ni à la todo, et le résumé
+  contient le digest de FR-4 s'il est retenu.
+- **AC-3:** Avec un modèle dont `MAX - PROMPT - 3R - T` est inférieur à `SYS`, la session refuse de démarrer avec un message
+  qui nomme la cause ; à `SYS` égal à cette borne, une compaction suivie d'un résumé de taille `R` ne redéclenche pas de
+  compaction.
 - **AC-4:** Une compaction par la stratégie par défaut envoie au résumeur la session intégrale (raisonnement compris s'il est
   rejoué) ; la session qui suit se compose du prompt système inchangé puis du résumé, et aucune compaction n'intervient
   entre un `tool_call` et son résultat.
 - **AC-5:** Avec un profil en mode `preserve_thinking`, le raisonnement des tours précédents est renvoyé au modèle, compté
   dans `SESSION` et fourni au résumeur ; avec le mode aucun, il est stocké mais absent de la requête.
+- **AC-6:** Un message utilisateur trop gros pour tenir avec `SYS` seul est refusé avec une erreur explicite, sans requête au
+  fournisseur simulé, et la session reste intacte.
 
 ## Réalisation SpecDD
 

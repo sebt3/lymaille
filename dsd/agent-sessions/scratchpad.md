@@ -2,12 +2,12 @@
 
 ## Objectif
 
-Fournir le moteur d'exécution Rhai lié à la session : un scope persistant, le tool natif unique, l'introspection, les
+Fournir le moteur d'exécution Rhai lié à la session : un scope persistant, le tool natif `rhai_pad`, l'introspection, les
 limites de sandbox et le rendu borné des sorties.
 
 ## Contexte applicable du domaine
 
-`agent-sessions#FR-1` (un seul tool natif) et `agent-sessions#FR-2` (introspection avec recherche) sont réalisées ici.
+`agent-sessions#FR-1` (tool natif `rhai_pad` ; le tool `skill` relève de `toolsets`) et `agent-sessions#FR-2` (introspection avec recherche) sont réalisées ici.
 `agent-sessions#BR-2` s'applique : les modules accessibles à l'exécution sont ceux de la définition d'agent, et aucune
 fonction définie par le LLM n'élargit cet ensemble. `agent-sessions#CON-4` décrit les limites de Rhai sur les fonctions
 et closures. `agent-sessions#CON-2` place le moteur dans `vynil-core`.
@@ -38,6 +38,20 @@ et closures. `agent-sessions#CON-2` place le moteur dans `vynil-core`.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-3`, `AC-7`
 
+- **FR-11 - MUST:** Le moteur enregistre d'office le seul groupe pur du socle commun de `vynil-core` ; les autres groupes
+  (autorité : `get_env`, `sleep`, `log_*` ; fichiers ; `shell_run`) ne le sont que si la définition d'agent les accorde,
+  quelles que soient les features avec lesquelles le processus hôte compile `vynil-core`. Prérequis :
+  `vynil-org/vynil-core#18` (`docs/vynil-core-shopping-list.md`).
+    - **Source:** agent-sessions#BR-2, agent-sessions#CON-3 ; user instruction, 2026-10-25
+    - **Verified by:** `AC-10`
+
+- **FR-12 - MUST:** Le moteur de session et le moteur qui construit les modules de toolset désactivent le mot-clé `const`
+  (`Engine::disable_symbol`) ; l'hôte et la librairie ne posent aucune constante dans le scope de session. Un script qui
+  emploie `const` reçoit une erreur de syntaxe.
+    - **Source:** user instruction, 2026-10-25 ; Observed in: panique de Rhai sur affectation à une constante map (Faits
+      vérifiés)
+    - **Verified by:** `AC-11`
+
 - **FR-5 - MUST:** Le résultat d'un script est une valeur `Dynamic` (chaîne ou objet structuré) dont le rendu renvoyé au
   LLM est plafonné en caractères, à 8 000 par défaut, valeur surchargeable par définition d'agent. Une sortie tronquée
   conserve son début et sa fin, porte au milieu un avis explicite indiquant la troncature et la taille d'origine, et
@@ -61,9 +75,9 @@ et closures. `agent-sessions#CON-2` place le moteur dans `vynil-core`.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-5`
 
-- **FR-9 - MUST:** Les limites de `agent-sessions#CON-4` sont exposées au LLM (prompt système ou skill intégré accessible
-  par introspection), avec la façon de les contourner : passer les données en argument, et lire les constantes par
-  `global::`.
+- **FR-9 - MUST:** Les limites de `agent-sessions#CON-4` sont exposées au LLM par le skill intégré sur `rhai_pad`
+  (`agent-sessions/toolsets#FR-18`), avec la façon de les contourner : passer les données en argument et lire le
+  ToolsetContext par `session_context()` (`agent-sessions/toolsets#FR-17`) ; `const` n'existe pas (FR-12).
     - **Source:** agent-sessions#CON-4
     - **Verified by:** `AC-6`
 
@@ -85,11 +99,26 @@ et closures. `agent-sessions#CON-2` place le moteur dans `vynil-core`.
 - **DEC-2 - Pont async/sync de vynil-core, Rhai en feature `sync`**
     - **Context:** rig est asynchrone, Rhai exécute de façon synchrone ; `vynil-core` compile déjà Rhai avec `sync`,
       `serde` et `internals` et fournit un pont `block_on` (Observed in: vynil-core `Cargo.toml`, `src/rt.sdd`).
-    - **Decision:** réutiliser cette feature et ce pont pour les appels MCP et d'inférence faits depuis un script.
-    - **Consequences:** moteur et valeurs sont `Send + Sync` ; un script occupe un thread du runtime pendant ses attentes ;
-      l'hôte fournit un runtime multi-thread (`agent-sessions#CON-6`) ; le pont ne sait pas annuler, il faut un hook de
-      progression (voir Questions ouvertes).
-    - **Source:** user instruction, 2026-10-24 (feature `sync`) ; Observed in: vynil-core
+    - **Decision:** réutiliser cette feature et la stratégie de ce pont pour les appels MCP et d'inférence faits depuis un
+      script.
+    - **Consequences:** moteur et valeurs sont `Send + Sync` ; l'hôte fournit un runtime multi-thread
+      (`agent-sessions#CON-6`) ; l'annulation suit DEC-3. Le pont `rt::block_on` de `vynil-core` est `pub(crate)` et
+      n'existe qu'avec les features `http`, `oci`, `s3` ou `k8s` : `lymaille` ne peut pas l'appeler tel quel (voir Questions
+      ouvertes).
+    - **Source:** user instruction, 2026-10-24 (feature `sync`) ; Observed in: vynil-core `8076ee4` (`src/rt.rs`, `src/lib.rs`)
+
+- **DEC-3 - Exécution des scripts hors des workers et annulation par jeton de fil**
+    - **Context:** un script est synchrone et peut durer (compilation dans un sandbox MCP) ; `on_progress` n'a la main
+      qu'entre deux opérations Rhai ; `vynil-core` fournit depuis `#21` un jeton d'annulation porté par le fil
+      (`cancel::scope`), honoré par `block_on` et `sleep`, qui abandonne le futur en cours en 25 ms environ.
+    - **Decision:** chaque appel de `rhai_pad` s'évalue dans `tokio::task::spawn_blocking`, qui ouvre sur ce fil une portée
+      `cancel::scope` avec le jeton du run ; le hook `on_progress` lit le même jeton pour interrompre les boucles Rhai. Tout
+      pont bloquant utilisé par `lymaille` honore ce jeton.
+    - **Alternatives:** évaluer le script dans une tâche async, écarté car une boucle Rhai y monopoliserait un worker du
+      runtime de l'hôte.
+    - **Consequences:** les workers du runtime restent libres pour l'inférence et les autres sessions ; le nombre de scripts
+      simultanés est borné par le pool bloquant de tokio ; FR-10 est réalisable sans attendre le retour d'un appel.
+    - **Source:** user instruction, 2026-10-25 ; Observed in: vynil-core `src/cancel.sdd`, `src/rt.sdd`
 
 ## Faits vérifiés (Rhai 1.25.1)
 
@@ -111,11 +140,24 @@ Mesurés par les programmes de `spikes/rhai-1-25`, avec les features de `vynil-c
 - Les limites de taille s'appliquent aussi aux valeurs rendues par des fonctions natives : un appel MCP trop gros échoue
   avec une erreur, sans troncature.
 - `on_progress` interrompt une boucle Rhai en 200 ms environ ; pendant un appel natif bloquant, l'arrêt n'a lieu qu'au
-  retour de l'appel (1,5 s dans le test).
+  retour de l'appel (1,5 s dans le test). `vynil-core` a depuis ajouté le jeton de fil de DEC-3 (`#21`).
 - Avec la feature `metadata`, signatures et commentaires de documentation des fonctions, scripts compris, sont exportables
-  pour l'introspection. `vynil-core` n'active pas cette feature aujourd'hui.
+  pour l'introspection. `vynil-core` offre depuis cette feature (`#22`).
+- Une constante posée dans le scope de session par l'hôte se lit depuis les scripts du LLM et depuis les `fn` qu'il
+  définit, mais pas depuis une fonction d'un module de toolset (`Variable not found`, avec ou sans `global::`). Une
+  fonction native enregistrée sur le moteur de session est, elle, appelable depuis un module de toolset. Mesuré le
+  2026-10-25 hors dépôt, Rhai 1.25.1.
+- **Panique de Rhai :** affecter une propriété ou un index d'une constante map (`const C = #{a: 1}; C.a = 2`, ou constante
+  posée par `Scope::push_constant`) fait paniquer le processus (`unreachable!`, `eval/stmt.rs`) avec l'optimiseur par
+  défaut ; avec `OptimizationLevel::None`, Rhai rend l'erreur `Cannot modify constant`. Reproduit sur 1.25.1 et 1.27.0, le
+  2026-10-25, aucun ticket trouvé en amont. Avec `Engine::disable_symbol("const")`, `const` et `export const` deviennent
+  une erreur de syntaxe et les affectations de propriétés de variables `let` restent possibles : c'est la parade retenue
+  (FR-12).
 
 ## Questions ouvertes
+
+- **TBD:** pont bloquant pour les appels MCP et d'inférence de `lymaille` : `block_on` public derrière une feature dédiée,
+  demandé dans `vynil-org/vynil-core#23` (2026-10-25) ; prérequis du code qui appelle MCP ou l'inférence depuis un script.
 
 
 ## Acceptation
@@ -136,6 +178,11 @@ Mesurés par les programmes de `spikes/rhai-1-25`, avec les features de `vynil-c
 - **AC-8:** Une variable qui contient une closure produit l'avertissement et est absente après restauration, le reste
   du scope étant restauré.
 - **AC-9:** Un appel MCP simulé qui ne rend jamais est abandonné dans le délai d'une annulation, sans attendre sa fin.
+- **AC-10:** Dans le moteur d'un agent qui n'accorde aucun groupe de `vynil-core`, `json_encode` répond, tandis que
+  `get_env`, `sleep`, `file_read` et `shell_run` sont introuvables et absents de l'introspection, y compris quand le
+  processus est compilé avec les features `fs` et `shell` de `vynil-core`.
+- **AC-11:** Dans un moteur de session comme dans le moteur de construction des toolsets, `const C = #{a: 1}; C.a = 2` rend une
+  erreur de syntaxe rendue au LLM, sans panique, et `let c = #{a: 1}; c.a = 2; c.a` rend `2`.
 
 ## Réalisation SpecDD
 

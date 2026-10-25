@@ -58,6 +58,8 @@ et ce que l'agent consomme.
   un fournisseur directement.
     - **Source:** user instruction, 2026-10-24
 
+## Questions ouvertes
+
 - **TBD:** détection des modèles. `list_models` existe dans `rig` 0.43 sur les clients OpenAI, Anthropic, Ollama, Copilot et
   Gemini (Observed in: rig-core 0.43.0, `src/client`), et `ModelInfo` porte `context_length` et `max_output_tokens`
   optionnels. vLLM annonce `max_model_len` dans `/v1/models` (262 144 pour `qwen3.8-flash-next`, Observed in:
@@ -66,9 +68,6 @@ et ce que l'agent consomme.
   Une passerelle de l'écosystème annonce `context_length: 8192` pour presque tous ses modèles, dont `qwen3.8-flash-next` que
   vLLM déclare à 262 144 (signalé : `kydah/kydah-ai-proxy#113`) : la détection ne suffit pas, la surcharge du profil
   (FR-7) est nécessaire, pas seulement prévue.
-
-## Questions ouvertes
-
 
 ## Acceptation
 

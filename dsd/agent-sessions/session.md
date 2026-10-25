@@ -20,7 +20,7 @@ non-interruption sur le temps.
     - **Verified by:** `AC-1`
 
 - **FR-2 - MUST:** L'état persisté d'une session comprend l'historique (raisonnement compris, avec l'émetteur qui seul peut le rejouer), les variables du scratchpad (sérialisation
-  serde), le texte source des fonctions définies, la todo, les watchers, les Memory de niveau session, les compteurs de tokens, la
+  serde), le texte source des fonctions définies, la todo, les watchers, les handles des runs de sous-agents en cours (`agent-sessions/delegation#FR-14`), les compteurs de tokens, la
   référence à l'agent avec l'empreinte de sa définition et au ToolsetContext (jamais de secret, `agent-sessions#CON-3`), une version de format et la
   version de chaque toolset utilisé.
     - **Source:** user instruction, 2026-10-24
@@ -58,7 +58,8 @@ non-interruption sur le temps.
     - **Source:** user instruction, 2026-10-24 ; Observed in: spikes/rhai-1-25 (`persistence`, S8)
     - **Verified by:** `AC-5`
 
-- **FR-10 - MUST:** Une session se restaure toujours avec les définitions courantes. Un message système signale au LLM ce qui
+- **FR-10 - MUST:** Une session se restaure toujours avec les définitions courantes, figées ensuite pour le nouveau segment
+  (`agent-sessions/toolsets#FR-16`). Un message système signale au LLM ce qui
   a changé depuis la sauvegarde : une version majeure de toolset différente, une définition d'agent dont l'empreinte
   diffère de celle enregistrée, un toolset plus ancien que celui de la sauvegarde. Les évolutions mineures du format de
   session n'ajoutent que des champs optionnels ; seule une version majeure incompatible refuse la restauration.
@@ -66,15 +67,15 @@ non-interruption sur le temps.
     - **Verified by:** `AC-6`
 
 - **FR-11 - MUST:** Au début de chaque segment de contexte (début de session, sortie de compaction, restauration), la session
-  persiste le contexte tel que le modèle l'a reçu : le prompt système rendu, la définition du tool `rhai_pad` et le profil
+  persiste le contexte tel que le modèle l'a reçu : le prompt système rendu, les définitions des tools natifs (`rhai_pad` et `skill`) et le profil
   de modèle résolu (identifiant et mode de rejeu du raisonnement). Une restauration qui re-rend le prompt avec des
   définitions plus récentes (FR-10) ne remplace pas ce qui a été envoyé auparavant.
     - **Source:** user instruction, 2026-10-24 ; agent-sessions#DEC-12 ; ASSUMPTION: contenu déduit de ce qu'exigerait un export
       fidèle, à confirmer
     - **Verified by:** `AC-7`
 
-- **FR-12 - MUST:** L'historique persisté garde chaque message tel que le modèle l'a reçu ou produit : sortie de `rhai_pad`
-  après plafonnement et troncature, raisonnement avec son émetteur, appels d'outils. Les frontières de segment
+- **FR-12 - MUST:** L'historique persisté garde chaque message tel que le modèle l'a reçu ou produit : sorties de `rhai_pad`
+  après plafonnement et troncature, sorties de `skill`, raisonnement avec son émetteur, appels d'outils. Les frontières de segment
   (compaction, restauration) y sont marquées.
     - **Source:** user instruction, 2026-10-24 ; agent-sessions#DEC-12
     - **Verified by:** `AC-7`
@@ -85,6 +86,12 @@ non-interruption sur le temps.
     - **Source:** user instruction, 2026-10-24 ; agent-sessions#DEC-12 ; ASSUMPTION: liste des signaux déduite d'une analyse
       de la sélection de données, à confirmer
     - **Verified by:** `AC-8`
+
+- **FR-14 - MUST:** Un message utilisateur reçu pendant un tour actif n'ouvre pas de nouveau tour : il est injecté dans
+  l'historique avant la prochaine requête d'inférence de ce tour, jamais entre un `tool_call` et son résultat, et la
+  condition de compaction (`agent-sessions/context-window#FR-2`) l'inclut. Reçu hors tour, il en ouvre un.
+    - **Source:** user instruction, 2026-10-25
+    - **Verified by:** `AC-9`
 
 ## Décisions
 
@@ -109,7 +116,7 @@ Pistes pour le jour où le besoin se confirmera :
   modèle ;
 - la crate attacherait les signaux de qualité (FR-13) et laisserait l'hôte filtrer ;
 - l'export serait un opt-in par session, avec le masquage des secrets et un hook de rédaction fourni par l'hôte ;
-- le format serait une structure neutre de type chat (messages, raisonnement, appels d'outils, définition de `rhai_pad`), le
+- le format serait une structure neutre de type chat (messages, raisonnement, appels d'outils, définitions des tools natifs), le
   gabarit du modèle cible étant appliqué par l'outil d'entraînement ;
 - avant tout entraînement, mesurer le taux de réussite du modèle de base sur le jeu de tâches de référence, qui ne doit pas
   servir d'entraînement.
@@ -118,12 +125,15 @@ Source: user instruction, 2026-10-24
 
 ## Questions ouvertes
 
+- **TBD:** forme du retour de texte vers l'hôte pendant un tour : fragments de streaming comme événements du canal de
+  `agent-sessions#FR-3`, ou flux dédié rendu par le lancement du tour, la réponse complète figurant dans tous les cas dans
+  l'événement de fin de tour.
 - **TBD:** inventaire des types `Dynamic` à étiqueter au-delà de `char` et `blob` (horodatages, décimaux selon les features).
 
 ## Acceptation
 
-- **AC-1:** Une session sauvegardée via un stockage simulé puis rechargée restitue historique, variables, fonctions,
-  todo et Memory de session.
+- **AC-1:** Une session sauvegardée via un stockage simulé puis rechargée restitue historique, variables, fonctions et
+  todo ; ses Memory de niveau session, lues par le trait Memory (`agent-sessions/modules#FR-2`), restent accessibles.
 - **AC-2:** Restaurer une session dont une fonction référence une API de toolset disparue restaure les variables et les
   autres fonctions, et le premier message système lui signale la fonction cassée.
 - **AC-3:** Une annulation émise pendant un backoff termine le tour sans ajouter de message d'erreur à l'historique.
@@ -134,10 +144,12 @@ Source: user instruction, 2026-10-24
 - **AC-6:** Une session restaurée après modification de sa définition d'agent, ou avec un toolset d'une autre version
   majeure, reçoit un message système qui nomme le changement et reprend avec les définitions courantes.
 - **AC-7:** Une session compactée puis restaurée après modification de l'agent permet de reconstituer, pour chaque segment, le
-  prompt système, la définition du tool et le profil de modèle tels qu'ils ont été envoyés, ainsi que les sorties de `rhai_pad`
+  prompt système, les définitions des tools et le profil de modèle tels qu'ils ont été envoyés, ainsi que les sorties de `rhai_pad`
   telles que le modèle les a reçues.
 - **AC-8:** Un run batch de sous-agent dont la sortie est invalide puis corrigée enregistre l'issue finale, le nombre d'erreurs et
   de corrections, l'étape de workflow et les versions de toolsets.
+- **AC-9:** Un message utilisateur envoyé pendant qu'un script du tour s'exécute apparaît dans la requête d'inférence suivante
+  du même tour, après le résultat de l'outil, sans ouvrir de second tour.
 
 ## Réalisation SpecDD
 
