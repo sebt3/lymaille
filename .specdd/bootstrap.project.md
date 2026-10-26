@@ -83,7 +83,8 @@ racine à la création du squelette du crate.
 ## Commandes de vérification
 
 - `scripts/check` : point d'entrée unique (formatage, clippy, tests, et le reste du harnais). `scripts/check fast` en boucle interne.
-- `specdd lint` : validation de la syntaxe des specs.
+- `specdd lint` : validation de la syntaxe des specs. Si `specdd` est absent du PATH, le binaire npm global est
+  `~/.npm-global/bin/specdd`.
 
 ## Conventions git
 
