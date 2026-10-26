@@ -6,6 +6,9 @@ La documentation du projet est rédigée en français : documents DSD (Domain De
 des specs `.sdd`. Les mots-clés du langage SpecDD (`Spec`, `Must`, `Scenario`...) et les marqueurs normatifs de DSD
 (`MUST`, `SHOULD`, `TBD`, `ASSUMPTION`, `BR-1`...) restent tels que définis par SpecDD, en anglais.
 
+La documentation tournée vers l'extérieur (`README.md`, métadonnées du `Cargo.toml`, rustdoc, `LICENSE`) est en anglais :
+la crate est destinée à crates.io.
+
 Le code est en anglais : commentaires, commentaires de documentation (rustdoc) et nommage des fonctions, traits, types
 et autres identifiants.
 

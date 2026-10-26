@@ -1,0 +1,165 @@
+[package]
+name = "lymaille"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.95.0"
+description = "Library to run an LLM as a durable work agent: persistent sessions, a Rhai scratchpad, lazily discovered toolsets."
+license = "BSD-3-Clause"
+repository = "https://github.com/sebt3/lymaille"
+readme = "README.md"
+keywords = ["llm", "agent", "rhai", "mcp"]
+categories = ["development-tools"]
+publish = false
+
+[lints]
+workspace = true
+
+[workspace]
+members = ["."]
+resolver = "3"
+
+[workspace.lints.rust]
+# Groups (low priority: the individual lints below win).
+future_incompatible = { level = "deny", priority = -1 }
+nonstandard_style = { level = "deny", priority = -1 }
+rust_2018_idioms = { level = "deny", priority = -1 }
+rust_2024_compatibility = { level = "deny", priority = -1 }
+let_underscore = { level = "deny", priority = -1 }
+unused = { level = "deny", priority = -1 }
+refining_impl_trait = { level = "deny", priority = -1 }
+# A lint renamed or removed by a toolchain update must never switch itself off silently.
+unknown_lints = "deny"
+renamed_and_removed_lints = "deny"
+unfulfilled_lint_expectations = "deny"
+unstable_features = "deny"
+# Safety.
+unsafe_code = "forbid"
+# Documentation and public API.
+missing_docs = "deny"
+missing_debug_implementations = "deny"
+missing_copy_implementations = "deny"
+unreachable_pub = "deny"
+unnameable_types = "deny"
+# Hygiene.
+unused_crate_dependencies = "deny"
+unused_import_braces = "deny"
+unused_lifetimes = "deny"
+unused_qualifications = "deny"
+unused_results = "deny"
+single_use_lifetimes = "deny"
+trivial_casts = "deny"
+trivial_numeric_casts = "deny"
+variant_size_differences = "deny"
+macro_use_extern_crate = "deny"
+meta_variable_misuse = "deny"
+non_ascii_idents = "deny"
+explicit_outlives_requirements = "deny"
+unit_bindings = "deny"
+redundant_imports = "deny"
+redundant_lifetimes = "deny"
+deprecated_in_future = "deny"
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"
+private_intra_doc_links = "deny"
+missing_crate_level_docs = "deny"
+invalid_codeblock_attributes = "deny"
+invalid_html_tags = "deny"
+invalid_rust_codeblocks = "deny"
+bare_urls = "deny"
+redundant_explicit_links = "deny"
+unescaped_backticks = "deny"
+
+[workspace.lints.clippy]
+# Groups. `restriction` is never enabled as a whole (clippy advises against it: contradictory lints); it is
+# selected lint by lint below.
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+cargo = { level = "deny", priority = -1 }
+
+# --- restriction: failures and arithmetic ---
+arithmetic_side_effects = "deny"
+as_conversions = "deny"
+as_underscore = "deny"
+assertions_on_result_states = "deny"
+expect_used = "deny"
+fn_to_numeric_cast_any = "deny"
+indexing_slicing = "deny"
+infinite_loop = "deny"
+integer_division = "deny"
+lossy_float_literal = "deny"
+missing_assert_message = "deny"
+modulo_arithmetic = "deny"
+panic = "deny"
+panic_in_result_fn = "deny"
+string_slice = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+unwrap_in_result = "deny"
+unwrap_used = "deny"
+# --- restriction: output and side effects ---
+dbg_macro = "deny"
+exit = "deny"
+mem_forget = "deny"
+print_stderr = "deny"
+print_stdout = "deny"
+use_debug = "deny"
+# --- restriction: the harness cannot be bypassed (use #[expect(..., reason = "...")]) ---
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
+# --- restriction: API and exhaustiveness ---
+error_impl_error = "deny"
+exhaustive_enums = "deny"
+exhaustive_structs = "deny"
+partial_pub_fields = "deny"
+wildcard_enum_match_arm = "deny"
+# --- restriction: determinism and ownership ---
+clone_on_ref_ptr = "deny"
+iter_over_hash_type = "deny"
+mixed_read_write_in_expression = "deny"
+mutex_integer = "deny"
+rc_buffer = "deny"
+rc_mutex = "deny"
+# --- restriction: style ---
+default_union_representation = "deny"
+empty_drop = "deny"
+empty_enum_variants_with_brackets = "deny"
+empty_structs_with_brackets = "deny"
+filetype_is_file = "deny"
+format_push_string = "deny"
+get_unwrap = "deny"
+if_then_some_else_none = "deny"
+impl_trait_in_params = "deny"
+let_underscore_must_use = "deny"
+let_underscore_untyped = "deny"
+map_err_ignore = "deny"
+multiple_inherent_impl = "deny"
+needless_raw_strings = "deny"
+non_ascii_literal = "deny"
+pathbuf_init_then_push = "deny"
+redundant_type_annotations = "deny"
+ref_patterns = "deny"
+renamed_function_params = "deny"
+rest_pat_in_fully_bound_structs = "deny"
+same_name_method = "deny"
+semicolon_inside_block = "deny"
+separated_literal_suffix = "deny"
+shadow_unrelated = "deny"
+single_char_lifetime_names = "deny"
+str_to_string = "deny"
+string_add = "deny"
+string_lit_chars_any = "deny"
+suspicious_xor_used_as_pow = "deny"
+tests_outside_test_module = "deny"
+try_err = "deny"
+unnecessary_safety_comment = "deny"
+unneeded_field_pattern = "deny"
+unused_trait_names = "deny"
+verbose_file_reads = "deny"
+self_named_module_files = "deny"
+pub_with_shorthand = "deny"
+# --- known conflicts, settled once and for all ---
+# `unreachable_pub` (rustc) demands `pub(crate)` where `redundant_pub_crate` (nursery) refuses it.
+redundant_pub_crate = { level = "allow", priority = 1 }

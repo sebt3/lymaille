@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Quality harness: the single entry point for agents and CI. Every step must pass; there is no partial success.
+#   scripts/check         full harness
+#   scripts/check fast    inner loop: fmt, clippy, tests
+# SKIP="deny hack" skips named steps for a machine that lacks a tool. CI never sets it.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+mode="${1:-full}"
+skip() { [[ " ${SKIP:-} " == *" $1 "* ]]; }
+step() { printf '\n== %s\n' "$*"; }
+
+step "fmt";    cargo fmt --all --check
+step "clippy"; cargo clippy --workspace --all-targets --all-features -- -D warnings
+step "tests";  cargo test --workspace --all-features
+
+if [ "$mode" = full ]; then
+  skip hack     || { step "clippy, each feature alone"; cargo hack clippy --workspace --each-feature --no-dev-deps -- -D warnings; }
+  step "rustdoc"; RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
+  skip coverage || { step "coverage floor (90% of lines)"; cargo llvm-cov --workspace --all-features --fail-under-lines 90; }
+  skip deny     || { step "dependencies"; cargo deny check; }
+fi
+printf '\nharness: all steps passed\n'
