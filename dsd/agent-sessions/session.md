@@ -81,10 +81,11 @@ non-interruption sur le temps.
     - **Verified by:** `AC-7`
 
 - **FR-13 - MUST:** Chaque tour et chaque run enregistre des signaux de qualité exploitables après coup : issue (résultat
-  valide, échec ou annulation), nombre d'erreurs Rhai et de corrections, sous-agent et étape de workflow concernés, versions
-  de toolsets et profil de modèle.
-    - **Source:** user instruction, 2026-10-24 ; agent-sessions#DEC-12 ; ASSUMPTION: liste des signaux déduite d'une analyse
-      de la sélection de données, à confirmer
+  valide, échec ou annulation), nombre d'erreurs Rhai et de corrections, agent producteur du run, sous-agent et étape de
+  workflow concernés, versions de toolsets et profil de modèle.
+    - **Source:** user instruction, 2026-10-24 ; agent-sessions#DEC-12 ; référence de l'agent pour exclure les sessions de
+      l'agent de configuration du filtrage des candidatures (`agent-sessions#DEC-13`), user instruction, 2026-10-26 ;
+      ASSUMPTION: liste des signaux déduite d'une analyse de la sélection de données, à confirmer
     - **Verified by:** `AC-8`
 
 - **FR-14 - MUST:** Un message utilisateur reçu pendant un tour actif n'ouvre pas de nouveau tour : il est injecté dans
@@ -92,6 +93,14 @@ non-interruption sur le temps.
   condition de compaction (`agent-sessions/context-window#FR-2`) l'inclut. Reçu hors tour, il en ouvre un.
     - **Source:** user instruction, 2026-10-25
     - **Verified by:** `AC-9`
+
+- **FR-15 - MUST:** L'hôte peut étiqueter, pendant ou après la session, la session, un tour ou un run (par exemple en
+  réponse à une question posée à l'utilisateur en cours de session). Une étiquette est une entrée ajoutée à la session,
+  jamais une modification : libellé tiré d'un vocabulaire que l'hôte définit, émetteur (humain ou automatique) et date
+  posés par la librairie, persistée avec la session. La librairie n'impose ni le moment ni la forme de la question, qui
+  relèvent de l'hôte ; elle émet déjà les fins de tour et de run qui servent de points d'accroche.
+    - **Source:** user instruction, 2026-10-26 ; agent-sessions#DEC-13 ; ASSUMPTION: granularité et vocabulaire à confirmer
+    - **Verified by:** `AC-10`
 
 ## Décisions
 
@@ -147,9 +156,11 @@ Source: user instruction, 2026-10-24
   prompt système, les définitions des tools et le profil de modèle tels qu'ils ont été envoyés, ainsi que les sorties de `rhai_pad`
   telles que le modèle les a reçues.
 - **AC-8:** Un run batch de sous-agent dont la sortie est invalide puis corrigée enregistre l'issue finale, le nombre d'erreurs et
-  de corrections, l'étape de workflow et les versions de toolsets.
+  de corrections, l'étape de workflow, l'agent producteur et les versions de toolsets.
 - **AC-9:** Un message utilisateur envoyé pendant qu'un script du tour s'exécute apparaît dans la requête d'inférence suivante
   du même tour, après le résultat de l'outil, sans ouvrir de second tour.
+- **AC-10:** Une étiquette ajoutée à un run après la fin de la session est restituée à la restauration avec son émetteur et sa
+  date ; ajouter une seconde étiquette conserve la première.
 
 ## Réalisation SpecDD
 

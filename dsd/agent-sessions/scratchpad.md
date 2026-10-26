@@ -61,8 +61,10 @@ et closures. `agent-sessions#CON-2` place le moteur dans `vynil-core`.
     - **Verified by:** `AC-4`
 
 - **FR-6 - MUST:** Une erreur Rhai (syntaxe, exécution, limite) est rendue au LLM avec sa position et un message
-  exploitable.
-    - **Source:** agent-sessions, section Risques
+  exploitable. Quand une fonction ou un module est introuvable, le message nomme les candidats les plus proches parmi les
+  seuls modules accordés.
+    - **Source:** agent-sessions, section Risques ; suggestions de candidats, user instruction, 2026-10-26
+    - **Verified by:** `AC-12`
 
 - **FR-7 - MUST:** À la fin d'un script, si une variable persistante contient une closure, un pointeur de fonction ou une
   valeur non sérialisable, le rendu porte un avertissement qui nomme la variable et suggère de définir une `fn`, et la
@@ -183,6 +185,8 @@ Mesurés par les programmes de `spikes/rhai-1-25`, avec les features de `vynil-c
   processus est compilé avec les features `fs` et `shell` de `vynil-core`.
 - **AC-11:** Dans un moteur de session comme dans le moteur de construction des toolsets, `const C = #{a: 1}; C.a = 2` rend une
   erreur de syntaxe rendue au LLM, sans panique, et `let c = #{a: 1}; c.a = 2; c.a` rend `2`.
+- **AC-12:** Un script qui appelle `grafana::loki_queryy` rend une erreur qui nomme `grafana::loki_query` comme candidat le
+  plus proche ; aucune suggestion ne nomme une fonction d'un module non accordé.
 
 ## Réalisation SpecDD
 

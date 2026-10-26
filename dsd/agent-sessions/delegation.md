@@ -107,7 +107,27 @@ relevés le 2026-10-25 :
 - un sous-agent qui lit le tableau perd la reproductibilité de son batch : piste, ne lui laisser lire que les messages de
   son parent.
 
-Source: user instruction, 2026-10-25
+Raffinements du 2026-10-26, qui ne lui donnent toujours pas de cas d'usage :
+
+- un hint n'est pas un fait : l'auteur a d'autres objectifs que le lecteur. La réponse est dans le rendu, que la librairie
+  contrôle. Chaque message est rendu dans une enveloppe posée par la librairie (auteur, rôle, date, mention « observation
+  d'un voisin, non vérifiée ») ; le texte de l'auteur ne peut pas la contrefaire, la librairie neutralise toute tentative
+  de l'imiter. Un message peut citer sa source, par exemple un appel d'outil de la session de l'auteur, que la librairie
+  valide comme existant : le lecteur distingue une affirmation sans preuve d'un renvoi à une observation. Les messages
+  restent du contenu non fiable au sens de `agent-sessions#BR-2` ;
+- la péremption que l'hôte sait détecter se traite par l'hôte, sans que la librairie évalue quoi que ce soit (`agent-sessions#CON-1`)
+  et sans comparaison confiée au LLM. Un message peut déclarer un sujet opaque que l'hôte comprend (ressource, fichier,
+  objet d'un serveur MCP). L'hôte surveille ce sujet (watchers, FR-10) et, quand il change, ajoute au journal une entrée
+  d'invalidation qui vise le message ; auteur et date de cette entrée sont posés par la librairie. À la lecture, le
+  message est rendu « périmé depuis <date> : <raison> », et l'entrée alimente la source d'événements. L'invalidation est
+  une entrée datée du journal et pas une évaluation à la lecture : le rejeu d'un batch voit les mêmes entrées, la
+  reproductibilité tient. Seul l'hôte invalide : un auteur qui déclare un sujet fantaisiste n'invalide que son propre
+  message. Défaut connu : granularité grossière, et un message sans sujet ne périme jamais (il se lit avec son âge) ;
+- une pondération par score (confiance auto-évaluée, distance, alignement avec la demande) a été examinée et écartée : la
+  confiance déclarée par un LLM est un bruit que le mécanisme amplifierait, et la réponse du domaine à l'influence d'un
+  sous-agent reste structurelle (`agent-sessions#BR-2`, provenance posée par la librairie), pas probabiliste.
+
+Source: user instruction, 2026-10-25 ; enveloppe, sujet et invalidation par l'hôte, rejet des scores, user instruction, 2026-10-26
 
 ## Questions ouvertes
 

@@ -43,12 +43,13 @@ uniquement) s'appliquent.
 
 - **FR-6 - MUST:** Le prompt système, ainsi que le corps et la description des skills, sont des templates Handlebars rendus avec les données du
   ToolsetContext et des métadonnées de session figées au rendu (identifiant d'agent, date de début, toolsets accordés avec leur
-  description et, pour un agent principal, capacité de sous-agents parallélisables, `agent-sessions/delegation#FR-11`),
+  description, noms des skills accordés sans leur description ni leur corps et, pour un agent principal, capacité de
+  sous-agents parallélisables, `agent-sessions/delegation#FR-11`),
   y compris des sections conditionnelles selon la présence d'un rôle. Le prompt système est rendu une
   seule fois, à la création ou à la restauration de la session ; aucun état changeant en cours de session (todo, Memory,
   scope) n'y entre.
-    - **Source:** user instruction, 2026-10-24
-    - **Verified by:** `AC-2`
+    - **Source:** user instruction, 2026-10-24 ; noms des skills dans le prompt système, user instruction, 2026-10-26
+    - **Verified by:** `AC-2`, `AC-12`
 
 - **FR-7 - MUST:** Un skill est un objet — métadonnées de frontmatter et corps markdown (une chaîne) — compatible avec le
   format `SKILL.md` de la spécification Agent Skills : `name` (1 à 64 caractères : minuscules, chiffres et tirets) et
@@ -61,11 +62,15 @@ uniquement) s'appliquent.
 
 - **FR-8 - MUST:** Un module permet à un LLM de créer et modifier des toolsets via un trait de stockage. Il n'est
   accordable qu'à un agent principal sans sous-agent délégable : la librairie refuse, au chargement ou à l'enregistrement,
-  une définition d'agent qui l'accorde à un sous-agent ou qui l'associe à des sous-agents délégables. Les agents de
-  configuration sont ainsi séparés des agents productifs, et un agent exposé à du contenu non fiable ne peut pas réécrire
-  le code d'un autre agent qu'il pilote.
-    - **Source:** user instruction, 2026-10-25 ; agent-sessions#BR-2
-    - **Verified by:** `AC-8`
+  une définition d'agent qui l'accorde à un sous-agent ou qui l'associe à des sous-agents délégables. Les sessions des
+  agents de création de toolsets sont exclues des candidatures à l'amélioration continue (`agent-sessions#DEC-13`). Ce que
+  le module enregistre est un brouillon, que le trait de stockage distingue des versions actives : l'activation est une
+  opération de l'hôte, hors du module. Les
+  agents de configuration sont ainsi séparés des agents productifs, et un agent exposé à du contenu non fiable ne peut pas
+  réécrire le code d'un autre agent qu'il pilote.
+    - **Source:** user instruction, 2026-10-25 ; exclusion des sessions de l'agent de configuration des candidatures,
+      user instruction, 2026-10-26 ; agent-sessions#BR-2
+    - **Verified by:** `AC-8`, `AC-13`
 
 - **FR-16 - MUST:** Les définitions d'agents et de toolsets utilisées par une session, y compris celles de ses sous-agents
   délégables, sont figées au début de chaque segment (`agent-sessions/session#FR-11`) : un sous-agent lancé en cours de
@@ -152,6 +157,10 @@ uniquement) s'appliquent.
   qui modifie la copie rendue ne change pas la valeur lue ensuite, et aucun processus ne panique.
 - **AC-11:** Sans aucun appel à `rhai_pad`, le tool `skill` liste les skills, rend le skill intégré sur `rhai_pad` et rend un
   document annexe ; l'enregistrement d'un skill dont le corps dépasse le plafond de rendu est refusé.
+- **AC-12:** Le prompt système rendu contient le nom de chaque skill des toolsets accordés, sans leur description ni leur
+  corps ; une session peut donc lire un skill nommé au premier tour sans appeler `skill` en découverte.
+- **AC-13:** Un toolset enregistré par le module de création n'est visible d'aucune session tant que l'hôte ne l'a pas activé ;
+  aucune fonction du module ne permet l'activation.
 
 ## Réalisation SpecDD
 

@@ -215,10 +215,13 @@ Le mot « contexte » n'apparaît jamais seul dans les documents de ce domaine :
 - **CON-5:** Les connexions aux moteurs d'inférence et aux serveurs MCP sont uniquement distantes, en HTTPS, ou en HTTP
   quand l'adresse de destination appartient à une plage privée IPv4 (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) ;
   la librairie manipule mécaniquement les secrets qu'elles exigent. Aucun transport local (socket, entrée et sortie
-  standard) n'est pris en charge. Aucun délai applicatif ne borne une requête, qu'un serveur peut légitimement mettre en file : un pair
+  standard) n'est pris en charge. La connexion de serveurs MCP stdio du commerce relève dès lors d'un relais HTTP que l'hôte
+  place sur une adresse privée, hors de la librairie : coût assumé, les applications visées n'ont pas la capacité de lancer
+  un processus. Aucun délai applicatif ne borne une requête, qu'un serveur peut légitimement mettre en file : un pair
   disparu sans fermer la connexion est détecté par le keepalive TCP, et par le ping HTTP/2 quand la connexion est en h2.
     - **Source:** user instruction, 2026-10-24 (« uniquement remote, pas de socket supporté ») ; HTTP sur plage privée et
-      keepalive, user instruction, 2026-10-25
+      keepalive et exclusion stdio, user instruction, 2026-10-25 ; coût du relais stdio consigné, user instruction,
+      2026-10-26
 
 - **CON-6:** Rhai est compilé avec la feature `sync`, et les appels asynchrones (MCP, moteurs d'inférence) faits depuis
   un script passent par un pont bloquant qui exige un runtime tokio multi-thread fourni par l'hôte.
@@ -348,6 +351,28 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
       format de session.
     - **Source:** user instruction, 2026-10-24
 
+- **DEC-13 - Amélioration continue des toolsets à partir des sessions**
+    - **Context:** les fonctions que le LLM définit dans le scratchpad et réutilise d'une session réussie à l'autre signalent
+      un manque des toolsets. La capture (DEC-12) et le module de création (`toolsets` FR-8) existent ; il reste à les
+      brancher.
+    - **Decision:** la boucle est consignée comme contrat : la part de la librairie est la suffisance de la capture —
+      fonctions persistées en source (`agent-sessions/session#FR-2`) et signaux de qualité par run
+      (`agent-sessions/session#FR-13`) doivent permettre l'agrégation « fonctions par agent producteur, sessions à issue
+      valide, contre versions de toolsets » ; le rapport d'agrégation et son ordonnancement relèvent de l'hôte (CON-1), qui
+      en fera son propre sujet durable. Le raffinement est exécuté par l'agent de configuration via le module de
+      `agent-sessions/toolsets#FR-8` et passe par la version sémantique (`agent-sessions/toolsets#FR-10`).
+    - **Consequences:** un canal d'influence nouveau : du code né dans des sessions exposées à du contenu non fiable
+      remonte vers des toolsets exécutés par des agents productifs. Un candidat n'est jamais promu tel quel : l'agent de
+      configuration le réécrit, l'extraction de contrat s'y applique, et le diff est relu par un humain : un agent
+      relecteur lirait les mêmes candidats issus de sessions exposées. Ce que l'agent de configuration enregistre est un
+      brouillon ; l'activation d'une version pour des agents productifs est une action de l'hôte, jamais un outil du LLM
+      (`agent-sessions/toolsets#FR-8`). Le relecteur reçoit le delta de capacités du diff (modules appelés, écritures) en
+      plus du texte. Les sessions de l'agent de configuration sont exclues des candidatures. Seules les sessions étiquetées
+      positivement par un humain (`agent-sessions/session#FR-15`) sont candidates : l'étiquette est la qualification que
+      les signaux automatiques ne donnent pas. Aucun outil de rapport n'est exigé avant qu'un volume de sessions le
+      justifie : une requête au stockage suffit les premiers mois.
+    - **Source:** user instruction, 2026-10-26
+
 ## Risques
 
 - **Rhai est un langage de niche.** Le modèle doit déjà le connaître, ce qui borne la cible aux modèles assez capables
@@ -357,7 +382,9 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
 - **Injection de prompt.** Le contenu d'alertes et de logs est non fiable et atteint des agents pouvant agir. Mitigation :
   capacités étroites (BR-2, BR-7). Les toolsets d'écriture sont à concevoir en connaissance de ce risque. Le module de
   création de toolsets n'est accordable qu'à un agent principal sans sous-agent (`toolsets` FR-8) : un agent productif ne
-  peut pas, même par un sous-agent, réécrire le code qu'il fera exécuter.
+  peut pas, même par un sous-agent, réécrire le code qu'il fera exécuter. Les fonctions candidates de l'amélioration
+  continue (DEC-13) viennent de sessions exposées et sont du contenu non fiable : leur réécriture par l'agent de
+  configuration et la relecture du diff font foi.
 - **Dérive du vocabulaire du ToolsetContext.** Un nom de rôle ou de paramètre inventé sans déclaration casse la
   portabilité entre environnements. Mitigation : les ContextType nommés (DEC-11).
 - **Communication entre agents** (idée réservée, non décidée). Tout canal par lequel un sous-agent exposé à du contenu
