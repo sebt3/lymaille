@@ -38,10 +38,10 @@ et closures. `agent-sessions#CON-2` place le moteur dans `vynil-core`.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-3`, `AC-7`
 
-- **FR-11 - MUST:** Le moteur enregistre d'office le seul groupe pur du socle commun de `vynil-core` ; les autres groupes
-  (autorité : `get_env`, `sleep`, `log_*` ; fichiers ; `shell_run`) ne le sont que si la définition d'agent les accorde,
-  quelles que soient les features avec lesquelles le processus hôte compile `vynil-core`. Prérequis :
-  `vynil-org/vynil-core#18` (`docs/vynil-core-shopping-list.md`).
+- **FR-11 - MUST:** Le moteur enregistre d'office le seul groupe pur du socle commun de `vynil-core` (`core_pure_rhai_register`) ; les
+  autres groupes (hôte : `get_env`, `log_*` ; attente : `sleep` ; fichiers ; `shell_run`) ne le sont que si la définition
+  d'agent les accorde, quelles que soient les features avec lesquelles le processus hôte compile `vynil-core`. Livré par
+  `vynil-core` 0.9.0 (`#18`, `docs/vynil-core-shopping-list.md`).
     - **Source:** agent-sessions#BR-2, agent-sessions#CON-3 ; user instruction, 2026-10-25
     - **Verified by:** `AC-10`
 
@@ -104,9 +104,8 @@ et closures. `agent-sessions#CON-2` place le moteur dans `vynil-core`.
     - **Decision:** réutiliser cette feature et la stratégie de ce pont pour les appels MCP et d'inférence faits depuis un
       script.
     - **Consequences:** moteur et valeurs sont `Send + Sync` ; l'hôte fournit un runtime multi-thread
-      (`agent-sessions#CON-6`) ; l'annulation suit DEC-3. Le pont `rt::block_on` de `vynil-core` est `pub(crate)` et
-      n'existe qu'avec les features `http`, `oci`, `s3` ou `k8s` : `lymaille` ne peut pas l'appeler tel quel (voir Questions
-      ouvertes).
+      (`agent-sessions#CON-6`) ; l'annulation suit DEC-3. Le pont `rt::block_on` de `vynil-core` est public depuis la
+      version 0.9.0, derrière la feature `rt` (`#23`).
     - **Source:** user instruction, 2026-10-24 (feature `sync`) ; Observed in: vynil-core `8076ee4` (`src/rt.rs`, `src/lib.rs`)
 
 - **DEC-3 - Exécution des scripts hors des workers et annulation par jeton de fil**
@@ -128,9 +127,9 @@ Mesurés par les programmes de `spikes/rhai-1-25`, avec les features de `vynil-c
 
 - Avec `sync`, `Engine`, `AST`, `Scope` et `Dynamic` sont `Send + Sync`, et un moteur partagé entre threads fonctionne.
 - L'`AST` n'est pas sérialisable : la persistance des fonctions passe par leur texte source (DEC-1).
-- `vynil-core` enregistre d'office `get_env`, `sleep` et `log_*` ; avec les features `fs`, `shell` ou `password` du processus,
+- `vynil-core` 0.8.0 enregistrait d'office `get_env`, `sleep` et `log_*` ; avec les features `fs`, `shell` ou `password` du processus,
   il enregistre aussi les accès fichiers et `shell_run`. Le moteur est public, donc `on_progress` et les limites de taille se
-  posent depuis `lymaille` (`docs/vynil-core-shopping-list.md`).
+  posent depuis `lymaille`. La version 0.9.0 scinde ce socle en groupes publics (`docs/vynil-core-shopping-list.md`).
 - `AST::iter_functions` rend nom, paramètres, accès et commentaires de documentation des fonctions. Rhai ne type pas
   statiquement : un contrat de toolset se réduit à des noms et des paramètres (`toolsets`, FR-10).
 - Un pointeur de fonction ou une closure se sérialise **sans erreur** en chaîne, ou en tableau s'il capture ; relue, la
@@ -157,10 +156,6 @@ Mesurés par les programmes de `spikes/rhai-1-25`, avec les features de `vynil-c
   (FR-12).
 
 ## Questions ouvertes
-
-- **TBD:** pont bloquant pour les appels MCP et d'inférence de `lymaille` : `block_on` public derrière une feature dédiée,
-  demandé dans `vynil-org/vynil-core#23` (2026-10-25) ; prérequis du code qui appelle MCP ou l'inférence depuis un script.
-
 
 ## Acceptation
 

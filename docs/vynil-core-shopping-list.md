@@ -9,6 +9,11 @@
 
 Issues ouvertes dans `vynil-org/vynil-core` le 2026-10-24 : #18 (M1) et #19 à #22 (N1 à N4).
 
+**Livraison : tout est livré dans `vynil-core` 0.9.0** (publiée sur crates.io, relevé le 2026-10-26), plus `#23` (pont
+`rt::block_on` public, feature `rt`) et `#28` (`Error::Cancelled`). Écarts de forme avec la demande : le groupe « autorité »
+est scindé en groupe hôte (`get_env`, `log_*`) et groupe d'attente (`sleep`) ; l'annulation est un jeton porté par le fil
+(`cancel::scope`) et non un paramètre de `rt::block_on`.
+
 ## Must have
 
 ### M1 — Enregistrement granulaire du socle commun, sans rien casser

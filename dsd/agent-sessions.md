@@ -224,7 +224,9 @@ Le mot « contexte » n'apparaît jamais seul dans les documents de ce domaine :
       2026-10-26
 
 - **CON-6:** Rhai est compilé avec la feature `sync`, et les appels asynchrones (MCP, moteurs d'inférence) faits depuis
-  un script passent par un pont bloquant qui exige un runtime tokio multi-thread fourni par l'hôte.
+  un script passent par un pont bloquant (`vynil_core::rt::block_on`, feature `rt`) : sur un runtime tokio multi-thread fourni par l'hôte il bloque
+  sur place ; un fil sans runtime reçoit un runtime temporaire, et un runtime `current_thread` est refusé avec une erreur
+  explicite.
     - **Source:** user instruction, 2026-10-24 ; pont de référence : vynil-core `src/rt.sdd`
 
 - **CON-7:** L'hôte garantit qu'une session n'est active que dans un seul processus à la fois ; la librairie garantit un
@@ -422,9 +424,6 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
   `deny.toml` (licences, avis de sécurité, sources) et `scripts/mutants`, déclarer les doublons de versions inévitables dans
   `allowed-duplicate-crates` avec une raison, et reporter dans le dépôt le mécanisme de canaris de
   `spikes/lint-harness`.
-
-- **TBD:** réaliser la shopping-list de `vynil-core` avant de coder : `docs/vynil-core-shopping-list.md`. Un seul Must
-  (enregistrement granulaire du socle commun, additif : `vynil-org/vynil-core#18`), quatre Nice (`#19` à `#22`).
 
 ## Références
 
