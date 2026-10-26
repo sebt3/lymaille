@@ -66,9 +66,9 @@ Scenario: empty label refused on deserialization
   Then it fails
 
 Tasks:
-  [ ] #4 Désérialisation validante de @Labels et son Scenario (rend caduque la seconde moitié de #3).
+  [x] #4 Désérialisation validante de @Labels et son Scenario (rend caduque la seconde moitié de #3).
   [x] #1 Tests puis implémentation.
   [?] #3 Posé à l'implémentation : @Labels::add rend `Some(&Label)` ou `None` si le libellé est vide ; `IntoIterator` pour `&Labels` ajouté (lint
-      `iter_without_into_iter`) ; la désérialisation de @Labels n'interdit pas un libellé vide (comme celle des identifiants, à rendre validante ?).
+      `iter_without_into_iter`).
   [?] #2 Granularité et vocabulaire à confirmer (ASSUMPTION du DSD) : le vocabulaire est libre ici ; une énumération hôte
       resterait compatible.

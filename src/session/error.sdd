@@ -19,7 +19,7 @@ Exposes:
 Raises:
   @SessionError::Store: échec du stockage de l'hôte, message texte.
   @SessionError::Serialization: état non (dé)sérialisable, message texte.
-  @SessionError::IncompatibleFormat: version majeure de format différente, porte les versions enregistrée et courante.
+  @SessionError::IncompatibleFormat: version majeure de format différente, porte les deux @FormatVersion (enregistrée et courante).
   @SessionError::TurnActive: un tour est déjà actif pour la session, porte l'identifiant.
   @SessionError::PendingToolCall: un message utilisateur ne peut s'insérer entre un appel d'outil et son résultat.
   @SessionError::Poisoned: un verrou interne empoisonné.
@@ -44,7 +44,6 @@ Scenario: display texts are stable
 
 Tasks:
   [x] #1 Tests des textes Display, puis l'énumération.
-  [?] #3 `IncompatibleFormat` porte quatre entiers (majeure et mineure enregistrées et courantes) en attendant `FormatVersion` ;
-      le remplacer par ce type au lot `format`.
+  [x] #3 `IncompatibleFormat` porte deux @FormatVersion (enregistrée et courante) ; le Display est inchangé.
   [?] #2 Les erreurs d'inférence (transitoire, permanente, dépassement de contexte, `agent-sessions#FR-6`) se classent
       dans le module `agents`, pas ici : confirmer.

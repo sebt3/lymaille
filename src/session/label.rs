@@ -1,10 +1,14 @@
 //! Labels added by the host to a session, a turn or a run, during or after the session. Entries are only added, never
 //! changed nor removed (`agent-sessions/session#FR-15`, `agent-sessions#DEC-13`, `agent-sessions/session#AC-10`).
 
+use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 
 use super::{RunId, TurnId};
 use crate::clock::{Clock, Timestamp};
+
+/// Message of the deserialization error raised for an empty label text.
+const EMPTY_TEXT: &str = "a label text must not be empty";
 
 /// What a label is attached to: the session as a whole, one turn, or one run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -28,14 +32,38 @@ pub enum LabelAuthor {
     Automatic,
 }
 
-/// One label: a free text, its target, its author and the date set by the injected clock.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// One label: a free text, its target, its author and the date set by the injected clock. Its text is never empty.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct Label {
     text: String,
     target: LabelTarget,
     author: LabelAuthor,
     date: Timestamp,
+}
+
+/// Wire form of a label, checked before it becomes a [`Label`].
+#[derive(Deserialize)]
+struct LabelRecord {
+    text: String,
+    target: LabelTarget,
+    author: LabelAuthor,
+    date: Timestamp,
+}
+
+impl<'de> Deserialize<'de> for Label {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let record = LabelRecord::deserialize(deserializer)?;
+        if record.text.is_empty() {
+            return Err(<D::Error as de::Error>::custom(EMPTY_TEXT));
+        }
+        Ok(Self {
+            text: record.text,
+            target: record.target,
+            author: record.author,
+            date: record.date,
+        })
+    }
 }
 
 impl Label {
@@ -275,6 +303,18 @@ mod tests {
             texts,
             vec!["on-turn-2"],
             "for_target must return only the labels attached to that turn"
+        );
+    }
+
+    #[test]
+    fn empty_label_refused_on_deserialization() {
+        let json = serde_json::json!([
+            {"text": "", "target": "Session", "author": "Human", "date": 1000}
+        ]);
+        let result: Result<Labels, _> = serde_json::from_value(json);
+        assert!(
+            result.is_err(),
+            "a serialized list holding a label with an empty text must fail to deserialize"
         );
     }
 

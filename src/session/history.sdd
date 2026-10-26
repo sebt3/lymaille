@@ -77,7 +77,7 @@ Scenario: a result with an unknown call changes nothing
   Then it is appended and `c1` is still pending
 
 Tasks:
-  [ ] #3 Test du Scenario « unknown call » ci-dessus (comportement déjà en place).
+  [x] #3 Test du Scenario « unknown call » ci-dessus (comportement déjà en place).
   [?] #2 Posé à l'implémentation : @Message est une énumération à champs nommés sérialisée avec une étiquette `role` ; la taille d'origine d'une sortie
       tronquée s'exprime en caractères ; @History::push_user_during_turn prend un texte ; un résultat retire toutes les occurrences de son identifiant.
   [x] #1 Tests puis implémentation.

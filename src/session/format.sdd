@@ -44,5 +44,5 @@ Scenario: different major refused
   Then both fail with IncompatibleFormat naming both versions
 
 Tasks:
-  [ ] #1 Tests puis implémentation.
+  [x] #1 Tests puis implémentation.
   [?] #2 Faut-il une migration entre majeures plutôt qu'un refus sec ? Le DSD dit « refuse » : posé tel quel, à rouvrir à la première majeure.

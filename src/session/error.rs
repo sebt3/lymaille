@@ -1,6 +1,6 @@
 //! Typed error of the session module.
 
-use super::SessionId;
+use super::{FormatVersion, SessionId};
 
 /// Error of the session module. Texts carry identifiers and versions only, never the content of a session.
 #[derive(Debug, thiserror::Error)]
@@ -13,18 +13,12 @@ pub enum SessionError {
     #[error("session serialization failed: {0}")]
     Serialization(String),
     /// The saved major format version differs from the current one. Both versions are carried.
-    #[error(
-        "incompatible session format: saved version {saved_major}.{saved_minor}, current version {current_major}.{current_minor}"
-    )]
+    #[error("incompatible session format: saved version {saved}, current version {current}")]
     IncompatibleFormat {
-        /// Major version recorded in the saved state.
-        saved_major: u32,
-        /// Minor version recorded in the saved state.
-        saved_minor: u32,
-        /// Major version this library reads and writes.
-        current_major: u32,
-        /// Minor version this library reads and writes.
-        current_minor: u32,
+        /// Format version recorded in the saved state.
+        saved: FormatVersion,
+        /// Format version this library reads and writes.
+        current: FormatVersion,
     },
     /// A turn is already active for the session.
     #[error("a turn is already active for session {0}")]
@@ -42,7 +36,7 @@ pub type SessionResult<T> = Result<T, SessionError>;
 
 #[cfg(test)]
 mod tests {
-    use super::{SessionError, SessionId};
+    use super::{FormatVersion, SessionError, SessionId};
 
     #[test]
     fn display_texts_are_stable() {
@@ -58,10 +52,8 @@ mod tests {
             ),
             (
                 SessionError::IncompatibleFormat {
-                    saved_major: 2,
-                    saved_minor: 0,
-                    current_major: 1,
-                    current_minor: 0,
+                    saved: FormatVersion::new(2, 0),
+                    current: FormatVersion::new(1, 0),
                 },
                 "incompatible session format: saved version 2.0, current version 1.0",
             ),

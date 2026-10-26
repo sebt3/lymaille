@@ -52,7 +52,10 @@ Scenario: unknown tag refused
   Then it fails
 
 Tasks:
-  [ ] #1 Tests puis implémentation.
+  [ ] #6 Test manquant : `Blob([1,2])` et `Array([Int(1),Int(2)])` restent distincts après aller-retour.
+  [x] #1 Tests puis implémentation.
+  [?] #5 Les Scenarios d'aller-retour passent par les dérivations serde : seule la règle des flottants non finis contraint le code. Le format d'étiquetage est un contrat
+      de persistance (ne pas le modifier sans montée de version de format).
   [?] #2 Encodage du `blob` : tableau d'entiers JSON (aucune dépendance, volumineux) ou base64 (dépendance à nommer). Posé : tableau d'entiers.
   [?] #3 Types `Dynamic` supplémentaires (horodatages, décimaux selon les features de `vynil-core`) : TBD du DSD, non couverts.
   [?] #4 Le passage entre `rhai::Dynamic` et @TaggedValue vit dans `scratchpad` : cette spec ne dépend pas de Rhai.

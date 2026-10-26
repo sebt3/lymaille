@@ -203,6 +203,11 @@ mod tests {
             "the start and the restore segments must both exist"
         );
         assert_eq!(
+            segments.get(1).map(Segment::boundary),
+            Some(BoundaryKind::Restore),
+            "the second segment must be the restore boundary"
+        );
+        assert_eq!(
             start.context(),
             &start_context,
             "the start segment must be unchanged by the restore"
@@ -211,6 +216,13 @@ mod tests {
             segments.get(1).map(|segment| segment.context().system_prompt()),
             Some("prompt v2"),
             "the restore segment must carry the newer prompt next to the start segment"
+        );
+
+        let json = serde_json::to_string(&start).expect("the start segment serializes");
+        let back: Segment = serde_json::from_str(&json).expect("the start segment deserializes");
+        assert_eq!(
+            back, start,
+            "the start segment must survive a serialization unchanged, next to the restore segment"
         );
     }
 }

@@ -8,8 +8,9 @@ mod session;
 
 pub use clock::{Clock, ManualClock, SystemClock, Timestamp};
 pub use session::{
-    Backoff, BoundaryKind, CancelHandle, Event, EventKind, EventSink, History, Label, LabelAuthor,
-    LabelTarget, Labels, McpRecord, Message, ModelProfile, NullSink, Outcome, Reasoning, RecordingSink,
-    Redactor, RunId, RunSignals, ScriptRecord, Segment, SegmentContext, SessionError, SessionId,
-    SessionResult, SleepOutcome, ToolCall, TurnGate, TurnId, TurnPermit,
+    Backoff, BoundaryKind, CancelHandle, Event, EventKind, EventSink, FormatVersion, History, Label,
+    LabelAuthor, LabelTarget, Labels, McpRecord, Message, ModelProfile, NullSink, Outcome, Provenance,
+    Reasoning, RecordingSink, Redactor, RunId, RunSignals, ScriptRecord, Segment, SegmentContext,
+    SessionError, SessionId, SessionResult, SleepOutcome, TaggedValue, ToolCall, TurnGate, TurnId,
+    TurnPermit, restore_notices,
 };

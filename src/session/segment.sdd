@@ -42,7 +42,7 @@ Scenario: a restore creates a new segment
   Then the start segment is unchanged and the two exist side by side
 
 Tasks:
-  [ ] #4 Renforcer `a_restore_creates_a_new_segment` : asserter le @BoundaryKind::Restore du second segment, et que le premier survit à une sérialisation.
+  [x] #4 Renforcer `a_restore_creates_a_new_segment` : asserter le @BoundaryKind::Restore du second segment, et que le premier survit à une sérialisation.
   [x] #1 Tests puis implémentation.
   [?] #2 Le « mode de rejeu du raisonnement » est du texte libre ici : le domaine `agents` (mapping fournisseur et modèle,
       `agent-sessions/context-window#FR-5`) en fixera l'énumération.

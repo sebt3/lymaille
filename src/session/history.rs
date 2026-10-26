@@ -357,6 +357,26 @@ mod tests {
     }
 
     #[test]
+    fn a_result_with_an_unknown_call_changes_nothing() {
+        let mut history = History::new();
+        history.push(Message::assistant("", None, vec![read_file_call("c1")]));
+        let before = history.messages().len();
+
+        history.push(Message::tool_result("c9", "read_file", "content", None));
+
+        assert_eq!(
+            history.messages().len(),
+            before + 1,
+            "a result for an unknown call must be appended like any other message"
+        );
+        assert_eq!(
+            history.pending_tool_calls(),
+            vec!["c1"],
+            "the unknown result must not remove the pending call c1"
+        );
+    }
+
+    #[test]
     fn truncated_output_keeps_the_original_size() {
         let mut history = History::new();
         history.push(Message::tool_result(
