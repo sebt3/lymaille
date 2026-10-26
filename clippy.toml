@@ -32,9 +32,10 @@ disallowed-methods = [
   { path = "std::fs::remove_file", reason = "CON-1: no storage I/O, go through a trait" },
   { path = "std::fs::File::open", reason = "CON-1: no storage I/O, go through a trait" },
   { path = "std::fs::File::create", reason = "CON-1: no storage I/O, go through a trait" },
-  { path = "tokio::fs::read", reason = "CON-1: no storage I/O, go through a trait" },
-  { path = "tokio::fs::read_to_string", reason = "CON-1: no storage I/O, go through a trait" },
-  { path = "tokio::fs::write", reason = "CON-1: no storage I/O, go through a trait" },
+  # allow-invalid: tokio's fs items exist only with the `fs` feature, which this crate does not enable.
+  { path = "tokio::fs::read", reason = "CON-1: no storage I/O, go through a trait", allow-invalid = true },
+  { path = "tokio::fs::read_to_string", reason = "CON-1: no storage I/O, go through a trait", allow-invalid = true },
+  { path = "tokio::fs::write", reason = "CON-1: no storage I/O, go through a trait", allow-invalid = true },
   # CON-3: the library never reads the process environment (secrets).
   { path = "std::env::var", reason = "CON-3: never read the process environment" },
   { path = "std::env::var_os", reason = "CON-3: never read the process environment" },
@@ -48,7 +49,8 @@ disallowed-methods = [
 ]
 disallowed-types = [
   { path = "std::process::Command", reason = "CON-1: the library never spawns a process" },
-  { path = "tokio::process::Command", reason = "CON-1: the library never spawns a process" },
+  # allow-invalid: tokio's process items exist only with the `process` feature, which this crate does not enable.
+  { path = "tokio::process::Command", reason = "CON-1: the library never spawns a process", allow-invalid = true },
   { path = "std::net::TcpStream", reason = "CON-5: connections go through the HTTPS client" },
   { path = "std::os::unix::net::UnixStream", reason = "CON-5: no local transport" },
 ]

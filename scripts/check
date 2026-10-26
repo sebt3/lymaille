@@ -11,7 +11,19 @@ skip() { [[ " ${SKIP:-} " == *" $1 "* ]]; }
 step() { printf '\n== %s\n' "$*"; }
 
 step "fmt";    cargo fmt --all --check
-step "clippy"; cargo clippy --workspace --all-targets --all-features -- -D warnings
+clippy_log="$(mktemp)"
+trap 'rm -f "$clippy_log"' EXIT
+step "clippy"
+clippy_status=0
+cargo clippy --workspace --all-targets --all-features -- -D warnings 2>"$clippy_log" || clippy_status=$?
+cat "$clippy_log" >&2
+# A clippy.toml problem (e.g. a disallowed path that does not resolve) is a configuration warning, not a lint:
+# -D warnings does not catch it, so the guard it encodes would be silently inactive.
+if grep -Eq 'clippy\.toml|does not refer to a reachable|configuration file' "$clippy_log"; then
+  echo "clippy: configuration warning above; fix clippy.toml (or give the unresolved entry allow-invalid = true, with the feature reason)" >&2
+  clippy_status=1
+fi
+[ "$clippy_status" -eq 0 ] || exit "$clippy_status"
 step "tests";  cargo test --workspace --all-features
 
 if [ "$mode" = full ]; then
