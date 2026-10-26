@@ -420,8 +420,8 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
 
 ## Open Issues
 
-- **TBD:** compléter le harnais : installer `cargo-deny` et `cargo-mutants` (absents de la machine de développement), écrire
-  `deny.toml` (licences, avis de sécurité, sources) et `scripts/mutants`, déclarer les doublons de versions inévitables dans
+- **TBD:** compléter le harnais : `cargo-deny` et `cargo-mutants` sont installés sur la machine de développement (2026-10-26) ;
+  reste à écrire `deny.toml` (licences, avis de sécurité, sources) et `scripts/mutants`, déclarer les doublons de versions inévitables dans
   `allowed-duplicate-crates` avec une raison, et reporter dans le dépôt le mécanisme de canaris de
   `spikes/lint-harness`.
 
