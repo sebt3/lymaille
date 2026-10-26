@@ -1,0 +1,37 @@
+Spec: context
+
+Purpose:
+  Fenêtre de contexte : calcul des seuils de compaction et de démarrage, suivi des tokens, mode de rejeu du raisonnement, traits de
+    résumeur et de stratégie avec la stratégie par défaut. Réalise `agent-sessions/context-window` (./dsd/agent-sessions/context-window.md).
+    Ne contient que de la logique pure et des traits : l'appel au modèle de résumé est celui du résumeur que l'hôte ou le domaine `agents` fournit.
+
+Structure:
+  ./mod.rs: déclarations et ré-exports
+  ./error.rs: erreur du module
+  ./budget.rs: seuils MAX, PROMPT, R, T, SYS
+  ./usage.rs: usage rapporté, estimation locale, cumul par agent
+  ./replay.rs: mode de rejeu du raisonnement
+  ./strategy.rs: résumeur, stratégie, stratégie par défaut, digest
+
+Owns:
+  ./mod.rs
+
+References:
+  ../../lymaille.sdd
+  ../../dsd/agent-sessions/context-window.md
+  ../session/session.sdd
+  ./error.sdd
+  ./budget.sdd
+  ./usage.sdd
+  ./replay.sdd
+  ./strategy.sdd
+
+Must:
+  Ne réaliser aucune E/S ni appel réseau ; ne jamais interrompre un run sur le nombre de tokens (`agent-sessions#FR-5`, `agent-sessions#DEC-7`).
+  Calculer les tailles en entiers non signés avec arithmétique vérifiée ou saturante : aucun flottant dans les décisions de seuil.
+  Déclarer chaque sous-module et ré-exporter ce que les specs enfants exposent ; mod.rs ne contient aucun comportement.
+
+Tasks:
+  [ ] #1 Déclarer les sous-modules dans ./mod.rs au fil des specs enfants livrées.
+  [?] #2 Intégration à la boucle de tour (décision de compacter avant chaque requête, refus d'un message trop gros) : dépend de la boucle de tour de `session` (#2 de ../session/session.sdd).
+  [?] #3 TBD du DSD : contenu du prompt de résumé (consigne de citer textuellement les demandes de l'utilisateur) ; l'essai de bout en bout du rejeu du raisonnement.

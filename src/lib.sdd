@@ -10,9 +10,10 @@ References:
   ../lymaille.sdd
   ./clock.sdd
   ./session/session.sdd
+  ./context/context.sdd
 
 Must:
-  Déclarer chaque module de ./ et de ./session et ré-exporter à la racine les types publics qu'une spec enfant déclare
+  Déclarer chaque module de ./, de ./session et de ./context et ré-exporter à la racine les types publics qu'une spec enfant déclare
     dans son `Exposes`, rien d'autre.
   Porter un commentaire de crate en anglais (`missing_crate_level_docs`) renvoyant au domaine.
   Ne contenir ni fonction ni type : tout comportement vit dans un fichier à spec propre.

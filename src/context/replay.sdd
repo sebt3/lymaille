@@ -1,0 +1,58 @@
+Spec: replay
+
+Purpose:
+  Mode de rejeu du raisonnement déclaré par un profil de modèle, et sélection du raisonnement à renvoyer au modèle (`agent-sessions/context-window#FR-9`, `AC-5`).
+
+Owns:
+  ./replay.rs
+
+Exposes:
+  @ReplayMode
+  @replayed_reasoning
+
+Accepts:
+  @ReplayMode: `None`, `IntraTurn`, `AllTurns` (ce dernier correspond à `preserve_thinking`).
+  @replayed_reasoning: un `&[Message]` (historique) et un @ReplayMode.
+
+Returns:
+  @replayed_reasoning: pour chaque message de l'assistant, le raisonnement à renvoyer au modèle ou rien, sous forme de liste parallèle aux messages.
+  @ReplayMode::as_str: `none`, `intra_turn`, `all_turns`.
+  @ReplayMode::parse: le mode depuis ce texte, ou rien.
+
+Must:
+  `None` ne renvoie aucun raisonnement : il reste dans l'historique pour l'audit, absent de la requête.
+  `AllTurns` renvoie le raisonnement de tous les messages de l'assistant.
+  `IntraTurn` renvoie le raisonnement des seuls messages de l'assistant du tour courant, c'est-à-dire ceux qui suivent le dernier message utilisateur.
+  Un raisonnement n'est renvoyé que s'il a un émetteur : le choix de ne le rejouer qu'à son émetteur est celui du domaine `agents`, non de ce fichier.
+  Le résultat ne modifie jamais l'historique.
+  @ReplayMode se sérialise en `none`, `intra_turn`, `all_turns` ; `parse` est l'inverse de `as_str` et refuse tout autre texte.
+
+Depends on:
+  ../session/history.sdd
+  serde
+
+Scenario: none stores but does not replay
+  Given an assistant message carrying reasoning
+  When replayed_reasoning is called with None
+  Then no reasoning is returned and the history still holds it
+
+Scenario: all turns replays everything
+  Given reasoning on three assistant messages across two user turns
+  When replayed_reasoning is called with AllTurns
+  Then the three reasonings are returned
+
+Scenario: intra turn replays the current turn only
+  Given reasoning on assistant messages before and after the last user message
+  When replayed_reasoning is called with IntraTurn
+  Then only the reasoning after the last user message is returned
+
+Scenario: mode text round trips
+  Given each mode
+  When converted with as_str then parse, and serialized to JSON
+  Then the same mode returns, the JSON is the quoted text and `other` is refused
+
+Tasks:
+  [x] #1 Tests puis implémentation.
+  [ ] #4 Test manquant : @ReplayMode::IntraTurn sans aucun message utilisateur (voir #3).
+  [?] #3 Posé à l'implémentation : en mode `IntraTurn` sans aucun message utilisateur, tous les messages de l'assistant sont du tour courant ; un émetteur vide vaut « pas d'émetteur ».
+  [?] #2 @ModelProfile de ../session/segment.sdd porte le mode de rejeu en texte libre : le remplacer par @ReplayMode quand `agents` consomme ce module (même valeurs textuelles, donc sans montée de format).

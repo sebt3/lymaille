@@ -1,0 +1,96 @@
+Spec: usage
+
+Purpose:
+  Suivi des tokens d'une session : taille courante de ce qui serait envoyé, taux de remplissage, usage cumulé pour l'audit de coût par agent, estimation locale quand
+    le fournisseur n'a rien rapporté de fiable (`agent-sessions/context-window#FR-1`, `FR-8`, `AC-1`).
+
+Owns:
+  ./usage.rs
+
+Exposes:
+  @UsageTracker
+  @estimate_tokens
+
+Accepts:
+  @estimate_tokens: un nombre de caractères, les caractères par token en millièmes et la majoration en pourcentage.
+  @UsageTracker::new: la majoration en pourcentage des estimations (10 par défaut) et les caractères par token en millièmes (2500 par défaut).
+  @UsageTracker::record_response: l'agent (texte), l'usage rapporté (prompt et complétion, chacun optionnel) et l'estimation locale du prompt envoyé en tokens.
+  @UsageTracker::note_added: la taille estimée en tokens (sans majoration) d'un message ajouté depuis le dernier appel.
+  @UsageTracker::note_compaction: aucun argument.
+  @UsageTracker::set_session_estimate: la taille estimée de la session après une compaction (sans majoration).
+  @UsageTracker::estimate_chars: un nombre de caractères ; rend l'estimation majorée en tokens avec les paramètres du tracker.
+
+Returns:
+  @estimate_tokens: le nombre de tokens estimé, majoré, arrondi au supérieur.
+  @UsageTracker::session_tokens: la taille `SESSION` : base (rapportée telle quelle ou estimée majorée) plus les messages ajoutés depuis, majorés.
+  @UsageTracker::fill_permille: le taux de remplissage en millièmes de `max`, plafonné à 1000 par la présentation mais non borné en interne (retourne la valeur brute saturante).
+  @UsageTracker::cumulative: pour un agent, le total des tokens de prompt et de complétion comptés, ou le total de la session.
+
+Must:
+  L'usage rapporté par le fournisseur fait foi et n'est pas majoré ; il remplace l'estimation locale de la base.
+  Une estimation locale (majorée) remplace l'usage rapporté quand celui-ci est absent, nul, ou inférieur au rapport précédent sans compaction entre-temps.
+  Après @UsageTracker::note_compaction, un rapport inférieur au précédent est accepté (la session a rétréci).
+  @UsageTracker::note_added s'ajoute à `SESSION` majoré et se remet à zéro quand un nouvel usage est enregistré (il couvre les messages ajoutés depuis le dernier appel).
+  Le cumul par agent additionne, pour chaque réponse, le prompt et la complétion retenus (rapportés s'ils sont fiables, estimés sinon), saturant, séparément par agent ; il ne diminue jamais, compaction comprise.
+  Aucun flottant : majoration par entiers (`(x * (100 + pct) + 99) / 100` en arithmétique vérifiée).
+  @UsageTracker n'est pas partagé entre threads sans verrou posé par l'appelant (type de valeur simple, `Send`).
+
+Depends on:
+  serde
+
+Scenario: reported usage is the truth
+  Given a provider reporting a prompt of 5000 tokens while the local estimate was 4000
+  When the response is recorded
+  Then session_tokens is 5000, unmarked up
+
+Scenario: estimate replaces missing usage
+  Given no reported usage and a local estimate of 1000 tokens
+  When the response is recorded
+  Then session_tokens is 1100 (10 percent margin)
+
+Scenario: zero or lower usage is replaced by the estimate
+  Given a first reported prompt of 5000 then a reported prompt of 3000 without compaction in between, with an estimate of 5200
+  When the second response is recorded
+  Then session_tokens is 5720 (estimate with margin)
+
+Scenario: lower usage accepted after a compaction
+  Given a first reported prompt of 5000, a compaction noted, then a reported prompt of 800
+  When the second response is recorded
+  Then session_tokens is 800
+
+Scenario: added messages count with margin
+  Given a base of 5000 reported tokens
+  When messages of 100 and 50 estimated tokens are noted
+  Then session_tokens is 5165
+
+Scenario: added messages reset on new usage
+  Given pending added messages
+  When a new response is recorded
+  Then the pending added size is zero
+
+Scenario: cumulative per agent
+  Given two responses by `main` (3000+200 and 3500+300) and one by `sub1` (1000+100)
+  When cumulative is read
+  Then `main` is 7000, `sub1` is 1100 and the session total is 8100
+
+Scenario: fill rate
+  Given session_tokens 5000 and max 20000
+  When fill_permille is read
+  Then it is 250
+
+Scenario: estimate rounds up twice
+  Given 1001 characters at 2500 milli and a 10 percent margin
+  When estimate_tokens is called
+  Then the characters convert to 401 tokens (rounded up) and the margin gives 442 (rounded up)
+
+Tasks:
+  [ ] #3 Remplacer le test « estimate rounds up » par celui du Scenario corrigé (1001 caractères, 442).
+  [ ] #5 Tests manquants relevés par la validation : rapport `Some(0)` remplacé par l'estimation ; cumul qui ne diminue jamais, compaction comprise ; saturation du cumul ;
+      cumul avec prompt estimé majoré ; règle du rapport inférieur par agent ; @estimate_tokens près de la valeur maximale ; @UsageTracker::estimate_chars ;
+      @UsageTracker::set_session_estimate (remise à zéro des messages ajoutés).
+  [?] #4 Posé à l'implémentation : la règle du rapport inférieur au précédent s'applique par agent (le cumul de `sub1` l'exige), la base `SESSION` suit le dernier rapport global ;
+      complétion non rapportée comptée 0 ; prompt estimé compté majoré dans le cumul ; @UsageTracker::set_session_estimate remet à zéro les messages ajoutés ;
+      `fill_permille` avec `max` nul rend la valeur maximale ; `estimate_chars` conservé et déclaré dans `Accepts` (il consomme le paramètre `chars_per_token_milli` du tracker).
+      Un tracker sert une fenêtre de contexte, donc une session : un sous-agent qui a sa propre session a son propre tracker ; le cumul par agent d'un même tracker sert l'audit.
+  [ ] #1 Tests puis implémentation (rouverte : tests manquants, voir #3 et #5).
+  [?] #2 Le DSD ne dit pas si le cumul est persisté : @TokenCounters de ../session/state.sdd en porte le total ; l'agrégation par agent (sous-agents) est à brancher quand `delegation` existe.

@@ -1,0 +1,88 @@
+Spec: budget
+
+Purpose:
+  Seuils de la fenêtre de contexte : déclenchement de la compaction avant une requête, refus de démarrer une session dont le prompt système est trop gros,
+    refus d'un message utilisateur trop gros (`agent-sessions/context-window#FR-2`, `FR-6`, `FR-10`, `AC-2`, `AC-3`, `AC-6`).
+
+Owns:
+  ./budget.rs
+
+Exposes:
+  @Budget
+
+Accepts:
+  @Budget::new: `max` (taille maximale de contexte du modèle), `prompt` (taille du prompt de demande de résumé), `response_max` (`R`), `render_cap_chars` (plafond de rendu d'une sortie d'outil en caractères), tous en tokens sauf le dernier.
+  @Budget::with_chars_per_token_milli: caractères par token en millièmes (2500 par défaut, soit 2,5).
+  @Budget::needs_compaction: la taille `SESSION` en tokens de ce qui serait envoyé.
+  @Budget::check_startup: la taille `SYS`.
+  @Budget::check_user_message: la taille `SYS` et celle du message en tokens.
+
+Returns:
+  @Budget::render_cap_tokens: `T`, le plafond de rendu converti en tokens, arrondi au supérieur, au moins 1 si le plafond n'est pas nul.
+  @Budget::needs_compaction: vrai si `MAX - PROMPT - SESSION - 2R - T < 0`.
+  @Budget::check_startup, @Budget::check_user_message: succès ou @ContextError.
+
+Raises:
+  @ContextError::SystemTooLarge: `SYS > MAX - PROMPT - 3R - T`.
+  @ContextError::MessageTooLarge: `SYS + message` rendrait `needs_compaction` vrai.
+
+Must:
+  Les comparaisons se font sans soustraction qui déborde : `needs_compaction` équivaut à `PROMPT + SESSION + 2R + T > MAX` calculé par additions saturantes.
+  La compaction ne se déclenche pas à l'égalité (`MAX - PROMPT - SESSION - 2R - T == 0`) et se déclenche dès que la valeur devient négative.
+  @Budget::check_startup refuse `SYS` strictement supérieur à la borne `MAX - PROMPT - 3R - T` et accepte `SYS` égal à cette borne ; à la borne, une session réduite à `SYS + R` après compaction ne redéclenche pas @Budget::needs_compaction.
+  @Budget::check_user_message est équivalente à `needs_compaction(SYS + message)` rendue en erreur, sans effet de bord.
+  La conversion de `T` utilise un entier (millièmes de caractère par token) ; un `chars_per_token_milli` de zéro est refusé à la construction (`None`).
+  Si `MAX` est inférieur à la somme incompressible (`PROMPT + 3R + T`), @Budget::check_startup refuse toute valeur de `SYS`.
+
+Depends on:
+  ./error.sdd
+
+Scenario: no compaction at the boundary
+  Given max 10000, prompt 500, response max 1000 and render cap such that T is 400
+  When SESSION is 7100 (so the margin is exactly 0)
+  Then needs_compaction is false
+  And with SESSION 7101 it is true
+
+Scenario: worst case always fits
+  Given a budget and SESSION just below the threshold
+  When one response of size R then one tool result of size T are added
+  Then the summary request of size PROMPT and its response of size R still fit in MAX
+
+Scenario: startup refused when the system prompt is too big
+  Given a budget where MAX - PROMPT - 3R - T is 6000
+  When check_startup is called with SYS 6001 and then with SYS 6000
+  Then 6001 fails with SystemTooLarge naming 6001 and 6000, and 6000 succeeds
+
+Scenario: no compaction loop at the startup boundary
+  Given SYS equal to the startup bound
+  When the session is compacted to SYS + R
+  Then needs_compaction is false
+
+Scenario: oversized user message refused
+  Given SYS alone fits
+  When check_user_message is called with a message that makes the margin negative
+  Then it fails with MessageTooLarge and with a message that fits it succeeds
+
+Scenario: render cap converts with 2.5 characters per token
+  Given a render cap of 1000 characters and the default ratio
+  When render_cap_tokens is read
+  Then it is 400
+  And with a cap of 1001 characters it is 401
+
+Scenario: overflow-safe
+  Given sizes near the maximum of u64
+  When needs_compaction and check_startup are called
+  Then neither panics nor wraps
+
+Scenario: zero ratio refused
+  Given a ratio of zero
+  When with_chars_per_token_milli is called
+  Then it returns nothing
+
+Tasks:
+  [x] #1 Tests puis implémentation.
+  [ ] #4 Tests manquants : `MAX < PROMPT + 3R + T` sans débordement (borne rapportée 0) ; place disponible saturée à 0 dans @ContextError::MessageTooLarge ; remplacer
+      `worst_case_always_fits` par un test qui appelle @Budget::needs_compaction aux deux bornes (SESSION maximal sans compaction, puis ajout de R et de T, puis PROMPT et R).
+  [?] #3 Posé à l'implémentation : si `MAX < PROMPT + 3R + T`, @Budget::check_startup refuse toute valeur de `SYS` en rapportant une borne de 0 ; la place disponible de
+      @ContextError::MessageTooLarge vaut `MAX - PROMPT - 2R - T - SYS`.
+  [?] #2 Les tailles `MAX`, `PROMPT` et `R` viennent du profil de modèle (domaine `agents`) ; ce fichier les reçoit en nombres.

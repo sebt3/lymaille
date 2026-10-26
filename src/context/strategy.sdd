@@ -1,0 +1,79 @@
+Spec: strategy
+
+Purpose:
+  Traits remplaçables par l'hôte pour la production du résumé et le choix de ce qui est compacté, stratégie par défaut qui fait résumer la session intégrale, et digest de l'état hors fenêtre
+    (`agent-sessions/context-window#FR-3`, `FR-4`, `FR-7`, `AC-4`).
+
+Owns:
+  ./strategy.rs
+
+Exposes:
+  @Summarizer
+  @CompactionStrategy
+  @DefaultStrategy
+  @Digest
+
+Accepts:
+  @Summarizer::summarize: un texte de transcription (la session à résumer, raisonnement rejoué compris) et, optionnellement, le digest.
+  @CompactionStrategy::compact: l'historique courant (@History) et le @Digest.
+  @Digest::new: le nombre de tâches ouvertes et le nombre de Memory.
+
+Returns:
+  @Summarizer::summarize: le texte du résumé.
+  @CompactionStrategy::compact: les messages qui ouvrent le nouveau segment, dans l'ordre : une frontière `Compaction` puis le résumé.
+  @Digest::render: une ligne de texte anglais qui donne les deux nombres sans aucun contenu de todo ni de Memory.
+
+Raises:
+  @ContextError::PendingToolCall: l'historique se termine par un appel d'outil sans résultat.
+  @ContextError::Summarizer: échec du résumeur.
+  @ContextError::EmptySummary: résumé vide ou blanc.
+
+Must:
+  @Summarizer et @CompactionStrategy sont des traits asynchrones à futurs `Send`, `Send + Sync`, utilisables par l'hôte : le crate fournit @DefaultStrategy, pas de résumeur concret.
+  @DefaultStrategy envoie au résumeur la session intégrale, sans élagage ni extrait conservé ; le texte de transcription contient chaque message dans l'ordre, avec son rôle, et le raisonnement rejoué selon le @ReplayMode donné à la construction.
+  La session qui suit une compaction se compose du prompt système (inchangé, porté par le segment et non recopié ici) puis de la sortie : frontière `Compaction` suivie du résumé comme message utilisateur.
+  Le digest, s'il est retenu, est ajouté à la fin du message de résumé et ne contient que des nombres.
+  Aucune compaction ne tombe entre un appel d'outil et son résultat : un historique avec appel en attente est refusé avant tout appel au résumeur.
+  @DefaultStrategy ne modifie pas l'historique reçu ; elle rend les nouveaux messages, l'appelant remplace l'historique.
+  La compaction ne touche ni au scratchpad, ni à la todo, ni aux Memory : ces états ne sont pas des paramètres de la stratégie.
+
+Depends on:
+  ./error.sdd
+  ./replay.sdd
+  ../session/history.sdd
+  ../session/segment.sdd
+
+Scenario: default strategy sends the whole session
+  Given a history of four messages and a recording summarizer
+  When the default strategy compacts it
+  Then the summarizer received all four messages in order and the result is a Compaction boundary followed by the summary as a user message
+
+Scenario: reasoning follows the replay mode
+  Given an assistant message with reasoning, with replay mode AllTurns then None
+  When the transcript is built
+  Then the reasoning is present with AllTurns and absent with None
+
+Scenario: no compaction between a tool call and its result
+  Given a history ending with an assistant tool call that has no result
+  When compact is called
+  Then it fails with PendingToolCall and the summarizer was never called
+
+Scenario: digest carries counts only
+  Given a digest of 3 open tasks and 7 memories
+  When rendered and appended to the summary
+  Then the text contains 3 and 7 and none of the task or memory text
+
+Scenario: empty summary refused
+  Given a summarizer that returns blank text
+  When compact is called
+  Then it fails with EmptySummary
+
+Scenario: summarizer failure is reported
+  Given a summarizer that fails
+  When compact is called
+  Then it fails with Summarizer and the history given is unchanged
+
+Tasks:
+  [ ] #1 Tests (résumeur simulé) puis implémentation.
+  [?] #2 Le rôle du message de résumé (utilisateur) et son gabarit (préambule) sont posés ici ; le contenu du prompt de résumé relève du TBD de ./context.sdd.
+  [?] #3 Le résumeur reçoit du texte et non des messages structurés : l'hôte peut préférer des messages. À confirmer avec `agents`.

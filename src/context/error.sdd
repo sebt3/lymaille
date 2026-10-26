@@ -1,0 +1,33 @@
+Spec: error
+
+Purpose:
+  Erreur typée du module context.
+
+Owns:
+  ./error.rs
+
+Depends on:
+  thiserror
+
+Exposes:
+  @ContextError
+  @ContextResult
+
+Raises:
+  @ContextError::SystemTooLarge: le prompt système et les définitions de tools ne tiennent pas (`SYS` trop grand), porte `SYS` et la borne.
+  @ContextError::MessageTooLarge: un message utilisateur ne tient pas avec `SYS` seul, porte sa taille et la place disponible.
+  @ContextError::PendingToolCall: compaction demandée alors qu'un appel d'outil attend son résultat.
+  @ContextError::Summarizer: le résumeur a échoué, message texte.
+  @ContextError::EmptySummary: le résumeur a rendu un texte vide.
+
+Must:
+  @ContextError est `#[non_exhaustive]`, dérive `thiserror::Error`, chaque variante a un texte Display en anglais qui nomme la cause et les nombres en jeu (aucun contenu de session).
+  @ContextResult est l'alias `Result<T, ContextError>`.
+
+Scenario: display names the cause
+  Given each variant built with sample numbers
+  When formatted
+  Then the text names the cause and contains the numbers
+
+Tasks:
+  [x] #1 Tests puis implémentation.
