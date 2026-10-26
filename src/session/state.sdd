@@ -1,0 +1,90 @@
+Spec: state
+
+Purpose:
+  État persisté d'une session et sa (dé)sérialisation JSON : historique, segments, variables du scratchpad, source des fonctions, todo,
+    watchers, handles de runs en cours, compteurs de tokens, références (agent avec empreinte, ToolsetContext), versions de toolsets,
+    étiquettes, signaux de qualité, version de format (`agent-sessions/session#FR-2`, `agent-sessions/session#AC-1`, `agent-sessions/session#AC-5`).
+
+Owns:
+  ./state.rs
+
+Exposes:
+  @SessionState
+  @AgentRef
+  @TokenCounters
+
+Accepts:
+  @SessionState::new: un @SessionId, un @AgentRef (nom et empreinte de la définition), le nom du ToolsetContext, les versions de toolsets
+    (nom → version) et un @Timestamp de création.
+  @SessionState::to_json: produit le texte JSON.
+  @SessionState::from_json: lit un texte JSON.
+
+Returns:
+  @SessionState: identifiant, version de format (@FormatVersion), @History, segments (@Segment, dans l'ordre), variables (nom → @TaggedValue),
+    fonctions (nom → texte source), todo, watchers, handles de runs en cours (valeurs JSON opaques pour l'instant), @TokenCounters
+    (prompt, complétion, raisonnement), @AgentRef, nom du ToolsetContext, versions de toolsets, @Labels, signaux par tour (@TurnId → @RunSignals).
+
+Raises:
+  @SessionError::Serialization: JSON invalide ou valeur non sérialisable.
+  @SessionError::IncompatibleFormat: majeure de format différente, vérifiée avant toute autre lecture des champs.
+
+Must:
+  Un aller-retour @SessionState::to_json puis @SessionState::from_json rend un état égal, fonctions et variables comprises.
+  @SessionState::from_json lit d'abord la version de format et refuse une majeure différente sans interpréter le reste ; les champs
+    ajoutés par une mineure plus récente sont ignorés, les champs optionnels absents prennent leur valeur vide.
+  L'état ne porte que des noms et des références : jamais de secret, ni de jeton, ni d'endpoint résolu (`agent-sessions#CON-3`).
+  Les tables sont ordonnées par clé pour une sortie reproductible.
+  Les Memory ne font pas partie de cet état : elles se lisent par leur propre trait (`agent-sessions/modules#FR-2`).
+  La création pose la version @FormatVersion::CURRENT.
+
+Must not:
+  Écrire ou lire quoi que ce soit : le texte est rendu ou reçu, le stockage est l'affaire de @SessionStore.
+
+Depends on:
+  ./id.sdd
+  ./history.sdd
+  ./segment.sdd
+  ./format.sdd
+  ./tagged_value.sdd
+  ./label.sdd
+  ./signals.sdd
+  ./error.sdd
+  ../clock.sdd
+  serde
+  serde_json
+
+Scenario: full round trip
+  Given a state with history, two variables, one function source, a todo entry, token counters and labels
+  When serialized then deserialized
+  Then every field is equal to the original
+
+Scenario: variable types survive
+  Given variables holding a char, a blob and an integer
+  When the state is saved and restored
+  Then the restored variables are a char, a blob and an integer
+
+Scenario: newer minor with unknown field
+  Given a JSON document of format 1.9 carrying an unknown field
+  When read
+  Then it loads and the unknown field is ignored
+
+Scenario: different major refused before reading
+  Given a JSON document of format 2.0 with an otherwise invalid body
+  When read
+  Then it fails with IncompatibleFormat
+
+Scenario: no secret in the state
+  Given a state referencing a ToolsetContext by name
+  When serialized
+  Then the text contains the name and no credential field
+
+Scenario: absent optional fields default
+  Given a minimal JSON document of format 1.0 holding only identifier, agent and format
+  When read
+  Then empty history, tables and counters are used
+
+Tasks:
+  [ ] #1 Tests puis implémentation.
+  [?] #2 Types de la todo, des watchers et des handles de runs : définis par `modules` (todo) et `delegation` (watchers, `FR-14`).
+      Valeurs JSON opaques en attendant ; remplacer par des types nommés à ce moment, sans changer la version de format.
+  [?] #3 L'empreinte de la définition d'agent est une chaîne opaque fournie par l'hôte ou le domaine `agents` ; l'algorithme n'est pas fixé ici.

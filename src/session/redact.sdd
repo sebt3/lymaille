@@ -1,0 +1,65 @@
+Spec: redact
+
+Purpose:
+  Masquer mécaniquement les secrets que la librairie détient dans tout texte ou toute valeur JSON destinés aux événements
+    (`agent-sessions/session#FR-8`, `agent-sessions#CON-3`).
+
+Owns:
+  ./redact.rs
+
+Exposes:
+  @Redactor
+
+Accepts:
+  @Redactor::add_secret: une chaîne ; une chaîne vide est ignorée.
+  @Redactor::redact: un texte.
+  @Redactor::redact_json: une valeur `serde_json::Value`.
+
+Returns:
+  @Redactor::redact: le texte où chaque occurrence d'un secret est remplacée par `***`.
+  @Redactor::redact_json: la valeur où chaque chaîne (valeurs et clés d'objet) est masquée de même.
+
+Must:
+  Quand un secret en contient un autre, le plus long est masqué d'abord, pour ne laisser aucun reste.
+  Le masquage est idempotent.
+  Le `Debug` de @Redactor ne montre jamais un secret, seulement leur nombre.
+  @Redactor n'est ni sérialisable ni cloné vers l'état persisté.
+  Un texte sans secret est rendu inchangé.
+
+Must not:
+  Deviner qu'une valeur est secrète : seuls les secrets déclarés par @Redactor::add_secret sont masqués.
+
+Depends on:
+  serde_json
+
+Can modify:
+  /Cargo.toml: ajout de `serde_json` seulement.
+
+Scenario: a secret is masked everywhere
+  Given a redactor holding `tok-123`
+  When redacting `Bearer tok-123 and tok-123`
+  Then the result is `Bearer *** and ***`
+
+Scenario: longest secret first
+  Given secrets `abc` and `abcdef`
+  When redacting `xabcdefx`
+  Then the result is `x***x`
+
+Scenario: json strings and keys
+  Given a redactor holding `s3cr3t`
+  When redacting `{"s3cr3t": ["a s3cr3t b", 1]}`
+  Then the result is `{"***": ["a *** b", 1]}`
+
+Scenario: debug hides the secrets
+  Given a redactor holding `s3cr3t`
+  When formatted with Debug
+  Then the text does not contain `s3cr3t`
+
+Scenario: empty secret ignored
+  Given a redactor to which an empty secret is added
+  When redacting `hello`
+  Then the result is `hello`
+
+Tasks:
+  [ ] #1 Tests puis implémentation.
+  [?] #2 Les secrets de petite taille (un caractère) masquent trop : seuil minimal à décider avec le développeur principal.

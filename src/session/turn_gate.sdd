@@ -1,0 +1,55 @@
+Spec: turn_gate
+
+Purpose:
+  Garantir au plus un tour actif par session au sein d'un processus (`agent-sessions#NFR-2`, `agent-sessions/session#FR-4`),
+    sans détecter de conflit entre processus (`agent-sessions/session#DEC-1`).
+
+Owns:
+  ./turn_gate.rs
+
+Exposes:
+  @TurnGate
+  @TurnPermit
+
+Accepts:
+  @TurnGate::try_begin: un @SessionId.
+
+Returns:
+  @TurnGate::try_begin: un @TurnPermit si aucun tour n'est actif pour cette session.
+
+Raises:
+  @SessionError::TurnActive: un tour est déjà actif pour cette session.
+  @SessionError::Poisoned: le verrou interne est empoisonné.
+
+Must:
+  @TurnGate est partageable entre threads (clonable, état commun) ; des sessions différentes ne s'excluent pas.
+  Le @TurnPermit libère la session quand il est détruit, y compris à la suite d'une erreur ou d'une annulation.
+  @TurnGate::is_active dit si une session a un tour actif.
+  Aucune attente : un refus est immédiat.
+
+Depends on:
+  ./id.sdd
+  ./error.sdd
+
+Scenario: second turn is refused
+  Given a permit held for session `s1`
+  When try_begin is called for `s1`
+  Then it fails with TurnActive
+
+Scenario: other sessions are independent
+  Given a permit held for `s1`
+  When try_begin is called for `s2`
+  Then a permit is returned
+
+Scenario: dropping releases
+  Given a permit for `s1`
+  When it is dropped
+  Then try_begin for `s1` succeeds and is_active was true before the drop and is false after
+
+Scenario: concurrent attempts
+  Given eight threads calling try_begin for the same session at once
+  When they all run
+  Then exactly one obtains a permit
+
+Tasks:
+  [ ] #1 Tests puis implémentation.

@@ -1,0 +1,74 @@
+Spec: history
+
+Purpose:
+  Historique persisté d'une session : chaque message tel que le modèle l'a reçu ou produit, avec le raisonnement et son émetteur, les
+    appels d'outils, les sorties plafonnées de `rhai_pad` et de `skill`, et les frontières de segment
+    (`agent-sessions/session#FR-12`, `agent-sessions/session#FR-14`).
+
+Owns:
+  ./history.rs
+
+Exposes:
+  @Message
+  @ToolCall
+  @Reasoning
+  @History
+
+Accepts:
+  @History::push: un @Message.
+  @Message: `System`, `User`, `Assistant` (texte, @Reasoning optionnel, @ToolCall), `ToolResult` (identifiant d'appel, nom de tool, contenu
+    tel que reçu par le modèle, taille d'origine si tronqué) et `Boundary` (@BoundaryKind).
+  @ToolCall: identifiant, nom du tool, arguments JSON.
+  @Reasoning: l'émetteur (identifiant du fournisseur ou du modèle qui seul peut le rejouer) et le texte.
+
+Returns:
+  @History::messages: les messages dans l'ordre d'ajout.
+  @History::pending_tool_calls: les identifiants des appels d'outil de l'assistant qui n'ont pas encore de résultat.
+
+Raises:
+  @SessionError::PendingToolCall: @History::push_user_during_turn alors qu'un appel d'outil attend son résultat.
+
+Must:
+  L'historique n'est qu'ajouté : aucun message n'est modifié ni retiré par cette API.
+  @History::push_user_during_turn insère un message utilisateur reçu pendant un tour, mais jamais entre un `tool_call` et son
+    résultat : tant que des appels attendent leur résultat il rend @SessionError::PendingToolCall et n'ajoute rien ;
+    l'orchestrateur du tour réessaie après les résultats (`agent-sessions/session#FR-14`, `AC-9`).
+  Un message `ToolResult` retire l'appel correspondant de la liste des appels en attente ; un résultat sans appel connu est accepté
+    mais ne retire rien (reprise d'un historique partiel).
+  Les contenus et le raisonnement sont conservés tels quels, sans réécriture.
+  Se sérialise et se désérialise à l'identique ; les appels en attente se recalculent depuis les messages (aucun état caché).
+
+Depends on:
+  ./segment.sdd
+  ./error.sdd
+  serde
+  serde_json
+
+Scenario: messages keep their order and content
+  Given a user message, an assistant message with reasoning and a tool call, and its result
+  When serialized then deserialized
+  Then order, reasoning emitter and tool output as received are identical
+
+Scenario: user message waits for tool results
+  Given an assistant message with a tool call whose result is missing
+  When push_user_during_turn is called
+  Then it fails with PendingToolCall and the history is unchanged
+
+Scenario: user message accepted after the result
+  Given the same call with its result now pushed
+  When push_user_during_turn is called
+  Then the message is appended after the result
+
+Scenario: pending calls derive from messages
+  Given an assistant message with two tool calls and one result
+  When pending_tool_calls is read
+  Then only the call without result is listed
+  And after a round trip through JSON the answer is the same
+
+Scenario: truncated output keeps the original size
+  Given a tool result truncated from 5000 characters
+  When read back
+  Then the content is the truncated text and the original size 5000 is kept
+
+Tasks:
+  [ ] #1 Tests puis implémentation.

@@ -1,0 +1,60 @@
+Spec: lymaille
+
+Platform: Rust edition 2024, toolchain stable 1.99.0, rust-version 1.95.0
+
+Purpose:
+  Librairie Rust pure qui conduit un LLM comme agent de travail durable : sessions persistantes, scratchpad Rhai,
+    toolsets découverts à la demande, délégation à des sous-agents. Destinée à vanyline, miryad-core et à
+    l'agent Matrix. Publiée sous licence BSD-3-Clause. Le domaine est décrit par ./dsd/agent-sessions.md et ses Solutions.
+
+Structure:
+  ./Cargo.toml: manifeste et table `[workspace.lints]` du harnais
+  ./src: code de la crate, une spec `.sdd` par fichier source
+  ./scripts/check: point d'entrée unique du harnais de qualité
+  ./dsd: documents de domaine et Solutions (source des exigences)
+  ./spikes: bancs d'essai jetables, hors crate, jamais une dépendance
+
+Owns:
+  ./Cargo.toml
+  ./Cargo.lock
+  ./clippy.toml
+  ./rustfmt.toml
+  ./rust-toolchain.toml
+  ./scripts/check
+  ./README.md
+  ./LICENSE
+
+References:
+  ./.specdd/bootstrap.project.md
+  ./dsd/agent-sessions.md
+  ./src/lib.sdd
+  ./src/clock.sdd
+  ./src/session/session.sdd
+
+Must:
+  Rester une librairie pure : aucune E/S de stockage, de processus, d'environnement ni d'horloge système en direct
+    (`agent-sessions#CON-1`, `agent-sessions#CON-3`, `agent-sessions#NFR-1`). Le harnais le fait respecter par les
+    `disallowed-*` de ./clippy.toml.
+  Passer `scripts/check` sans exception injustifiée avant qu'une entrée de `Tasks` passe à `[x]` (`agent-sessions#NFR-3`).
+  Rendre l'API publique conforme au harnais : toute énumération et toute structure publique est `#[non_exhaustive]` et
+    se construit par un constructeur ; chaque élément public est documenté en anglais.
+  Épingler les versions des dépendances ici seulement (règle de `.specdd/bootstrap.project.md`) ; les autres specs
+    nomment la dépendance sans version.
+
+Must not:
+  Ajouter une dépendance qu'aucune spec ne nomme dans `Depends on`.
+  Modifier la table `[workspace.lints]`, ./clippy.toml, ./rustfmt.toml, ./rust-toolchain.toml ni ./scripts/check
+    sans demande explicite du développeur principal.
+
+Forbids:
+  /spikes
+
+Tasks:
+  [x] #0 Poser le squelette du crate (harnais à la racine, toolchain, licence, README).
+  [?] #1 `deny.toml` (licences, avis, sources) et `scripts/mutants`, report du mécanisme de canaris de
+      ./spikes/lint-harness : à écrire quand les premières dépendances sont connues (TBD de `agent-sessions`, Open Issues).
+  [?] #2 Épingler dans ce manifeste les versions de `serde`, `serde_json`, `thiserror`, `tokio` et `tokio-util` posées
+      par les specs de `session` : l'implémenteur les ajoute avec `cargo add`, le développeur principal confirme les
+      majeures retenues.
+  [?] #3 Le premier jalon publiera-t-il `lymaille` en 0.1 avec les domaines `session` seul, ou attend-on `scratchpad` ?
+      Lever `publish = false` à ce moment.

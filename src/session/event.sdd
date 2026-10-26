@@ -1,0 +1,61 @@
+Spec: event
+
+Purpose:
+  Événements observables de la librairie et canal par lequel l'hôte les reçoit : usage de tokens, changements de todo et de
+    Memory, scripts, appels MCP, dépassements de délai, réessais d'inférence, cycle de vie des tours
+    (`agent-sessions#FR-3`, `agent-sessions/session#FR-6`).
+
+Owns:
+  ./event.rs
+
+Exposes:
+  @Event
+  @EventKind
+  @EventSink
+  @RecordingSink
+  @NullSink
+
+Accepts:
+  @Event::new: une session, un instant (@Timestamp) et un @EventKind.
+  @EventSink::emit: un @Event, sans valeur de retour.
+
+Returns:
+  @RecordingSink::events: une copie des événements reçus, dans l'ordre d'émission.
+
+Must:
+  @EventKind est `#[non_exhaustive]` et couvre : usage de tokens (prompt, complétion), todo modifiée, Memory modifiée (niveau et
+    identifiant seulement, jamais le corps), script exécuté (@ScriptRecord), appel MCP (@McpRecord), dépassement de délai
+    (`Overrun`, avec la durée écoulée), réessai d'inférence (numéro, délai en millisecondes, classe de l'erreur), début de tour,
+    fin de tour (issue de type @Outcome, réponse complète), fin de run.
+  @Event se sérialise en JSON et se désérialise à l'identique (l'hôte peut le journaliser).
+  @EventSink::emit ne bloque pas et ne peut pas échouer vers la librairie ; il est utilisable depuis plusieurs threads.
+  @RecordingSink conserve l'ordre d'émission ; @NullSink jette tout.
+  Aucun événement ne porte de secret : les enregistrements viennent de ./audit.sdd.
+
+Depends on:
+  ./audit.sdd
+  ./id.sdd
+  ./signals.sdd
+  ../clock.sdd
+  serde
+
+Scenario: events keep emission order
+  Given a @RecordingSink and three events emitted
+  When events is read
+  Then the three events come back in the same order
+
+Scenario: event round trips through JSON
+  Given an @Event of each kind
+  When serialized then deserialized
+  Then it equals the original
+
+Scenario: recording sink is shareable across threads
+  Given a @RecordingSink shared by four threads each emitting ten events
+  When all finish
+  Then forty events were recorded
+
+Tasks:
+  [ ] #1 Tests puis implémentation.
+  [?] #2 Variante de fragment de streaming (TBD de `agent-sessions/session`, Questions ouvertes) : non incluse. Si le choix
+      est « fragments comme événements », ajouter une variante `TextDelta`.
+  [?] #3 Événements de délégation (démarrage, fin de sous-agent, watcher déclenché) : définis par le domaine `delegation`.

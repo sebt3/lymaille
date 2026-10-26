@@ -1,0 +1,21 @@
+Spec: lib
+
+Purpose:
+  Racine de la crate (./lib.rs) : commentaire de crate, déclaration des modules et ré-exports publics. Aucune logique.
+
+Owns:
+  ./lib.rs
+
+References:
+  ../lymaille.sdd
+  ./clock.sdd
+  ./session/session.sdd
+
+Must:
+  Déclarer chaque module de ./ et de ./session et ré-exporter à la racine les types publics qu'une spec enfant déclare
+    dans son `Exposes`, rien d'autre.
+  Porter un commentaire de crate en anglais (`missing_crate_level_docs`) renvoyant au domaine.
+  Ne contenir ni fonction ni type : tout comportement vit dans un fichier à spec propre.
+
+Tasks:
+  [ ] #1 Ajouter les déclarations `mod` et les `pub use` au fil des specs enfants livrées.

@@ -1,0 +1,65 @@
+Spec: label
+
+Purpose:
+  Étiquettes ajoutées par l'hôte à une session, un tour ou un run, pendant ou après la session ; entrées ajoutées, jamais modifiées
+    (`agent-sessions/session#FR-15`, `agent-sessions#DEC-13`, `agent-sessions/session#AC-10`).
+
+Owns:
+  ./label.rs
+
+Exposes:
+  @Label
+  @LabelTarget
+  @LabelAuthor
+  @Labels
+
+Accepts:
+  @Labels::add: un libellé (texte non vide du vocabulaire de l'hôte), une cible (@LabelTarget : session, tour ou run), un
+    émetteur (@LabelAuthor : humain ou automatique) et une horloge (@Clock).
+
+Returns:
+  @Labels::iter: toutes les étiquettes dans l'ordre d'ajout.
+  @Labels::for_target: les étiquettes d'une cible.
+
+Must:
+  La date de l'étiquette vient de l'horloge injectée, posée par la librairie ; l'hôte ne la fournit pas.
+  @Labels::add ajoute toujours : une seconde étiquette sur la même cible conserve la première, et aucune étiquette
+    existante n'est modifiée ni supprimée.
+  Un libellé vide est refusé (`None`).
+  @Labels se sérialise et se désérialise à l'identique, ordre compris.
+  La librairie n'impose aucun vocabulaire : le libellé est du texte libre.
+
+Depends on:
+  ./id.sdd
+  ../clock.sdd
+  serde
+
+Scenario: label recorded with author and date
+  Given a manual clock at 1000 milliseconds
+  When a human adds label `good` to a run
+  Then the label has author Human, date 1000 and target that run
+
+Scenario: second label keeps the first
+  Given a label already on a session
+  When another label is added to the same session at a later time
+  Then both labels exist, in order, with their own dates
+
+Scenario: labels after session end
+  Given labels serialized with the session
+  When restored and a new label added
+  Then the earlier labels are intact with their author and date
+
+Scenario: filter by target
+  Given labels on the session, on turn 2 and on run `r1`
+  When for_target is called for turn 2
+  Then only the turn 2 label is returned
+
+Scenario: empty label refused
+  Given an empty label text
+  When add is called
+  Then nothing is added
+
+Tasks:
+  [ ] #1 Tests puis implémentation.
+  [?] #2 Granularité et vocabulaire à confirmer (ASSUMPTION du DSD) : le vocabulaire est libre ici ; une énumération hôte
+      resterait compatible.

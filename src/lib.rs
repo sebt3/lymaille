@@ -2,3 +2,9 @@
 //! It provides persistent session management, a Rhai scratchpad for
 //! agent state, and lazily discovered MCP toolsets.
 //! See `dsd/agent-sessions.md` for the full design.
+
+mod clock;
+mod session;
+
+pub use clock::{Clock, ManualClock, SystemClock, Timestamp};
+pub use session::{RunId, SessionError, SessionId, SessionResult, TurnId};

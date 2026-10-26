@@ -1,0 +1,58 @@
+Spec: tagged_value
+
+Purpose:
+  Valeur de variable du scratchpad étiquetée par son type réel, pour que la restauration rende un type identique là où JSON
+    ne distingue pas (`char`, `blob`, entier et flottant) (`agent-sessions/session#FR-9`, `agent-sessions/session#AC-5`).
+
+Owns:
+  ./tagged_value.rs
+
+Exposes:
+  @TaggedValue
+
+Accepts:
+  @TaggedValue: `Unit`, `Bool`, `Int` (i64), `Float` (f64), `Char`, `String`, `Blob` (octets), `Array`, `Map` (table ordonnée par clé).
+
+Must:
+  La sérialisation JSON étiquette chaque valeur par un champ de type explicite (`{"type": "char", "value": "x"}`) : un `char` et une
+    chaîne d'un caractère, un entier et un flottant de même valeur, un `blob` et un tableau d'entiers ne se confondent jamais après un aller-retour.
+  Un aller-retour sérialisation puis désérialisation rend une valeur égale, imbriquée comprise.
+  Un `Float` non fini (NaN, infini) n'est pas représentable en JSON : sa sérialisation échoue avec une erreur de sérialisation,
+    elle ne rend pas `null` en silence ; l'appelant l'exclut avec l'avertissement de `agent-sessions/scratchpad#FR-7`.
+  Un `Map` garde un ordre stable (par clé) pour une sérialisation reproductible.
+  Une étiquette de type inconnue à la lecture est une erreur, pas une valeur par défaut.
+
+Depends on:
+  serde
+  serde_json
+
+Scenario: char, blob and integer keep their type
+  Given a char `x`, a blob of three bytes and the integer 7
+  When serialized then deserialized
+  Then the values are a char, a blob and an integer, equal to the originals
+
+Scenario: ambiguous pairs stay distinct
+  Given the string `x` and the char `x`, the integer 1 and the float 1.0
+  When each is round tripped
+  Then each comes back as its own type
+
+Scenario: nested values
+  Given a map holding an array of a char and a blob
+  When round tripped
+  Then the nested structure is equal
+
+Scenario: non finite float refused
+  Given a float NaN
+  When serialized
+  Then it fails with an error and nothing is written as `null`
+
+Scenario: unknown tag refused
+  Given the JSON `{"type": "decimal", "value": "1.5"}`
+  When deserialized
+  Then it fails
+
+Tasks:
+  [ ] #1 Tests puis implémentation.
+  [?] #2 Encodage du `blob` : tableau d'entiers JSON (aucune dépendance, volumineux) ou base64 (dépendance à nommer). Posé : tableau d'entiers.
+  [?] #3 Types `Dynamic` supplémentaires (horodatages, décimaux selon les features de `vynil-core`) : TBD du DSD, non couverts.
+  [?] #4 Le passage entre `rhai::Dynamic` et @TaggedValue vit dans `scratchpad` : cette spec ne dépend pas de Rhai.

@@ -1,0 +1,42 @@
+Spec: backoff
+
+Purpose:
+  Calendrier des délais de réessai après une erreur transitoire du moteur d'inférence : départ à 1 s, doublement à chaque
+    réessai, plafond de cinq minutes, sans limite de nombre (`agent-sessions#FR-6`, `agent-sessions/session#FR-7`).
+
+Owns:
+  ./backoff.rs
+
+Exposes:
+  @Backoff
+
+Returns:
+  @Backoff::next_delay: le délai à attendre avant le prochain réessai, puis avance le calendrier.
+  @Backoff::attempts: le nombre de délais déjà rendus.
+
+Must:
+  La suite des délais rendus est 1 s, 2 s, 4 s, 8 s, 16 s, 32 s, 64 s, 128 s, 256 s, puis 300 s indéfiniment.
+  @Backoff::reset ramène le calendrier à 1 s et le compteur à zéro (un appel d'inférence réussi).
+  Aucune attente n'est faite ici : le type calcule des durées, l'attente annulable est dans ./cancel.sdd.
+  Aucun débordement, aucune panique, quel que soit le nombre d'appels.
+
+Depends on:
+  std::time::Duration
+
+Scenario: delays double up to the cap
+  Given a new @Backoff
+  When next_delay is called eleven times
+  Then the delays are 1, 2, 4, 8, 16, 32, 64, 128, 256, 300 and 300 seconds
+
+Scenario: reset restarts the schedule
+  Given a @Backoff that has produced five delays
+  When reset is called
+  Then the next delay is 1 second and attempts is 0
+
+Scenario: very many attempts never overflow
+  Given a new @Backoff
+  When next_delay is called one hundred thousand times
+  Then the last delay is 300 seconds
+
+Tasks:
+  [ ] #1 Tests puis implémentation.

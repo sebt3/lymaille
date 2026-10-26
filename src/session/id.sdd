@@ -1,0 +1,58 @@
+Spec: id
+
+Purpose:
+  Identifiants typés de session, de tour et de run, pour qu'une étiquette, un signal ou un handle ne confonde pas deux espèces d'identifiant.
+
+Owns:
+  ./id.rs
+
+Exposes:
+  @SessionId
+  @TurnId
+  @RunId
+
+Accepts:
+  @SessionId::new, @RunId::new: une chaîne non vide.
+  @TurnId::new: un entier non signé (rang du tour dans la session, à partir de 1).
+
+Returns:
+  @SessionId::as_str, @RunId::as_str: la chaîne.
+  @TurnId::get: l'entier.
+  @TurnId::next: le tour suivant (saturant).
+
+Must:
+  Chaque type est un nouveau type opaque, comparable, ordonnable, hachable, cloneable, avec `Display`, et se sérialise en
+    la valeur nue (chaîne ou nombre), sans enveloppe.
+  Une chaîne vide est refusée à la construction : les constructeurs de chaîne rendent `Option<Self>`, `None` pour le vide.
+
+Depends on:
+  serde
+  serde_json: en dev-dependency déjà présente, pour les tests
+
+Scenario: empty identifiers are refused
+  Given an empty string
+  When a @SessionId or a @RunId is built from it
+  Then no identifier is produced
+
+Scenario: identifiers serialize bare
+  Given @SessionId `abc` and @TurnId 3
+  When serialized to JSON
+  Then the texts are `"abc"` and `3`
+
+Scenario: deserialization refuses the empty identifier
+  Given the JSON texts `"abc"` and `""`
+  When deserialized as @SessionId and as @RunId
+  Then `"abc"` gives the identifier and `""` fails
+  And a @TurnId deserializes from a bare number
+
+Scenario: turn ids are successive
+  Given @TurnId 1
+  When next is called
+  Then it is 2
+  And next of the maximum value is the maximum value
+
+Tasks:
+  [x] #1 Tests puis implémentation.
+  [ ] #4 Désérialisation validante de @SessionId et @RunId (nécessaire à @SessionState), voir le Scenario correspondant.
+  [?] #3 Choix faits à l'implémentation : @TurnId::new accepte 0 ; @TurnId est copiable.
+  [?] #2 Les identifiants sont-ils générés par la librairie (UUID, dépendance) ou toujours fournis par l'hôte ? Posé : fournis par l'hôte, aucune dépendance.

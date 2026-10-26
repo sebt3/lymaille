@@ -1,0 +1,50 @@
+Spec: error
+
+Purpose:
+  Erreur typée unique du module session. Nommée @SessionError : le lint `error_impl_error` interdit un type nommé `Error`.
+
+Owns:
+  ./error.rs
+
+Depends on:
+  thiserror
+
+Can modify:
+  /Cargo.toml: ajout de la dépendance `thiserror` seulement.
+
+Exposes:
+  @SessionError
+  @SessionResult
+
+Raises:
+  @SessionError::Store: échec du stockage de l'hôte, message texte.
+  @SessionError::Serialization: état non (dé)sérialisable, message texte.
+  @SessionError::IncompatibleFormat: version majeure de format différente, porte les versions enregistrée et courante.
+  @SessionError::TurnActive: un tour est déjà actif pour la session, porte l'identifiant.
+  @SessionError::PendingToolCall: un message utilisateur ne peut s'insérer entre un appel d'outil et son résultat.
+  @SessionError::Poisoned: un verrou interne empoisonné.
+
+Must:
+  @SessionError est `#[non_exhaustive]` et dérive `thiserror::Error` ; chaque variante a un texte `Display` en anglais.
+  @SessionResult est l'alias `Result<T, SessionError>`.
+  Aucun texte d'erreur ne reprend le contenu d'un message ou d'une valeur de session : seulement des identifiants et des
+    versions (`agent-sessions#CON-3`).
+  Les variantes `Store` et `Serialization` ne portent qu'un message texte produit par l'appelant, jamais une source qui
+    contiendrait des données de session.
+
+  Les textes Display sont : `session store failed: {m}`, `session serialization failed: {m}`,
+    `incompatible session format: saved version M.m, current version M.m`, `a turn is already active for session {id}`,
+    `a user message cannot be inserted between a tool call and its result`, `an internal lock was poisoned`.
+
+Scenario: display texts are stable
+  Given each variant built with sample data
+  When it is formatted with Display
+  Then the text matches the documented wording
+  And none contains message or value content of a session
+
+Tasks:
+  [x] #1 Tests des textes Display, puis l'énumération.
+  [?] #3 `IncompatibleFormat` porte quatre entiers (majeure et mineure enregistrées et courantes) en attendant `FormatVersion` ;
+      le remplacer par ce type au lot `format`.
+  [?] #2 Les erreurs d'inférence (transitoire, permanente, dépassement de contexte, `agent-sessions#FR-6`) se classent
+      dans le module `agents`, pas ici : confirmer.

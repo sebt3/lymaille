@@ -1,0 +1,48 @@
+Spec: format
+
+Purpose:
+  Version du format de session et règle de compatibilité à la restauration : les évolutions mineures n'ajoutent que des champs
+    optionnels, seule une version majeure incompatible refuse la restauration (`agent-sessions/session#FR-10`).
+
+Owns:
+  ./format.rs
+
+Exposes:
+  @FormatVersion
+  @FormatVersion::CURRENT
+
+Accepts:
+  @FormatVersion::new: une majeure et une mineure.
+  @FormatVersion::check: la version enregistrée, comparée à @FormatVersion::CURRENT.
+
+Raises:
+  @SessionError::IncompatibleFormat: la majeure enregistrée diffère de la majeure courante.
+
+Must:
+  @FormatVersion::CURRENT vaut 1.0 pour le premier jalon.
+  Une mineure enregistrée plus récente ou plus ancienne que la courante est acceptée, la majeure égale.
+  Une majeure enregistrée différente, plus ancienne ou plus récente, est refusée avec les deux versions dans l'erreur.
+  Se sérialise en un objet `{"major": n, "minor": n}` ; un champ inconnu est ignoré à la lecture.
+
+Depends on:
+  ./error.sdd
+  serde
+
+Scenario: same version accepted
+  Given a saved version 1.0
+  When checked
+  Then it is accepted
+
+Scenario: newer minor accepted
+  Given a saved version 1.7
+  When checked
+  Then it is accepted
+
+Scenario: different major refused
+  Given a saved version 2.0 and then 0.9
+  When checked
+  Then both fail with IncompatibleFormat naming both versions
+
+Tasks:
+  [ ] #1 Tests puis implémentation.
+  [?] #2 Faut-il une migration entre majeures plutôt qu'un refus sec ? Le DSD dit « refuse » : posé tel quel, à rouvrir à la première majeure.

@@ -1,0 +1,64 @@
+Spec: store
+
+Purpose:
+  Trait de stockage de session que l'hôte implémente, et un stockage en mémoire pour les tests et les hôtes de démonstration
+    (`agent-sessions/session#FR-1`, `agent-sessions/session#DEC-1`, `agent-sessions#NFR-1`).
+
+Owns:
+  ./store.rs
+
+Exposes:
+  @SessionStore
+  @InMemoryStore
+
+Accepts:
+  @SessionStore::load: un @SessionId.
+  @SessionStore::save: un @SessionState.
+
+Returns:
+  @SessionStore::load: l'état s'il existe, sinon rien.
+  @SessionStore::save: rien en cas de succès.
+
+Raises:
+  @SessionError::Store: échec du stockage de l'hôte.
+  @SessionError::Poisoned: verrou interne de @InMemoryStore empoisonné.
+
+Must:
+  @SessionStore est un `load` et un `save` simples, sans jeton de version ni détection de conflit entre processus ; le dernier
+    `save` l'emporte (`agent-sessions/session#DEC-1`).
+  Les deux opérations sont asynchrones, sans exiger un type de futur boxé ni une dépendance de macro ; le futur rendu est `Send`.
+  @SessionStore est utilisable derrière un pointeur partagé entre threads.
+  @InMemoryStore stocke l'état sérialisé en JSON (jamais l'objet vivant), pour que ce qu'on recharge passe par exactement le même
+    format qu'un vrai stockage ; chaque `save` remplace l'état précédent du même identifiant.
+  @InMemoryStore n'effectue aucune E/S.
+
+Depends on:
+  ./state.sdd
+  ./id.sdd
+  ./error.sdd
+
+Scenario: save then load restores the state
+  Given an @InMemoryStore and a state with history, variables and functions
+  When the state is saved then loaded by identifier
+  Then the loaded state equals the original
+
+Scenario: unknown session
+  Given an empty store
+  When load is called for an unknown identifier
+  Then nothing is returned and there is no error
+
+Scenario: last save wins
+  Given two different states saved under the same identifier
+  When the session is loaded
+  Then the last saved state is returned
+
+Scenario: store holds serialized form
+  Given a state saved in the store
+  When a later change is made to the original object without saving
+  Then the stored state is unaffected
+
+Tasks:
+  [ ] #1 Tests (exécuteur tokio de test) puis implémentation.
+  [?] #2 Le trait ne prévoit ni liste, ni suppression, ni recherche de sessions : relève de l'hôte (`agent-sessions#CON-1`). Confirmer
+      qu'aucune opération de liste n'est attendue de la librairie (reprise d'une session par identifiant seulement).
+  [?] #3 Choix du `async fn` natif et de la généricité sur le stockage contre `Box<dyn ...>` : posé générique, sans objet dynamique.

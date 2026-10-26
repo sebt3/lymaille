@@ -1,0 +1,59 @@
+Spec: cancel
+
+Purpose:
+  Handle d'annulation rendu à l'hôte au lancement d'un tour ou d'un run, et attente annulable utilisée pendant le backoff
+    (`agent-sessions#FR-4`, `agent-sessions/session#FR-5`, `agent-sessions/session#FR-7`).
+
+Owns:
+  ./cancel.rs
+
+Exposes:
+  @CancelHandle
+  @SleepOutcome
+
+Returns:
+  @CancelHandle::is_cancelled: l'état d'annulation.
+  @CancelHandle::sleep: @SleepOutcome::Elapsed si la durée s'est écoulée, @SleepOutcome::Cancelled si l'annulation est arrivée avant.
+
+Must:
+  Les clones d'un @CancelHandle partagent le même état : annuler l'un annule tous les autres, y compris ceux dérivés par
+    @CancelHandle::child (annuler le parent annule l'enfant, pas l'inverse).
+  Annuler est idempotent, immédiat et ne bloque pas.
+  @CancelHandle::cancelled est un futur qui se termine quand l'annulation a eu lieu (immédiatement si déjà annulé).
+  @CancelHandle::sleep rend @SleepOutcome::Cancelled dès l'annulation, sans attendre la fin de la durée ; une annulation
+    déjà faite rend @SleepOutcome::Cancelled sans attendre.
+  Ne modifie aucun autre état : annuler pendant un backoff ne laisse rien dans l'historique (`agent-sessions/session#AC-3`).
+
+Depends on:
+  tokio
+  tokio-util
+
+Can modify:
+  /Cargo.toml: ajout de `tokio` (features `rt`, `sync`, `time`, `macros`; `test-util` en dev-dependency) et de `tokio-util` seulement.
+
+Scenario: sleep elapses
+  Given a handle that is not cancelled and paused tokio time
+  When sleep of 2 seconds is awaited and time advances by 2 seconds
+  Then it returns Elapsed
+
+Scenario: cancel interrupts sleep
+  Given a handle sleeping for 300 seconds
+  When the handle is cancelled after 1 second
+  Then sleep returns Cancelled after about 1 second, not 300
+
+Scenario: clones and children
+  Given a handle, a clone and a child
+  When the clone is cancelled
+  Then all three report is_cancelled
+  And cancelling only the child leaves the parent not cancelled
+
+Scenario: cancelled is idempotent
+  Given a cancelled handle
+  When cancel is called again and cancelled is awaited
+  Then nothing fails and the future completes at once
+
+Tasks:
+  [ ] #1 Tests (temps tokio en pause), puis implémentation sur le jeton de `tokio-util`.
+  [?] #2 Le pont vers `vynil_core::cancel::CancelToken`, lu par `vynil_core::rt::block_on` pendant un appel de script
+      (shopping-list vynil-core, jeton d'annulation), s'écrit avec le domaine `scratchpad` : prévoir une conversion ou un
+      second jeton. `tokio-util` est le choix par défaut, à confirmer.

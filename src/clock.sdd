@@ -1,0 +1,69 @@
+Spec: clock
+
+Purpose:
+  Horloge injectée : toute date ou durée mesurée par la crate passe par @Clock, jamais par `SystemTime::now` ni
+    `Instant::now` en direct (`agent-sessions#NFR-1`, `disallowed-methods` de ../clippy.toml).
+
+Owns:
+  ./clock.rs
+
+References:
+  ../lymaille.sdd
+  ../dsd/agent-sessions.md
+
+Exposes:
+  @Timestamp
+  @Clock
+  @SystemClock
+  @ManualClock
+
+Accepts:
+  @Timestamp::from_millis: millisecondes depuis l'époque Unix, UTC.
+  @ManualClock::new: un @Timestamp de départ.
+
+Returns:
+  @Timestamp::as_millis: le nombre de millisecondes.
+  @Clock::now: l'instant courant.
+
+Must:
+  @Timestamp est un entier de millisecondes depuis l'époque Unix, copiable, ordonnable, et se sérialise en un simple nombre.
+  @Clock est utilisable derrière un pointeur partagé entre threads.
+  @SystemClock lit l'horloge système à un seul endroit, par un `#[expect(clippy::disallowed_methods, reason = "...")]`
+    sur la fonction la plus étroite ; un instant antérieur à l'époque rend `Timestamp(0)`.
+  @ManualClock est déterministe : @ManualClock::now rend la valeur posée, @ManualClock::advance l'avance de la durée donnée
+    (saturante, sans débordement), @ManualClock::set la remplace ; partageable entre threads.
+
+Must not:
+  Lire l'horloge système ailleurs que dans @SystemClock.
+
+Depends on:
+  serde
+  serde_json: en dev-dependency, pour le test de sérialisation seulement
+
+Can modify:
+  /Cargo.toml: ajout de `serde` (feature `derive`) et de `serde_json` (en dev-dependency) seulement.
+
+Scenario: manual clock returns the value it was given
+  Given a @ManualClock created at 1000 milliseconds
+  When the clock is read
+  Then it returns a @Timestamp of 1000 milliseconds
+
+Scenario: manual clock advances
+  Given a @ManualClock at 1000 milliseconds
+  When it is advanced by 500 milliseconds
+  Then it returns 1500 milliseconds
+  And advancing past the maximum saturates instead of overflowing
+
+Scenario: system clock is after 2020
+  Given a @SystemClock
+  When it is read
+  Then the @Timestamp is greater than `1577836800000`
+
+Scenario: timestamp serializes as a plain number
+  Given a @Timestamp of 42 milliseconds
+  When it is serialized to JSON
+  Then the JSON text is `42`
+  And it deserializes back to the same value
+
+Tasks:
+  [x] #1 Écrire les tests des quatre scénarios, les voir échouer, puis implémenter @Timestamp, @Clock, @SystemClock, @ManualClock.

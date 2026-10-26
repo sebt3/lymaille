@@ -1,0 +1,73 @@
+Spec: notice
+
+Purpose:
+  Messages système signalant au LLM, à la restauration, ce qui a changé depuis la sauvegarde : version majeure de toolset différente,
+    définition d'agent modifiée, toolset plus ancien que celui de la sauvegarde, fonctions cassées. La session reprend toujours avec les
+    définitions courantes (`agent-sessions/session#FR-10`, `agent-sessions/session#FR-3`, `agent-sessions/session#AC-2`, `agent-sessions/session#AC-6`).
+
+Owns:
+  ./notice.rs
+
+Exposes:
+  @Provenance
+  @restore_notices
+
+Accepts:
+  @Provenance::new: l'empreinte de la définition d'agent et les versions de toolsets (nom → `major.minor.patch`).
+  @restore_notices: la @Provenance enregistrée, la @Provenance courante et la liste des noms de fonctions dont la recompilation a échoué.
+
+Returns:
+  @restore_notices: une liste de textes de message système, en anglais, vide si rien n'a changé.
+
+Must:
+  Un texte par changement détecté, dans cet ordre : définition d'agent, puis toolsets par nom croissant, puis fonctions cassées.
+  Définition d'agent : signalée seulement si les empreintes diffèrent.
+  Toolset : majeure différente → message qui nomme le toolset et les deux versions ; version courante strictement plus ancienne que
+    l'enregistrée → message de rétrogradation qui nomme les deux versions ; mineure ou correctif plus récent, même majeure → aucun message.
+  Toolset présent à la sauvegarde et absent maintenant, ou l'inverse : signalé en nommant le toolset.
+  Fonctions cassées : un seul message qui liste leurs noms, dans l'ordre reçu.
+  Aucun texte ne reprend de contenu de session ni de secret : noms, empreintes et versions seulement.
+  Une version qui ne se lit pas comme `major.minor.patch` est comparée comme chaîne : différente → message, jamais de panique.
+
+Depends on:
+  serde
+
+Scenario: nothing changed
+  Given identical provenances and no broken function
+  When restore_notices is called
+  Then the list is empty
+
+Scenario: agent definition changed
+  Given different agent fingerprints
+  When restore_notices is called
+  Then one message states that the agent definition changed
+
+Scenario: major toolset change
+  Given toolset `k8s` at 1.4.0 saved and 2.0.0 now
+  When restore_notices is called
+  Then one message names `k8s`, 1.4.0 and 2.0.0
+
+Scenario: older toolset
+  Given toolset `k8s` at 1.4.0 saved and 1.2.0 now
+  When restore_notices is called
+  Then one message states the toolset is older than the saved one
+
+Scenario: newer minor is silent
+  Given toolset `k8s` at 1.4.0 saved and 1.6.1 now
+  When restore_notices is called
+  Then there is no message for `k8s`
+
+Scenario: broken functions listed once
+  Given the broken functions `list_pods` and `scale`
+  When restore_notices is called
+  Then one message lists both names in that order
+
+Scenario: unparseable version never panics
+  Given a toolset version `nightly` saved and `1.0.0` now
+  When restore_notices is called
+  Then a message is produced
+
+Tasks:
+  [ ] #1 Tests puis implémentation.
+  [?] #2 Libellé exact des messages : posé ici en anglais court ; le domaine `scratchpad` ou `agents` pourra imposer le gabarit système.
+  [?] #3 Remplacer le petit analyseur de version par `vynil_core::Semver` quand cette dépendance entre dans la crate.

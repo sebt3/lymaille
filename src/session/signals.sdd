@@ -1,0 +1,58 @@
+Spec: signals
+
+Purpose:
+  Signaux de qualité enregistrés pour chaque tour et chaque run, exploitables après coup (capture de `agent-sessions#DEC-12`,
+    sélection de `agent-sessions#DEC-13`, `agent-sessions/session#FR-13`).
+
+Owns:
+  ./signals.rs
+
+Exposes:
+  @Outcome
+  @RunSignals
+
+Accepts:
+  @RunSignals::new: l'agent producteur, le profil de modèle, les versions de toolsets (nom → version).
+  @RunSignals::with_subagent, @RunSignals::with_workflow_step: étiquettes optionnelles du run.
+  @RunSignals::record_rhai_error, @RunSignals::record_correction: incrémentent les compteurs.
+  @RunSignals::finish: une @Outcome.
+
+Returns:
+  @Outcome: `Valid`, `Failed` ou `Cancelled`.
+  @RunSignals: issue (absente tant que le run n'est pas fini), nombre d'erreurs Rhai, nombre de corrections, agent
+    producteur, sous-agent, étape de workflow, versions de toolsets, profil de modèle.
+
+Must:
+  Un run non terminé n'a pas d'issue ; @RunSignals::finish la pose une fois, un second appel est sans effet (la première issue fait foi).
+  Les compteurs sont saturants.
+  Le type se sérialise et se désérialise à l'identique ; l'agent producteur permet d'exclure les sessions de l'agent de configuration
+    du filtrage des candidatures (`agent-sessions#DEC-13`).
+  L'ordre des versions de toolsets est stable (table ordonnée par nom) pour que la sérialisation soit reproductible.
+
+Depends on:
+  serde
+
+Scenario: counters and outcome
+  Given new signals
+  When two Rhai errors and one correction are recorded and finish(Valid) is called
+  Then the counts are 2 and 1 and the outcome is Valid
+
+Scenario: first outcome wins
+  Given signals finished with Failed
+  When finish(Valid) is called
+  Then the outcome stays Failed
+
+Scenario: unfinished run has no outcome
+  Given new signals
+  When the outcome is read
+  Then it is absent
+
+Scenario: round trip keeps every field
+  Given signals with subagent, workflow step and two toolset versions
+  When serialized then deserialized
+  Then all fields are identical and toolsets serialize in name order
+
+Tasks:
+  [ ] #1 Tests puis implémentation.
+  [?] #2 Les versions de toolset sont des chaînes `major.minor.patch` ici ; passer à `vynil_core::Semver` quand cette dépendance entre (`toolsets`).
+  [?] #3 `agent-sessions/session#FR-13` est une ASSUMPTION du DSD (liste des signaux déduite, à confirmer) : cette liste en hérite.

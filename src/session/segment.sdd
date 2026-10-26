@@ -1,0 +1,48 @@
+Spec: segment
+
+Purpose:
+  Contexte d'un segment tel que le modèle l'a reçu : prompt système rendu, définitions des tools natifs, profil de modèle résolu.
+    Persisté au début de chaque segment (début de session, sortie de compaction, restauration) pour qu'un export fidèle reste possible
+    (`agent-sessions/session#FR-11`, `agent-sessions#DEC-12`, `agent-sessions/session#AC-7`).
+
+Owns:
+  ./segment.rs
+
+Exposes:
+  @BoundaryKind
+  @ModelProfile
+  @SegmentContext
+  @Segment
+
+Accepts:
+  @ModelProfile::new: l'identifiant du modèle et le mode de rejeu du raisonnement (texte).
+  @SegmentContext::new: le prompt système rendu, les définitions de tools (valeurs JSON) et un @ModelProfile.
+  @Segment::new: un @BoundaryKind (`Start`, `Compaction`, `Restore`), un @SegmentContext et un @Timestamp.
+
+Must:
+  Un @Segment est immuable une fois créé : aucun accesseur ne modifie son contexte. Restaurer avec des définitions plus récentes
+    crée un nouveau @Segment et ne remplace pas ce qui a été envoyé (`agent-sessions/session#FR-11`).
+  Les définitions de tools conservent leur ordre.
+  Le contexte ne contient que du texte rendu et des définitions : aucune valeur de secret (`agent-sessions#CON-3`).
+  Se sérialise et se désérialise à l'identique.
+
+Depends on:
+  ../clock.sdd
+  serde
+  serde_json
+
+Scenario: segment keeps the context as sent
+  Given a segment built with a system prompt, two tool definitions and a model profile
+  When serialized then deserialized
+  Then prompt, tool definitions in order and profile are identical
+
+Scenario: a restore creates a new segment
+  Given a persisted start segment
+  When a restore segment is created with a newer prompt
+  Then the start segment is unchanged and the two exist side by side
+
+Tasks:
+  [ ] #1 Tests puis implémentation.
+  [?] #2 Le « mode de rejeu du raisonnement » est du texte libre ici : le domaine `agents` (mapping fournisseur et modèle,
+      `agent-sessions/context-window#FR-5`) en fixera l'énumération.
+  [?] #3 `agent-sessions/session#FR-11` est une ASSUMPTION du DSD (contenu déduit de ce qu'exigerait un export fidèle).

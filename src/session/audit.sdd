@@ -1,0 +1,62 @@
+Spec: audit
+
+Purpose:
+  Construire les enregistrements d'audit d'un script exécuté et d'un appel MCP : texte complet du script, résultat tronqué
+    au plafond de rendu avec la taille d'origine, durée, erreur ; rôle, fonction, arguments, statut et durée de l'appel,
+    tous masqués des secrets (`agent-sessions/session#FR-8`, `agent-sessions#CON-3`, `agent-sessions/session#AC-4`).
+
+Owns:
+  ./audit.rs
+
+Exposes:
+  @ScriptRecord
+  @McpRecord
+
+Accepts:
+  @ScriptRecord::new: un @Redactor, le plafond de rendu en caractères, le nom de l'agent, le texte du script, le résultat, la durée, l'erreur éventuelle.
+  @McpRecord::new: un @Redactor, le rôle MCP, le nom de la fonction, les arguments JSON, le statut, la durée.
+
+Returns:
+  @ScriptRecord: agent, script masqué complet, résultat masqué et tronqué, `original_len` (nombre de caractères du résultat masqué avant troncature), `truncated`, durée en millisecondes, erreur masquée.
+  @McpRecord: rôle, fonction, arguments masqués, statut, durée en millisecondes.
+
+Must:
+  Masquer avant de tronquer, pour qu'un secret coupé par la troncature n'en laisse pas un morceau.
+  Tronquer à un nombre de caractères (jamais d'octets : aucune coupure au milieu d'un caractère) ; `truncated` vaut vrai
+    seulement si le résultat a perdu des caractères, et `original_len` garde la taille avant troncature.
+  Le texte du script n'est jamais tronqué.
+  Un plafond de zéro tronque tout le résultat.
+  Les enregistrements se sérialisent (ils entrent dans @Event), sans champ secret.
+
+Depends on:
+  ./redact.sdd
+  serde
+  serde_json
+
+Scenario: result truncated at the cap with original size
+  Given a result of 50 characters and a cap of 20
+  When a @ScriptRecord is built
+  Then the result has 20 characters, original_len is 50 and truncated is true
+
+Scenario: result under the cap is untouched
+  Given a result of 10 characters and a cap of 20
+  When a @ScriptRecord is built
+  Then truncated is false and the result is unchanged
+
+Scenario: script and result never leak a secret
+  Given a redactor holding `tok-123`, a script containing `tok-123` and a result containing `tok-123`
+  When a @ScriptRecord is built
+  Then neither the script nor the result nor the error contains `tok-123`
+
+Scenario: truncation does not split a multi-byte character
+  Given a result of twenty `é` characters and a cap of 7
+  When a @ScriptRecord is built
+  Then the result is seven `é` characters
+
+Scenario: MCP arguments are masked
+  Given a redactor holding `tok-123` and arguments `{"auth": "tok-123"}`
+  When an @McpRecord is built
+  Then the arguments are `{"auth": "***"}`
+
+Tasks:
+  [ ] #1 Tests puis implémentation.

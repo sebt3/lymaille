@@ -1,0 +1,71 @@
+Spec: session
+
+Purpose:
+  Cycle de vie d'une session : état persisté, historique, stockage par trait, événements, annulation, étiquettes, signaux
+    de qualité. Réalise `agent-sessions/session` (./dsd/agent-sessions/session.md). Ce répertoire ne contient que des types et
+    des fonctions pures ou testables avec des doubles ; la boucle de tour (inférence, scratchpad) viendra avec les domaines
+    qui la fournissent.
+
+Structure:
+  ./mod.rs: déclarations et ré-exports du module
+  ./error.rs: erreur du module
+  ./id.rs: identifiants de session, de tour et de run
+  ./backoff.rs: calendrier de réessai
+  ./cancel.rs: handle d'annulation
+  ./turn_gate.rs: exclusion d'un tour actif par session
+  ./redact.rs: masquage des secrets
+  ./audit.rs: événements d'audit de script et d'appel MCP
+  ./event.rs: événements observables et canal
+  ./label.rs: étiquettes
+  ./signals.rs: signaux de qualité
+  ./segment.rs: contexte de segment tel qu'envoyé au modèle
+  ./history.rs: historique
+  ./format.rs: version de format de session
+  ./tagged_value.rs: valeurs étiquetées par type réel
+  ./state.rs: état persisté
+  ./store.rs: trait de stockage et stockage mémoire
+  ./notice.rs: messages système de restauration
+
+Owns:
+  ./mod.rs
+
+References:
+  ../../lymaille.sdd
+  ../../dsd/agent-sessions/session.md
+  ../clock.sdd
+  ./error.sdd
+  ./id.sdd
+  ./backoff.sdd
+  ./cancel.sdd
+  ./turn_gate.sdd
+  ./redact.sdd
+  ./audit.sdd
+  ./event.sdd
+  ./label.sdd
+  ./signals.sdd
+  ./segment.sdd
+  ./history.sdd
+  ./format.sdd
+  ./tagged_value.sdd
+  ./state.sdd
+  ./store.sdd
+  ./notice.sdd
+
+Must:
+  Ne réaliser aucune E/S : la persistance passe par @SessionStore, implémenté par l'hôte (`agent-sessions/session#FR-1`).
+  Ne laisser aucun secret atteindre l'état persisté, l'historique, les événements ni les messages d'erreur
+    (`agent-sessions#CON-3`) ; l'état ne porte que des références nommées.
+  Ne lire l'horloge que par @crate::Clock.
+  Déclarer chaque sous-module et ré-exporter ce que les specs enfants exposent ; mod.rs ne contient aucun comportement.
+
+Tasks:
+  [ ] #1 Déclarer les sous-modules dans ./mod.rs au fil des specs enfants livrées.
+  [?] #2 Boucle de tour (`agent-sessions/session#FR-4` à `FR-7`, `FR-14`, `AC-3`, `AC-8` à `AC-11`) : dépend du trait de
+      fournisseur d'inférence (`agents`), du scratchpad (`scratchpad`) et de la fenêtre de contexte (`context-window`).
+      Ne s'écrit qu'après leurs specs.
+  [?] #3 Restauration complète (`FR-3`, `AC-2`) : recompiler les fonctions exige le moteur Rhai (`scratchpad`). Cette spec
+      ne livre que le diff de provenance (./notice.sdd) et le format.
+  [?] #4 TBD du DSD : forme du retour de texte vers l'hôte pendant un tour (fragments de streaming comme événements, ou flux
+      dédié). Le type @Event laisse la place d'une variante ; rien n'est décidé.
+  [?] #5 TBD du DSD : inventaire des types `Dynamic` à étiqueter au-delà de `char` et `blob` ; ./tagged_value.sdd couvre
+      booléen, entiers, flottants, chaîne, `char`, `blob`, tableau, table.
