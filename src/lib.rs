@@ -8,5 +8,7 @@ mod session;
 
 pub use clock::{Clock, ManualClock, SystemClock, Timestamp};
 pub use session::{
-    Backoff, Redactor, RunId, SessionError, SessionId, SessionResult, TurnGate, TurnId, TurnPermit,
+    Backoff, CancelHandle, Event, EventKind, EventSink, McpRecord, NullSink, Outcome, RecordingSink,
+    Redactor, RunId, ScriptRecord, SessionError, SessionId, SessionResult, SleepOutcome, TurnGate, TurnId,
+    TurnPermit,
 };

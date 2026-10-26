@@ -55,7 +55,12 @@ Scenario: recording sink is shareable across threads
   Then forty events were recorded
 
 Tasks:
-  [ ] #1 Tests puis implémentation.
+  [x] #1 Tests puis implémentation.
+  [?] #4 Variantes et champs posés à l'implémentation : `TokenUsage{prompt, completion}`, `TodoChanged`, `MemoryChanged{level, id}`, `Script`, `McpCall`,
+      `Overrun{elapsed_ms}`, `InferenceRetry{attempt, delay_ms, error_class}`, `TurnStarted{turn}`, `TurnEnded{turn, outcome, response}`, `RunEnded{run, outcome}`.
+      Durées en millisecondes. À confirmer, notamment l'issue dans `RunEnded`.
+  [?] #5 Secrets : `TurnEnded.response` et `InferenceRetry.error_class` ne sont pas masqués (le modèle peut répéter un secret). Qui masque avant émission,
+      la session au moment d'émettre ou l'hôte ? Proposition : la session, par le @Redactor, dans la boucle de tour.
   [?] #2 Variante de fragment de streaming (TBD de `agent-sessions/session`, Questions ouvertes) : non incluse. Si le choix
       est « fragments comme événements », ajouter une variante `TextDelta`.
   [?] #3 Événements de délégation (démarrage, fin de sous-agent, watcher déclenché) : définis par le domaine `delegation`.

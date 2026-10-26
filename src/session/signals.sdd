@@ -53,6 +53,7 @@ Scenario: round trip keeps every field
   Then all fields are identical and toolsets serialize in name order
 
 Tasks:
+  [x] #0 Amorce : @Outcome seul est implémenté (requis par ./event.sdd).
   [ ] #1 Tests puis implémentation.
   [?] #2 Les versions de toolset sont des chaînes `major.minor.patch` ici ; passer à `vynil_core::Semver` quand cette dépendance entre (`toolsets`).
   [?] #3 `agent-sessions/session#FR-13` est une ASSUMPTION du DSD (liste des signaux déduite, à confirmer) : cette liste en hérite.

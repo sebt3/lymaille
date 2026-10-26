@@ -11,6 +11,9 @@ Exposes:
   @CancelHandle
   @SleepOutcome
 
+Accepts:
+  @CancelHandle::new: aucun argument ; @CancelHandle::cancel: annule le handle et ses enfants.
+
 Returns:
   @CancelHandle::is_cancelled: l'état d'annulation.
   @CancelHandle::sleep: @SleepOutcome::Elapsed si la durée s'est écoulée, @SleepOutcome::Cancelled si l'annulation est arrivée avant.
@@ -53,7 +56,9 @@ Scenario: cancelled is idempotent
   Then nothing fails and the future completes at once
 
 Tasks:
-  [ ] #1 Tests (temps tokio en pause), puis implémentation sur le jeton de `tokio-util`.
+  [x] #1 Tests (temps tokio en pause), puis implémentation sur le jeton de `tokio-util`.
+  [ ] #3 Renforcer les tests : `sleep_elapses` doit asserter que 2 secondes se sont écoulées (temps tokio en pause), et le sommeil d'un handle déjà
+      annulé doit asserter qu'aucun temps ne s'est écoulé.
   [?] #2 Le pont vers `vynil_core::cancel::CancelToken`, lu par `vynil_core::rt::block_on` pendant un appel de script
       (shopping-list vynil-core, jeton d'annulation), s'écrit avec le domaine `scratchpad` : prévoir une conversion ou un
       second jeton. `tokio-util` est le choix par défaut, à confirmer.

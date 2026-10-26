@@ -59,4 +59,6 @@ Scenario: MCP arguments are masked
   Then the arguments are `{"auth": "***"}`
 
 Tasks:
-  [ ] #1 Tests puis implémentation.
+  [x] #1 Tests puis implémentation.
+  [?] #2 @ScriptRecord::new (7 paramètres) et @McpRecord::new (6) portent un `#[expect(clippy::too_many_arguments)]` ; regrouper en structure d'entrée nommée
+      si le développeur principal préfère (nouveau type public).
