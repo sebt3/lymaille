@@ -75,10 +75,10 @@ Scenario: round trip
   Then it is identical
 
 Tasks:
-  [ ] #6 Tests manquants : l'empreinte change pour chaque champ de la liste du Must (prompt, profil, toolsets, modules, chacun des quatre droits de Memory, délai et plafond de sandbox, sous-agents délégables, schéma de sortie, aussi id, nature, paramètres, stratégie de contexte) ;
+  [x] #6 Tests manquants : l'empreinte change pour chaque champ de la liste du Must (prompt, profil, toolsets, modules, chacun des quatre droits de Memory, délai et plafond de sandbox, sous-agents délégables, schéma de sortie, aussi id, nature, paramètres, stratégie de contexte) ;
       vecteurs connus du FNV-1a 64 bits sur des chaînes (`""` → `cbf29ce484222325`, `"a"` → `af63dc4c8601ec8c`, `"foobar"` → `85944171f73967e8`) pour la fonction de hachage, afin que « indépendante de la plate-forme » soit vérifié ; `validate()` Ok sur une définition valide et sur un sous-agent avec schéma ;
       identifiant, prompt et profil vides refusés ; doublon de modules refusé.
-  [ ] #1 Tests puis implémentation.
+  [x] #1 Tests puis implémentation.
   [?] #2 Rendu du prompt templaté (variables du ToolsetContext) : relève de `toolsets` (templating) ; ici le prompt est du texte brut.
   [?] #3 La stratégie de contexte est un nom ; le choix de la stratégie par nom (fabrique) se branche avec la boucle de tour.
   [?] #5 Posé à l'implémentation : @MemoryRights = quatre droits indépendants (lecture, écriture utilisateur, projet, session) ; `sandbox` absent = aucune limite ; les doublons de sous-agents délégables ne sont pas refusés ; un identifiant, un prompt ou un nom de profil blanc est refusé.

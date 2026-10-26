@@ -36,7 +36,7 @@ Must:
   Déclarer chaque sous-module et ré-exporter ce que les specs enfants exposent ; mod.rs ne contient aucun comportement.
 
 Tasks:
-  [ ] #1 Déclarer les sous-modules dans ./mod.rs au fil des specs enfants livrées.
+  [x] #1 Déclarer les sous-modules dans ./mod.rs au fil des specs enfants livrées.
   [?] #2 Adaptateur `rig` (clients, `list_models`, décodage de `reasoning` / `reasoning_content`, `chat_template_kwargs` par `additional_params`) : crate ou module séparé qui implémente @InferenceProvider ;
       posé hors de cette spec pour garder la crate testable sans `rig`. Confirmer que `rig` entre comme dépendance de la crate (CON-2) ou d'un crate d'adaptation.
   [?] #3 Projet (FR-4 : manifeste d'agents, de toolsets, de ContextType et de ToolsetContext) : dépend de `toolsets` ; non spécifié ici.

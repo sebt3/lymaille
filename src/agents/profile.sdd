@@ -72,9 +72,9 @@ Scenario: profile round trips
   Then it is identical, and a profile without overrides serializes without those fields
 
 Tasks:
-  [ ] #6 Tests manquants : surcharge face à une détection plus grande ET plus petite ; `max_response` et `tools` surchargés puis détectés ; @ResolvedProfile::budget qui dépend de l'indice de tokenisation (le plafond de rendu converti change avec l'indice) ;
+  [x] #6 Tests manquants : surcharge face à une détection plus grande ET plus petite ; `max_response` et `tools` surchargés puis détectés ; @ResolvedProfile::budget qui dépend de l'indice de tokenisation (le plafond de rendu converti change avec l'indice) ;
       aller-retour sans `tokenization_hint` ni `concurrency` quand ils sont absents.
-  [ ] #1 Tests puis implémentation.
+  [x] #1 Tests puis implémentation.
   [?] #2 Comportement quand un modèle référencé n'est pas détecté (TBD du DSD) : posé ici « il se résout si le profil porte une taille de contexte, sinon erreur explicite » ; confirmer.
   [?] #3 Valeurs par défaut (réponse maximale = un quart du contexte) : proposées, non issues du DSD ; à confirmer.
   [?] #5 Les constructeurs refusent le zéro par le type (`NonZeroU64` pour l'indice de tokenisation et la simultanéité) ; réponse maximale par défaut = contexte divisé par 4 (division saturante entière).

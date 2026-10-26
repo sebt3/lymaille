@@ -30,4 +30,4 @@ Scenario: display names the cause and the object
   Then the text names the cause and the object
 
 Tasks:
-  [ ] #1 Tests puis implémentation.
+  [x] #1 Tests puis implémentation.

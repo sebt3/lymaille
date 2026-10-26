@@ -132,12 +132,15 @@ fn has_url_credentials(text: &str) -> bool {
     text.split_once("://").is_some_and(|(_, rest)| rest.contains('@'))
 }
 
-/// Tells whether `text` is shaped like a token: prefix `sk-` or `Bearer`, in any case for the latter.
+/// Tells whether `text` is shaped like a token: prefix `sk-` or `Bearer`, in any case for both.
 fn looks_like_token(text: &str) -> bool {
-    text.starts_with("sk-")
-        || text
-            .get(..6)
-            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("bearer"))
+    has_prefix(text, "sk-") || has_prefix(text, "bearer")
+}
+
+/// Tells whether `text` starts with `prefix`, ignoring the case of ASCII letters. Never panics on a multi-byte text.
+fn has_prefix(text: &str, prefix: &str) -> bool {
+    text.get(..prefix.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
 }
 
 #[cfg(test)]
@@ -225,5 +228,93 @@ mod tests {
             "Debug must not show the auth reference: {text}"
         );
         assert!(text.contains("strix"), "Debug shows the name: {text}");
+    }
+
+    #[test]
+    fn token_prefix_refused_in_any_case() {
+        for token in ["sk-abc123", "SK-abc123", "Sk-abc123"] {
+            assert!(
+                provider(token, None).is_none(),
+                "an address shaped like a token must give nothing: {token}"
+            );
+            assert!(
+                provider("vllm-strix", Some(token)).is_none(),
+                "an auth reference shaped like a token must give nothing: {token}"
+            );
+        }
+    }
+
+    #[test]
+    fn bearer_prefix_refused_in_any_case() {
+        for token in ["Bearer-abc", "bearer-abc", "BEARER-abc"] {
+            assert!(
+                provider("vllm-strix", Some(token)).is_none(),
+                "an auth reference starting with Bearer must give nothing: {token}"
+            );
+        }
+    }
+
+    #[test]
+    fn blank_inside_a_reference_refused() {
+        assert!(
+            provider("vllm strix", None).is_none(),
+            "an address with a space must give nothing"
+        );
+        assert!(
+            provider("vllm\tstrix", None).is_none(),
+            "an address with a tab must give nothing"
+        );
+        assert!(
+            provider("vllm-strix", Some("vllm key")).is_none(),
+            "an auth reference with a space must give nothing"
+        );
+    }
+
+    #[test]
+    fn blank_name_and_type_refused() {
+        let blank_name = Provider::new(
+            "  ".to_owned(),
+            "openai".to_owned(),
+            "vllm-strix".to_owned(),
+            None,
+            ProviderLevel::User,
+        );
+        assert!(blank_name.is_none(), "a name made of blanks must give nothing");
+        let blank_type = Provider::new(
+            "strix".to_owned(),
+            "  ".to_owned(),
+            "vllm-strix".to_owned(),
+            None,
+            ProviderLevel::User,
+        );
+        assert!(blank_type.is_none(), "a type made of blanks must give nothing");
+        let empty_type = Provider::new(
+            "strix".to_owned(),
+            String::new(),
+            "vllm-strix".to_owned(),
+            None,
+            ProviderLevel::User,
+        );
+        assert!(empty_type.is_none(), "an empty type must give nothing");
+    }
+
+    #[test]
+    fn deserialization_refuses_clear_references() {
+        let credentials_in_url = r#"{"name":"strix","kind":"openai","address":"https://user:pw@host/v1","auth":null,"level":"user"}"#;
+        assert!(
+            serde_json::from_str::<Provider>(credentials_in_url).is_err(),
+            "a JSON provider with credentials in its address must fail to deserialize"
+        );
+        let token_in_auth =
+            r#"{"name":"strix","kind":"openai","address":"vllm-strix","auth":"sk-abc123","level":"user"}"#;
+        assert!(
+            serde_json::from_str::<Provider>(token_in_auth).is_err(),
+            "a JSON provider with a token in its auth reference must fail to deserialize"
+        );
+        let blank_type = r#"{"name":"strix","kind":"  ","address":"vllm-strix","auth":null,"level":"user"}"#;
+        assert!(
+            serde_json::from_str::<Provider>(blank_type).is_err(),
+            "a JSON provider with a blank type must fail to deserialize"
+        );
     }
 }

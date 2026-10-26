@@ -479,4 +479,119 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn override_beats_a_larger_detection() {
+        let detected = DetectedModel::new(Some(524_288), None, None);
+        let resolved = profile()
+            .with_context_size(262_144)
+            .resolve(Some(detected))
+            .expect("the profile overrides the context size");
+        assert_eq!(
+            resolved.context_size(),
+            262_144,
+            "the override must win over a detected 524288"
+        );
+    }
+
+    #[test]
+    fn max_response_override_and_detection() {
+        let detected = DetectedModel::new(Some(40_000), Some(5_000), None);
+        let overridden = profile()
+            .with_max_response(8_000)
+            .resolve(Some(detected))
+            .expect("the detection gives the context size");
+        assert_eq!(
+            overridden.max_response(),
+            8_000,
+            "the override must win over the detected maximum output"
+        );
+        let detected_only = profile()
+            .resolve(Some(detected))
+            .expect("the detection gives the context size");
+        assert_eq!(
+            detected_only.max_response(),
+            5_000,
+            "without override the detected maximum output is used, not the quarter default"
+        );
+    }
+
+    #[test]
+    fn tools_override_and_detection() {
+        let supported = DetectedModel::new(Some(40_000), None, Some(true));
+        let unsupported = DetectedModel::new(Some(40_000), None, Some(false));
+        let overridden = profile()
+            .with_tools(false)
+            .resolve(Some(supported))
+            .expect("the detection gives the context size");
+        assert!(
+            !overridden.tools(),
+            "the override `false` must win over the detected support"
+        );
+        let forced = profile()
+            .with_tools(true)
+            .resolve(Some(unsupported))
+            .expect("the detection gives the context size");
+        assert!(
+            forced.tools(),
+            "the override `true` must win over the detected absence of tools"
+        );
+        let detected_absent = profile()
+            .resolve(Some(unsupported))
+            .expect("the detection gives the context size");
+        assert!(
+            !detected_absent.tools(),
+            "without override the detected absence of tools must be used, not the default"
+        );
+        let detected_present = profile()
+            .resolve(Some(supported))
+            .expect("the detection gives the context size");
+        assert!(
+            detected_present.tools(),
+            "without override the detected support of tools must be used"
+        );
+    }
+
+    #[test]
+    fn budget_depends_on_the_tokenization_hint() {
+        let detected = DetectedModel::new(Some(40_000), None, None);
+        let default_hint = profile()
+            .resolve(Some(detected))
+            .expect("the detection gives the context size");
+        let dense = profile()
+            .with_tokenization_hint(NonZeroU64::new(5_000).expect("5000 is not zero"))
+            .resolve(Some(detected))
+            .expect("the detection gives the context size");
+        let default_cap = default_hint.budget(500, 10_000).render_cap_tokens();
+        let dense_cap = dense.budget(500, 10_000).render_cap_tokens();
+        assert_eq!(
+            default_cap, 4_000,
+            "with the default hint of 2.5 characters per token, 10000 characters are 4000 tokens"
+        );
+        assert_eq!(
+            dense_cap, 2_000,
+            "with a hint of 5 characters per token, 10000 characters are 2000 tokens"
+        );
+    }
+
+    #[test]
+    fn absent_hint_and_concurrency_stay_absent() {
+        let bare = serde_json::to_value(profile()).expect("a profile serializes");
+        for field in ["tokenization_hint", "concurrency"] {
+            assert!(
+                bare.get(field).is_none(),
+                "a profile without override must not serialize `{field}`: {bare}"
+            );
+        }
+        let text = r#"{"name":"strix-qwen","provider":"vllm-strix","model":"qwen3.8-flash-next"}"#;
+        let read: ModelProfile = serde_json::from_str(text).expect("the required fields are enough");
+        assert_eq!(
+            read,
+            profile(),
+            "a profile with only the required fields must read back as the bare profile"
+        );
+        let back_text = serde_json::to_string(&read).expect("a profile serializes");
+        let back: ModelProfile = serde_json::from_str(&back_text).expect("a profile deserializes");
+        assert_eq!(back, read, "the round trip of a bare profile must be identical");
+    }
 }

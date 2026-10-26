@@ -52,7 +52,7 @@ Scenario: debug hides references
   Then the references do not appear
 
 Tasks:
-  [ ] #4 Tests manquants : préfixe `sk-` (dont `SK-`), blanc dans une référence, nom et type blancs, désérialisation JSON d'une référence en clair (refus). Rendre `sk-` insensible à la casse.
-  [ ] #1 Tests puis implémentation.
+  [x] #4 Tests manquants : préfixe `sk-` (dont `SK-`), blanc dans une référence, nom et type blancs, désérialisation JSON d'une référence en clair (refus). Rendre `sk-` insensible à la casse.
+  [x] #1 Tests puis implémentation.
   [?] #3 Posé à l'implémentation : une référence est refusée si elle est vide, contient un blanc, un `://` suivi d'un `@`, ou commence par `sk-` ou `Bearer` (casse indifférente pour les deux, décidé) ; une URL sans identifiants est acceptée ; `kind` et `name` ne sont testés que sur le vide.
   [?] #2 Le critère « ressemble à un jeton » est heuristique (espace, `Bearer`, `sk-`, longueur) : une liste précise est à fixer ; le contrôle réel reste à l'hôte (CON-3).

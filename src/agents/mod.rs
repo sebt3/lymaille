@@ -4,12 +4,19 @@
 //! The typed error of the module is also here. Pure data and logic, no I/O
 //! (`agent-sessions/agents#FR-1`, `FR-6`, `FR-7`, `FR-8`).
 
+mod catalog;
 mod definition;
 mod error;
+mod inference;
 mod profile;
 mod provider;
 
+pub use catalog::{AgentStore, InMemoryCatalog, ProfileStore, ProviderStore};
 pub use definition::{AgentDefinition, AgentKind, MemoryRights, SandboxLimits};
 pub use error::{AgentsError, AgentsResult};
+pub use inference::{
+    ErrorClass, InferenceError, InferenceProvider, InferenceRequest, InferenceResponse, ReportedUsage,
+    ScriptedProvider, classify_status,
+};
 pub use profile::{DetectedModel, ModelProfile, ResolvedProfile, SamplingParams};
 pub use provider::{Provider, ProviderLevel};

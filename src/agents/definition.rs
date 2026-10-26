@@ -399,8 +399,11 @@ fn fnv1a_64(bytes: &[u8]) -> u64 {
 mod tests {
     use std::time::Duration;
 
-    use super::{AgentDefinition, AgentKind, MemoryRights, SandboxLimits};
+    use super::{AgentDefinition, AgentKind, MemoryRights, SandboxLimits, fnv1a_64};
     use crate::agents::{AgentsError, SamplingParams};
+
+    const PROMPT: &str = "You are the assistant of {{project}}.";
+    const PROFILE: &str = "strix-qwen";
 
     fn main_agent() -> AgentDefinition {
         AgentDefinition::new(
@@ -420,13 +423,15 @@ mod tests {
         )
     }
 
-    fn full_main_agent() -> AgentDefinition {
+    /// A definition with every field set, under the identifier `id`, the kind `kind`, the prompt `prompt` and the profile
+    /// `profile`.
+    fn full_definition(id: &str, kind: AgentKind, prompt: &str, profile: &str) -> AgentDefinition {
         let sampling = SamplingParams::default()
             .with_temperature(0.7)
             .with_top_p(0.9)
             .with_top_k(40)
             .with_extra("seed".to_owned(), serde_json::json!(42));
-        main_agent()
+        AgentDefinition::new(id.to_owned(), kind, prompt.to_owned(), profile.to_owned())
             .with_sampling(sampling)
             .with_modules(vec!["files".to_owned(), "git".to_owned()])
             .with_toolsets(vec!["k8s".to_owned(), "logs".to_owned()])
@@ -439,6 +444,10 @@ mod tests {
             .with_sandbox(SandboxLimits::new(Duration::from_secs(30), 10_000))
             .with_context_strategy("summarize".to_owned())
             .with_delegable(vec!["reviewer".to_owned()])
+    }
+
+    fn full_main_agent() -> AgentDefinition {
+        full_definition("main", AgentKind::Main, PROMPT, PROFILE)
     }
 
     fn assert_invalid(definition: &AgentDefinition, case: &str) {
@@ -530,5 +539,173 @@ mod tests {
         let text = serde_json::to_string(&definition).expect("a definition serializes");
         let back: AgentDefinition = serde_json::from_str(&text).expect("a definition deserializes");
         assert_eq!(back, definition, "serialized then deserialized must be identical");
+    }
+
+    #[test]
+    fn fnv1a_matches_reference_vectors() {
+        assert_eq!(
+            fnv1a_64(b""),
+            0xcbf2_9ce4_8422_2325,
+            "the empty input hashes to the offset basis"
+        );
+        assert_eq!(
+            fnv1a_64(b"a"),
+            0xaf63_dc4c_8601_ec8c,
+            "FNV-1a 64 of `a` must match the reference vector"
+        );
+        assert_eq!(
+            fnv1a_64(b"foobar"),
+            0x8594_4171_f739_67e8,
+            "FNV-1a 64 of `foobar` must match the reference vector"
+        );
+    }
+
+    #[test]
+    fn fingerprint_changes_for_each_field() {
+        let base = full_main_agent().fingerprint();
+        let sampling = SamplingParams::default().with_temperature(0.1);
+        let memory = MemoryRights::default().with_read(true).with_write_user(true);
+        let cases = [
+            (
+                "identifier",
+                full_definition("other", AgentKind::Main, PROMPT, PROFILE),
+            ),
+            ("kind", full_definition("main", AgentKind::Sub, PROMPT, PROFILE)),
+            (
+                "prompt",
+                full_definition("main", AgentKind::Main, "Another prompt.", PROFILE),
+            ),
+            (
+                "profile",
+                full_definition("main", AgentKind::Main, PROMPT, "other-profile"),
+            ),
+            ("sampling", full_main_agent().with_sampling(sampling)),
+            (
+                "modules",
+                full_main_agent().with_modules(vec!["files".to_owned()]),
+            ),
+            (
+                "toolsets",
+                full_main_agent().with_toolsets(vec!["k8s".to_owned()]),
+            ),
+            (
+                "memory read",
+                full_main_agent().with_memory(memory.with_read(false).with_write_session(true)),
+            ),
+            (
+                "memory write user",
+                full_main_agent()
+                    .with_memory(MemoryRights::default().with_read(true).with_write_session(true)),
+            ),
+            (
+                "memory write project",
+                full_main_agent().with_memory(
+                    MemoryRights::default()
+                        .with_read(true)
+                        .with_write_user(true)
+                        .with_write_project(true)
+                        .with_write_session(true),
+                ),
+            ),
+            (
+                "memory write session",
+                full_main_agent().with_memory(MemoryRights::default().with_read(true).with_write_user(true)),
+            ),
+            (
+                "sandbox script timeout",
+                full_main_agent().with_sandbox(SandboxLimits::new(Duration::from_secs(31), 10_000)),
+            ),
+            (
+                "sandbox render cap",
+                full_main_agent().with_sandbox(SandboxLimits::new(Duration::from_secs(30), 10_001)),
+            ),
+            (
+                "context strategy",
+                full_main_agent().with_context_strategy("other".to_owned()),
+            ),
+            (
+                "delegable sub-agents",
+                full_main_agent().with_delegable(vec!["other".to_owned()]),
+            ),
+        ];
+        for (field, changed) in cases {
+            assert_ne!(
+                changed.fingerprint(),
+                base,
+                "changing the {field} must change the fingerprint"
+            );
+        }
+    }
+
+    #[test]
+    fn fingerprint_changes_for_output_schema() {
+        let plain = sub_agent().fingerprint();
+        let with_object = sub_agent().with_output_schema(serde_json::json!({"type": "object"}));
+        assert_ne!(
+            with_object.fingerprint(),
+            plain,
+            "adding an output schema must change the fingerprint"
+        );
+        let with_string = sub_agent().with_output_schema(serde_json::json!({"type": "string"}));
+        assert_ne!(
+            with_string.fingerprint(),
+            with_object.fingerprint(),
+            "changing the output schema must change the fingerprint"
+        );
+    }
+
+    #[test]
+    fn complete_definitions_pass_validation() {
+        let main = full_main_agent().validate();
+        assert!(
+            matches!(main, Ok(())),
+            "a complete main agent must be valid, got {main:?}"
+        );
+        let sub = sub_agent()
+            .with_output_schema(serde_json::json!({"type": "object"}))
+            .validate();
+        assert!(
+            matches!(sub, Ok(())),
+            "a sub-agent with an output schema must be valid, got {sub:?}"
+        );
+    }
+
+    #[test]
+    fn blank_identifier_prompt_and_profile_refused() {
+        let cases = [
+            (
+                "an empty identifier",
+                full_definition("", AgentKind::Main, PROMPT, PROFILE),
+            ),
+            (
+                "a blank identifier",
+                full_definition("  ", AgentKind::Main, PROMPT, PROFILE),
+            ),
+            (
+                "an empty prompt",
+                full_definition("main", AgentKind::Main, "", PROFILE),
+            ),
+            (
+                "a blank prompt",
+                full_definition("main", AgentKind::Main, " \n\t ", PROFILE),
+            ),
+            (
+                "an empty profile name",
+                full_definition("main", AgentKind::Main, PROMPT, ""),
+            ),
+            (
+                "a blank profile name",
+                full_definition("main", AgentKind::Main, PROMPT, "   "),
+            ),
+        ];
+        for (case, definition) in cases {
+            assert_invalid(&definition, case);
+        }
+    }
+
+    #[test]
+    fn duplicate_module_refused() {
+        let duplicated = main_agent().with_modules(vec!["files".to_owned(), "files".to_owned()]);
+        assert_invalid(&duplicated, "a definition with a duplicated module");
     }
 }

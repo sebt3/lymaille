@@ -66,5 +66,8 @@ Scenario: resolve through the store
   And an unknown profile name fails with UnknownProfile
 
 Tasks:
-  [ ] #1 Tests (tokio de test) puis implémentation.
+  [ ] #5 Test manquant : le catalogue stocke bien la forme JSON (JSON invalide injecté dans le stockage rend @AgentsError::Store au `get`).
+  [x] #1 Tests (tokio de test) puis implémentation.
+  [?] #3 Posé à l'implémentation : @resolve_profile est une méthode fournie de @ProfileStore ; `get_*` rend `AgentsResult<Option<T>>` ; l'échec de sérialisation devient @AgentsError::Store ; un verrou empoisonné est récupéré.
+  [?] #4 Décidé : la validation d'une définition à l'écriture est faite par @InMemoryCatalog ; un hôte qui implémente @AgentStore doit appeler @AgentDefinition::validate (à documenter dans le trait). Une méthode fournie qui impose la validation est écartée : @AgentStore::put_agent resterait contournable de toute façon.
   [?] #2 Les noms de niveau (utilisateur, projet) d'un profil ou d'un fournisseur ne sont pas dans la clé de stockage : un nom est unique par catalogue. À confirmer face à `agent-sessions/agents#FR-6` et `FR-7` (niveaux utilisateur et projet).
