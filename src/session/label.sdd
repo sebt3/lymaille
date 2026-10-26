@@ -18,6 +18,7 @@ Accepts:
     émetteur (@LabelAuthor : humain ou automatique) et une horloge (@Clock).
 
 Returns:
+  @Labels::add: `Some` de l'étiquette ajoutée, `None` si le libellé est vide.
   @Labels::iter: toutes les étiquettes dans l'ordre d'ajout.
   @Labels::for_target: les étiquettes d'une cible.
 
@@ -26,7 +27,7 @@ Must:
   @Labels::add ajoute toujours : une seconde étiquette sur la même cible conserve la première, et aucune étiquette
     existante n'est modifiée ni supprimée.
   Un libellé vide est refusé (`None`).
-  @Labels se sérialise et se désérialise à l'identique, ordre compris.
+  @Labels se sérialise et se désérialise à l'identique, ordre compris ; la désérialisation refuse un libellé vide (comme @Labels::add).
   La librairie n'impose aucun vocabulaire : le libellé est du texte libre.
 
 Depends on:
@@ -59,7 +60,15 @@ Scenario: empty label refused
   When add is called
   Then nothing is added
 
+Scenario: empty label refused on deserialization
+  Given a JSON list holding a label with an empty text
+  When deserialized as @Labels
+  Then it fails
+
 Tasks:
-  [ ] #1 Tests puis implémentation.
+  [ ] #4 Désérialisation validante de @Labels et son Scenario (rend caduque la seconde moitié de #3).
+  [x] #1 Tests puis implémentation.
+  [?] #3 Posé à l'implémentation : @Labels::add rend `Some(&Label)` ou `None` si le libellé est vide ; `IntoIterator` pour `&Labels` ajouté (lint
+      `iter_without_into_iter`) ; la désérialisation de @Labels n'interdit pas un libellé vide (comme celle des identifiants, à rendre validante ?).
   [?] #2 Granularité et vocabulaire à confirmer (ASSUMPTION du DSD) : le vocabulaire est libre ici ; une énumération hôte
       resterait compatible.

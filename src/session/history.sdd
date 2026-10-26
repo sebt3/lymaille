@@ -16,6 +16,7 @@ Exposes:
 
 Accepts:
   @History::push: un @Message.
+  @History::push_user_during_turn: le texte d'un message utilisateur reçu pendant un tour.
   @Message: `System`, `User`, `Assistant` (texte, @Reasoning optionnel, @ToolCall), `ToolResult` (identifiant d'appel, nom de tool, contenu
     tel que reçu par le modèle, taille d'origine si tronqué) et `Boundary` (@BoundaryKind).
   @ToolCall: identifiant, nom du tool, arguments JSON.
@@ -70,5 +71,13 @@ Scenario: truncated output keeps the original size
   When read back
   Then the content is the truncated text and the original size 5000 is kept
 
+Scenario: a result with an unknown call changes nothing
+  Given an assistant message with one pending call `c1`
+  When a tool result for the unknown call `c9` is pushed
+  Then it is appended and `c1` is still pending
+
 Tasks:
-  [ ] #1 Tests puis implémentation.
+  [ ] #3 Test du Scenario « unknown call » ci-dessus (comportement déjà en place).
+  [?] #2 Posé à l'implémentation : @Message est une énumération à champs nommés sérialisée avec une étiquette `role` ; la taille d'origine d'une sortie
+      tronquée s'exprime en caractères ; @History::push_user_during_turn prend un texte ; un résultat retire toutes les occurrences de son identifiant.
+  [x] #1 Tests puis implémentation.

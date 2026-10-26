@@ -78,11 +78,17 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn sleep_elapses() {
         let handle = CancelHandle::new();
+        let started = tokio::time::Instant::now();
         let outcome = handle.sleep(Duration::from_secs(2)).await;
         assert_eq!(
             outcome,
             SleepOutcome::Elapsed,
             "a sleep that is not cancelled must return Elapsed once its duration has passed"
+        );
+        assert!(
+            started.elapsed() >= Duration::from_secs(2),
+            "an Elapsed sleep must have waited the whole 2 seconds of paused time, waited {:?}",
+            started.elapsed()
         );
     }
 
@@ -149,11 +155,17 @@ mod tests {
             completed.is_ok(),
             "awaiting cancelled on an already cancelled handle must complete at once"
         );
+        let started = tokio::time::Instant::now();
         let outcome = handle.sleep(Duration::from_secs(300)).await;
         assert_eq!(
             outcome,
             SleepOutcome::Cancelled,
             "a sleep on an already cancelled handle must return Cancelled without waiting"
+        );
+        assert_eq!(
+            started.elapsed(),
+            Duration::ZERO,
+            "a sleep on an already cancelled handle must not let any paused time elapse"
         );
     }
 }
