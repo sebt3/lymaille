@@ -30,7 +30,7 @@ pub use id::{RunId, SessionId, TurnId};
 pub use label::{Label, LabelAuthor, LabelTarget, Labels};
 pub use notice::{Provenance, restore_notices};
 pub use redact::Redactor;
-pub use segment::{BoundaryKind, ModelProfile, Segment, SegmentContext};
+pub use segment::{BoundaryKind, ModelSnapshot, Segment, SegmentContext};
 pub use signals::{Outcome, RunSignals};
 pub use state::{AgentRef, SessionState, TokenCounters};
 pub use store::{InMemoryStore, SessionStore};

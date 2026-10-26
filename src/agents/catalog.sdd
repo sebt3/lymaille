@@ -1,0 +1,70 @@
+Spec: catalog
+
+Purpose:
+  Traits de stockage du catalogue (agents, fournisseurs, profils de modèle) que l'hôte implémente, et un stockage en mémoire pour les tests
+    (`agent-sessions#CON-1`, `agent-sessions/agents#FR-4`, `FR-6`, `FR-7`).
+
+Owns:
+  ./catalog.rs
+
+Exposes:
+  @AgentStore
+  @ProfileStore
+  @ProviderStore
+  @InMemoryCatalog
+
+Accepts:
+  @AgentStore::get_agent / put_agent: un identifiant d'agent / une @AgentDefinition.
+  @ProfileStore::get_profile / put_profile: un nom / un @ModelProfile.
+  @ProviderStore::get_provider / put_provider: un nom / un @Provider.
+
+Returns:
+  Chaque `get_*` rend l'objet s'il existe, sinon rien. Chaque `put_*` remplace l'objet de même nom.
+  @InMemoryCatalog implémente les trois traits.
+  @resolve_profile: un @ProfileStore, un nom de profil et un @DetectedModel optionnel ; rend le @ResolvedProfile.
+
+Raises:
+  @AgentsError::UnknownProfile: @resolve_profile pour un nom absent du stockage.
+  @AgentsError::Store: échec du stockage de l'hôte.
+
+Must:
+  Les trois traits sont `Send + Sync`, asynchrones, à futurs `Send`, sans macro ni objet dynamique, et sans opération de liste ni de suppression (relèvent de l'hôte).
+  @InMemoryCatalog stocke les objets sous leur forme JSON sérialisée (comme @InMemoryStore de ../session/store.sdd), pour que ce qu'on relit passe par le format réel.
+  @put_agent refuse une définition invalide (appel à @AgentDefinition::validate) ; @resolve_profile ne contacte pas de fournisseur.
+  Le stockage ne vérifie pas l'existence du profil nommé par un agent : cette vérification se fait au démarrage de session.
+
+Depends on:
+  ./definition.sdd
+  ./profile.sdd
+  ./provider.sdd
+  ./error.sdd
+
+Scenario: put then get restores each entity
+  Given an in-memory catalog and an agent, a profile and a provider
+  When each is put then fetched
+  Then each equals the original
+
+Scenario: unknown names give nothing
+  Given an empty catalog
+  When any get is called
+  Then nothing is returned and there is no error
+
+Scenario: put replaces
+  Given two profiles with the same name
+  When both are put in turn
+  Then the last one is returned
+
+Scenario: invalid agent refused at put
+  Given a sub-agent declaring delegable sub-agents
+  When put_agent is called
+  Then it fails with InvalidDefinition and nothing is stored
+
+Scenario: resolve through the store
+  Given a stored profile overriding the context size
+  When resolve_profile is called with a detected model of another size
+  Then the override is used
+  And an unknown profile name fails with UnknownProfile
+
+Tasks:
+  [ ] #1 Tests (tokio de test) puis implémentation.
+  [?] #2 Les noms de niveau (utilisateur, projet) d'un profil ou d'un fournisseur ne sont pas dans la clé de stockage : un nom est unique par catalogue. À confirmer face à `agent-sessions/agents#FR-6` et `FR-7` (niveaux utilisateur et projet).

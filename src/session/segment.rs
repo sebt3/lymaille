@@ -1,5 +1,5 @@
-//! Context of a segment as the model received it: the rendered system prompt, the native tool definitions and the resolved
-//! model profile. Persisted at the start of each segment so that a faithful export stays possible
+//! Context of a segment as the model received it: the rendered system prompt, the native tool definitions and a snapshot
+//! of the resolved model profile. Persisted at the start of each segment so that a faithful export stays possible
 //! (`agent-sessions/session#FR-11`, `agent-sessions#DEC-12`, `agent-sessions/session#AC-7`).
 
 use serde::{Deserialize, Serialize};
@@ -18,16 +18,19 @@ pub enum BoundaryKind {
     Restore,
 }
 
-/// Resolved model profile: the model identifier and the replay mode of its reasoning, both as free text.
+/// Snapshot of the resolved model profile as it was sent.
+///
+/// It holds the model identifier and the replay mode of its reasoning, both as free text. It is a copy of the values
+/// used, not the agents' `ModelProfile`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct ModelProfile {
+pub struct ModelSnapshot {
     model_id: String,
     reasoning_replay: String,
 }
 
-impl ModelProfile {
-    /// Builds a model profile from the model identifier and the reasoning replay mode.
+impl ModelSnapshot {
+    /// Builds a model snapshot from the model identifier and the reasoning replay mode.
     #[must_use]
     pub fn new<M: Into<String>, R: Into<String>>(model_id: M, reasoning_replay: R) -> Self {
         Self {
@@ -50,7 +53,7 @@ impl ModelProfile {
 }
 
 /// What the model received for a segment: the rendered system prompt, the tool definitions in their order, and the
-/// model profile.
+/// model snapshot.
 ///
 /// It holds rendered text and definitions only, never a secret value (`agent-sessions#CON-3`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,7 +61,7 @@ impl ModelProfile {
 pub struct SegmentContext {
     system_prompt: String,
     tool_definitions: Vec<serde_json::Value>,
-    profile: ModelProfile,
+    profile: ModelSnapshot,
 }
 
 impl SegmentContext {
@@ -67,7 +70,7 @@ impl SegmentContext {
     pub fn new<S: Into<String>>(
         system_prompt: S,
         tool_definitions: Vec<serde_json::Value>,
-        profile: ModelProfile,
+        profile: ModelSnapshot,
     ) -> Self {
         Self {
             system_prompt: system_prompt.into(),
@@ -88,9 +91,9 @@ impl SegmentContext {
         &self.tool_definitions
     }
 
-    /// Returns the model profile.
+    /// Returns the model snapshot.
     #[must_use]
-    pub const fn profile(&self) -> &ModelProfile {
+    pub const fn profile(&self) -> &ModelSnapshot {
         &self.profile
     }
 }
@@ -141,11 +144,11 @@ impl Segment {
 mod tests {
     use serde_json::json;
 
-    use super::{BoundaryKind, ModelProfile, Segment, SegmentContext};
+    use super::{BoundaryKind, ModelSnapshot, Segment, SegmentContext};
     use crate::clock::Timestamp;
 
-    fn profile() -> ModelProfile {
-        ModelProfile::new("model-x", "replay-verbatim")
+    fn profile() -> ModelSnapshot {
+        ModelSnapshot::new("model-x", "replay-verbatim")
     }
 
     fn definitions() -> Vec<serde_json::Value> {

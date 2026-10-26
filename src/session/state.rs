@@ -359,7 +359,7 @@ mod tests {
     use super::{AgentRef, SessionState, TokenCounters};
     use crate::clock::{ManualClock, Timestamp};
     use crate::session::{
-        BoundaryKind, FormatVersion, LabelAuthor, LabelTarget, Message, ModelProfile, Outcome, RunSignals,
+        BoundaryKind, FormatVersion, LabelAuthor, LabelTarget, Message, ModelSnapshot, Outcome, RunSignals,
         Segment, SegmentContext, SessionError, SessionId, TaggedValue, TurnId,
     };
 
@@ -392,7 +392,7 @@ mod tests {
         state.history.push(Message::assistant("done", None, Vec::new()));
         state.segments.push(Segment::new(
             BoundaryKind::Start,
-            SegmentContext::new("system prompt", Vec::new(), ModelProfile::new("model-x", "none")),
+            SegmentContext::new("system prompt", Vec::new(), ModelSnapshot::new("model-x", "none")),
             Timestamp::from_millis(1000),
         ));
         state.variables.extend([

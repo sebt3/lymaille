@@ -1,0 +1,81 @@
+Spec: profile
+
+Purpose:
+  Profil de modèle : désigne un fournisseur et un modèle, surcharge les métadonnées détectées, et se résout en un profil que le reste de la crate consomme. La surcharge l'emporte toujours
+    (`agent-sessions/agents#FR-7`, `AC-2`) ; la détection ne suffit pas (passerelles qui annoncent une taille fausse).
+
+Owns:
+  ./profile.rs
+
+Exposes:
+  @ModelProfile
+  @DetectedModel
+  @ResolvedProfile
+  @SamplingParams
+
+Accepts:
+  @ModelProfile::new: le nom du profil, le nom du fournisseur et l'identifiant du modèle ; puis des surcharges optionnelles par constructeurs chaînés : taille maximale de contexte, taille maximale de réponse, support des appels d'outils, @SamplingParams, indice de tokenisation (caractères par token en millièmes), nombre maximal de requêtes simultanées, mode de rejeu (@ReplayMode).
+  @DetectedModel::new: ce que le fournisseur annonce, tout optionnel : taille de contexte, taille maximale de sortie, support des appels d'outils.
+  @ModelProfile::resolve: un @DetectedModel optionnel (rien si le modèle n'est pas détecté).
+
+Returns:
+  @ModelProfile::resolve: un @ResolvedProfile où chaque valeur vient de la surcharge si elle existe, sinon de la détection, sinon d'une valeur par défaut documentée (réponse maximale : un quart du contexte ; outils : oui ; rejeu : @ReplayMode::None ; simultanéité : 1 ; indice : 2500).
+  @ResolvedProfile::budget: un @Budget (../context/budget.sdd) construit avec la taille de contexte résolue, la réponse maximale résolue, la taille du prompt de résumé et le plafond de rendu en caractères reçus en arguments, et l'indice de tokenisation résolu.
+
+Raises:
+  @AgentsError::ContextSizeUnknown: aucune surcharge de taille de contexte et aucune détection.
+
+Must:
+  La surcharge l'emporte toujours sur la détection, y compris quand la détection annonce une valeur plus grande ou plus petite.
+  Un modèle non détecté (aucun @DetectedModel) se résout si et seulement si le profil porte une taille de contexte ; sinon @AgentsError::ContextSizeUnknown (décision par défaut, voir Tasks).
+  Le budget de compaction utilise la taille de contexte du profil résolu, pas celle du fournisseur (AC-2).
+  Le profil ne contient aucun secret ni adresse : il nomme un fournisseur.
+  @ModelProfile et @SamplingParams se sérialisent et se désérialisent à l'identique ; les champs de surcharge absents restent absents.
+  @SamplingParams couvre au moins température, top-p, top-k et un jeu de paramètres supplémentaires libres (clé/valeur JSON) transmis tels quels au fournisseur.
+
+Depends on:
+  ./error.sdd
+  ../context/budget.sdd
+  ../context/replay.sdd
+  serde
+  serde_json
+
+Scenario: override beats detection
+  Given a detected context of 8192 and a profile overriding it to 262144
+  When the profile is resolved
+  Then the resolved context size is 262144
+
+Scenario: detection fills what is not overridden
+  Given a detected context of 32768 and a profile without context override
+  When the profile is resolved
+  Then the resolved context size is 32768
+
+Scenario: undetected model needs an override
+  Given no detected model
+  When a profile with a context override is resolved
+  Then it resolves
+  And a profile without it fails with ContextSizeUnknown naming the profile
+
+Scenario: defaults documented
+  Given a detected context of 40000 and nothing else
+  When resolved
+  Then max response is 10000, tools are supported, replay is none, concurrency is 1 and the tokenization hint is 2500
+
+Scenario: compaction uses the profile context size
+  Given a provider announcing 8192 and a profile overriding to 262144
+  When the resolved profile builds its budget with a summary prompt of 500 tokens and a render cap of 10000 characters
+  Then the budget needs no compaction for a session of 100000 tokens
+
+Scenario: profile round trips
+  Given a profile with every override and extra sampling parameters
+  When serialized then deserialized
+  Then it is identical, and a profile without overrides serializes without those fields
+
+Tasks:
+  [ ] #6 Tests manquants : surcharge face à une détection plus grande ET plus petite ; `max_response` et `tools` surchargés puis détectés ; @ResolvedProfile::budget qui dépend de l'indice de tokenisation (le plafond de rendu converti change avec l'indice) ;
+      aller-retour sans `tokenization_hint` ni `concurrency` quand ils sont absents.
+  [ ] #1 Tests puis implémentation.
+  [?] #2 Comportement quand un modèle référencé n'est pas détecté (TBD du DSD) : posé ici « il se résout si le profil porte une taille de contexte, sinon erreur explicite » ; confirmer.
+  [?] #3 Valeurs par défaut (réponse maximale = un quart du contexte) : proposées, non issues du DSD ; à confirmer.
+  [?] #5 Les constructeurs refusent le zéro par le type (`NonZeroU64` pour l'indice de tokenisation et la simultanéité) ; réponse maximale par défaut = contexte divisé par 4 (division saturante entière).
+  [?] #4 La détection réelle (`list_models` de `rig`, `max_model_len` de vLLM) vit dans l'adaptateur (voir ./agents.sdd #2) ; ici seulement le type @DetectedModel.

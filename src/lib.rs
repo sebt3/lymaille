@@ -3,10 +3,15 @@
 //! agent state, and lazily discovered MCP toolsets.
 //! See `dsd/agent-sessions.md` for the full design.
 
+mod agents;
 mod clock;
 mod context;
 mod session;
 
+pub use agents::{
+    AgentDefinition, AgentKind, AgentsError, AgentsResult, DetectedModel, MemoryRights, ModelProfile,
+    Provider, ProviderLevel, ResolvedProfile, SamplingParams, SandboxLimits,
+};
 pub use clock::{Clock, ManualClock, SystemClock, Timestamp};
 pub use context::{
     Budget, CompactionStrategy, ContextError, ContextResult, DefaultStrategy, Digest, ReplayMode, Summarizer,
@@ -14,7 +19,7 @@ pub use context::{
 };
 pub use session::{
     AgentRef, Backoff, BoundaryKind, CancelHandle, Event, EventKind, EventSink, FormatVersion, History,
-    InMemoryStore, Label, LabelAuthor, LabelTarget, Labels, McpRecord, Message, ModelProfile, NullSink,
+    InMemoryStore, Label, LabelAuthor, LabelTarget, Labels, McpRecord, Message, ModelSnapshot, NullSink,
     Outcome, Provenance, Reasoning, RecordingSink, Redactor, RunId, RunSignals, ScriptRecord, Segment,
     SegmentContext, SessionError, SessionId, SessionResult, SessionState, SessionStore, SleepOutcome,
     TaggedValue, TokenCounters, ToolCall, TurnGate, TurnId, TurnPermit, restore_notices,

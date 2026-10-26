@@ -1,0 +1,33 @@
+Spec: error
+
+Purpose:
+  Erreur typée du catalogue d'agents, de fournisseurs et de profils.
+
+Owns:
+  ./error.rs
+
+Depends on:
+  thiserror
+
+Exposes:
+  @AgentsError
+  @AgentsResult
+
+Raises:
+  @AgentsError::UnknownProfile: un profil de modèle nommé est introuvable, porte le nom.
+  @AgentsError::UnknownProvider: un fournisseur nommé est introuvable, porte le nom.
+  @AgentsError::ContextSizeUnknown: ni la détection ni le profil ne donnent la taille de contexte, porte le nom du profil.
+  @AgentsError::InvalidDefinition: une définition d'agent est incohérente, porte la raison (texte fixe) et l'identifiant.
+  @AgentsError::Store: échec du stockage de l'hôte, message texte.
+
+Must:
+  @AgentsError est `#[non_exhaustive]`, dérive `thiserror::Error`, chaque variante a un Display anglais qui nomme la cause et l'objet (nom ou identifiant) sans contenu de prompt.
+  @AgentsResult est l'alias `Result<T, AgentsError>`.
+
+Scenario: display names the cause and the object
+  Given each variant built with a sample name
+  When formatted
+  Then the text names the cause and the object
+
+Tasks:
+  [ ] #1 Tests puis implémentation.

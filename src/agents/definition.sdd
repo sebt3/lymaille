@@ -1,0 +1,85 @@
+Spec: definition
+
+Purpose:
+  Définition d'un agent, principal ou sous-agent : identifiant, nature, prompt système templaté, nom du profil de modèle et paramètres, modules et toolsets accessibles, droits de Memory par niveau,
+    limites de sandbox, stratégie de fenêtre de contexte, sous-agents délégables (principal) ou schéma de sortie (sous-agent), et son empreinte
+    (`agent-sessions/agents#FR-1`, `FR-2`, `FR-8`, `agent-sessions/session#FR-2`).
+
+Owns:
+  ./definition.rs
+
+Exposes:
+  @AgentDefinition
+  @AgentKind
+  @MemoryRights
+  @SandboxLimits
+  @AgentDefinition::fingerprint
+
+Accepts:
+  @AgentDefinition::new: l'identifiant, la nature (@AgentKind : `Main` ou `Sub`), le prompt système (gabarit texte) et le nom du profil de modèle, puis des constructeurs chaînés : paramètres d'échantillonnage, modules, toolsets, @MemoryRights par niveau (lecture, écriture pour utilisateur, projet, session), @SandboxLimits (délai de script, plafond de rendu en caractères), nom de la stratégie de contexte, sous-agents délégables (principal), schéma JSON de sortie (sous-agent).
+  @AgentDefinition::validate: aucun argument.
+
+Returns:
+  @AgentDefinition::fingerprint: une chaîne hexadécimale de 16 caractères, empreinte stable de la définition.
+  @AgentDefinition::validate: succès ou @AgentsError::InvalidDefinition.
+
+Raises:
+  @AgentsError::InvalidDefinition: un sous-agent qui déclare des sous-agents délégables ; un principal qui déclare un schéma de sortie ; un identifiant, un prompt ou un nom de profil vide ; un sous-agent délégable égal à l'agent lui-même ; une liste de toolsets ou de modules qui contient un doublon.
+
+Must:
+  Le modèle se désigne par un nom de profil : la définition n'a aucun champ de fournisseur.
+  L'empreinte est déterministe et indépendante de la plate-forme : même définition, même empreinte, y compris après un aller-retour de sérialisation ; elle change dès qu'un champ de la définition change (prompt, profil, toolsets, modules, droits, limites, sous-agents, schéma). Calculée par FNV-1a 64 bits sur la sérialisation JSON canonique (clés triées), sans dépendance externe.
+  Un sous-agent ne délègue pas (`agent-sessions#BR-6`) ; seul un principal a des sous-agents délégables.
+  Les capacités sont exactement celles de la définition (`agent-sessions#BR-2`) : aucune valeur par défaut n'accorde un module ou un toolset ; les listes absentes sont vides, les droits de Memory absents sont « aucun ».
+  Se sérialise et se désérialise à l'identique ; aucun champ ne porte de secret.
+
+Depends on:
+  ./error.sdd
+  ./profile.sdd
+  serde
+  serde_json
+
+Scenario: model by profile name only
+  Given a definition built with profile `strix-qwen`
+  When serialized
+  Then the JSON has the profile name and no provider field
+
+Scenario: fingerprint is stable and sensitive
+  Given a definition
+  When its fingerprint is computed twice, after a JSON round trip, and after changing one toolset
+  Then the first three are equal and the last differs
+
+Scenario: no capability by default
+  Given a definition with only the required fields
+  When read
+  Then modules and toolsets are empty and memory rights grant nothing
+
+Scenario: sub-agent cannot delegate
+  Given a sub-agent definition declaring delegable sub-agents
+  When validated
+  Then it fails with InvalidDefinition
+
+Scenario: main agent has no output schema
+  Given a main agent declaring an output schema
+  When validated
+  Then it fails with InvalidDefinition
+
+Scenario: self delegation and duplicates refused
+  Given a main agent listing itself as delegable, and a definition with a duplicated toolset
+  When validated
+  Then both fail with InvalidDefinition
+
+Scenario: round trip
+  Given a main agent with every field set
+  When serialized then deserialized
+  Then it is identical
+
+Tasks:
+  [ ] #6 Tests manquants : l'empreinte change pour chaque champ de la liste du Must (prompt, profil, toolsets, modules, chacun des quatre droits de Memory, délai et plafond de sandbox, sous-agents délégables, schéma de sortie, aussi id, nature, paramètres, stratégie de contexte) ;
+      vecteurs connus du FNV-1a 64 bits sur des chaînes (`""` → `cbf29ce484222325`, `"a"` → `af63dc4c8601ec8c`, `"foobar"` → `85944171f73967e8`) pour la fonction de hachage, afin que « indépendante de la plate-forme » soit vérifié ; `validate()` Ok sur une définition valide et sur un sous-agent avec schéma ;
+      identifiant, prompt et profil vides refusés ; doublon de modules refusé.
+  [ ] #1 Tests puis implémentation.
+  [?] #2 Rendu du prompt templaté (variables du ToolsetContext) : relève de `toolsets` (templating) ; ici le prompt est du texte brut.
+  [?] #3 La stratégie de contexte est un nom ; le choix de la stratégie par nom (fabrique) se branche avec la boucle de tour.
+  [?] #5 Posé à l'implémentation : @MemoryRights = quatre droits indépendants (lecture, écriture utilisateur, projet, session) ; `sandbox` absent = aucune limite ; les doublons de sous-agents délégables ne sont pas refusés ; un identifiant, un prompt ou un nom de profil blanc est refusé.
+  [?] #4 Granularité des droits de Memory (lecture/écriture par niveau) : proposée, à confirmer avec `modules`.

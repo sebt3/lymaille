@@ -1,0 +1,43 @@
+Spec: agents
+
+Purpose:
+  Définitions d'agents, fournisseurs et profils de modèle (avec la surcharge de ce que le fournisseur détecte), catalogue stocké par trait, et
+    trait du fournisseur d'inférence avec classement des erreurs et fournisseur scripté pour les tests. Réalise `agent-sessions/agents`
+    (./dsd/agent-sessions/agents.md) et la partie inférence de `agent-sessions#FR-6`, `agent-sessions#NFR-1`.
+
+Structure:
+  ./mod.rs: déclarations et ré-exports
+  ./error.rs: erreur du module
+  ./profile.rs: profil de modèle, métadonnées détectées, profil résolu
+  ./provider.rs: fournisseur (entité nommée par références)
+  ./definition.rs: définition d'agent et empreinte
+  ./catalog.rs: traits de stockage du catalogue et stockage mémoire
+  ./inference.rs: trait du fournisseur d'inférence, requête, réponse, classement des erreurs, fournisseur scripté
+
+Owns:
+  ./mod.rs
+
+References:
+  ../../lymaille.sdd
+  ../../dsd/agent-sessions/agents.md
+  ../context/context.sdd
+  ../session/session.sdd
+  ./error.sdd
+  ./profile.sdd
+  ./provider.sdd
+  ./definition.sdd
+  ./catalog.sdd
+  ./inference.sdd
+
+Must:
+  Ne réaliser aucune E/S : détection de modèles, appels d'inférence et stockage sont des traits ou des données (`agent-sessions#CON-1`).
+  Ne jamais contenir de secret : un fournisseur ne porte que des références nommées que l'hôte résout (`agent-sessions#CON-3`).
+  Une définition d'agent désigne son modèle par le nom d'un profil et ne référence jamais un fournisseur (`agents#FR-8`).
+  Déclarer chaque sous-module et ré-exporter ce que les specs enfants exposent ; mod.rs ne contient aucun comportement.
+
+Tasks:
+  [ ] #1 Déclarer les sous-modules dans ./mod.rs au fil des specs enfants livrées.
+  [?] #2 Adaptateur `rig` (clients, `list_models`, décodage de `reasoning` / `reasoning_content`, `chat_template_kwargs` par `additional_params`) : crate ou module séparé qui implémente @InferenceProvider ;
+      posé hors de cette spec pour garder la crate testable sans `rig`. Confirmer que `rig` entre comme dépendance de la crate (CON-2) ou d'un crate d'adaptation.
+  [?] #3 Projet (FR-4 : manifeste d'agents, de toolsets, de ContextType et de ToolsetContext) : dépend de `toolsets` ; non spécifié ici.
+  [?] #4 Sérialisation frontmatter + corps (FR-3) : exige une dépendance YAML (l'écosystème `serde_yaml` est archivé) ; ./definition.sdd livre la sérialisation JSON, le format éditable à la main est à décider.

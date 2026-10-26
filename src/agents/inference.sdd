@@ -1,0 +1,80 @@
+Spec: inference
+
+Purpose:
+  Trait du fournisseur d'inférence que la boucle de tour appelle, requête et réponse, classement des erreurs en transitoire, permanente ou dépassement de contexte, et un fournisseur scripté pour tester sans LLM réel
+    (`agent-sessions#FR-6`, `agent-sessions#NFR-1`, `agent-sessions/session#AC-8`, `AC-9`, `AC-11`).
+
+Owns:
+  ./inference.rs
+
+Exposes:
+  @InferenceProvider
+  @InferenceRequest
+  @InferenceResponse
+  @ReportedUsage
+  @InferenceError
+  @ErrorClass
+  @classify_status
+  @ScriptedProvider
+
+Accepts:
+  @InferenceProvider::complete: une @InferenceRequest (profil résolu, prompt système, messages, définitions de tools, raisonnement à rejouer, paramètres).
+  @classify_status: un code HTTP et un indicateur « corps signale un dépassement de contexte ».
+  @ScriptedProvider::new: une liste ordonnée de résultats préparés (réponse ou erreur) ; chaque appel consomme le suivant.
+
+Returns:
+  @InferenceProvider::complete: une @InferenceResponse (message de l'assistant, @ReportedUsage optionnel : prompt et complétion) ou une @InferenceError.
+  @classify_status: une @ErrorClass.
+  @ScriptedProvider::requests: les requêtes reçues, dans l'ordre.
+
+Raises:
+  @InferenceError porte une @ErrorClass (`Transient`, `Permanent`, `ContextOverflow`) et un message texte sans contenu de requête.
+
+Must:
+  @classify_status : 429 et 5xx → `Transient` ; 400, 401, 403, 404 → `Permanent` ; 400 dont le corps signale un dépassement de contexte → `ContextOverflow` ; tout autre 4xx → `Permanent` ; 2xx n'est pas une erreur (@classify_status rend `None`) ; les erreurs de réseau et de délai sont rapportées par l'adaptateur comme `Transient` (pas de code).
+  @InferenceProvider est `Send + Sync`, à futur `Send`, sans macro ni objet dynamique.
+  Un message d'erreur n'embarque jamais le contenu de la requête ni un secret.
+  @ScriptedProvider enregistre chaque requête reçue avant de répondre, rend `Permanent` avec le message « script exhausted » quand la liste est épuisée, et est partageable entre tâches (verrou interne, `Send + Sync`).
+  @InferenceRequest et @InferenceResponse se clonent et se comparent (tests).
+  Aucune attente, aucun réessai ici : le backoff est celui de ../session/backoff.sdd, piloté par la boucle de tour.
+
+Depends on:
+  ./profile.sdd
+  ../session/history.sdd
+  serde_json
+
+Scenario: status classification
+  Given the status codes 429, 500, 503, 400, 401, 403, 404, 418 and 200
+  When classified
+  Then 429, 500 and 503 are Transient, 400 401 403 404 and 418 are Permanent, and 200 gives nothing
+
+Scenario: context overflow is its own class
+  Given status 400 with a body flag signalling context overflow
+  When classified
+  Then the class is ContextOverflow
+
+Scenario: scripted provider replays its script
+  Given a scripted provider with two failures then a response
+  When complete is called three times
+  Then the first two return the scripted errors and the third the response
+
+Scenario: scripted provider records requests
+  Given a scripted provider and two requests
+  When both are completed
+  Then requests returns the two in order
+
+Scenario: exhausted script is a permanent error
+  Given an empty scripted provider
+  When complete is called
+  Then it fails Permanent with the message `script exhausted`
+
+Scenario: shared between tasks
+  Given a scripted provider shared by four tasks
+  When each completes one request
+  Then four requests are recorded and no result is used twice
+
+Tasks:
+  [ ] #1 Tests (tokio de test) puis implémentation.
+  [?] #2 Streaming (TBD de `agent-sessions/session`) : non couvert, la réponse est complète ; ajouter une variante ou une méthode de flux si le choix « fragments comme événements » est retenu.
+  [?] #3 Rejeu du raisonnement : la requête porte le raisonnement déjà choisi par @replayed_reasoning ; la transmission de `chat_template_kwargs` au serveur (mode explicite) est faite par l'adaptateur (voir ./agents.sdd #2).
+  [?] #4 Sortie structurée du sous-agent (schéma JSON, `delegation`) : la requête peut devoir porter un schéma de sortie ; non spécifié avant `delegation`.
