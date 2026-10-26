@@ -4,9 +4,11 @@
 mod budget;
 mod error;
 mod replay;
+mod strategy;
 mod usage;
 
 pub use budget::Budget;
 pub use error::{ContextError, ContextResult};
 pub use replay::{ReplayMode, replayed_reasoning};
+pub use strategy::{CompactionStrategy, DefaultStrategy, Digest, Summarizer};
 pub use usage::{UsageTracker, estimate_tokens};

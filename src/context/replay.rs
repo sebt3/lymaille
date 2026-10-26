@@ -158,6 +158,27 @@ mod tests {
     }
 
     #[test]
+    fn intra_turn_without_user_message_replays_every_message() {
+        let mut history = History::new();
+        history.push(Message::assistant(
+            "a1",
+            Some(Reasoning::new("provider-a", "r1")),
+            Vec::new(),
+        ));
+        history.push(Message::assistant(
+            "a2",
+            Some(Reasoning::new("provider-a", "r2")),
+            Vec::new(),
+        ));
+        let replayed = replayed_reasoning(history.messages(), ReplayMode::IntraTurn);
+        assert_eq!(
+            texts(&replayed),
+            vec!["r1", "r2"],
+            "without any user message, every assistant message belongs to the current turn"
+        );
+    }
+
+    #[test]
     fn reasoning_without_emitter_is_not_replayed() {
         let mut history = History::new();
         history.push(Message::user("question"));

@@ -151,18 +151,68 @@ mod tests {
     }
 
     #[test]
-    fn worst_case_always_fits() {
-        // SESSION just below the threshold: 10000 - 500 - 2000 - 400 = 7100 is the last size without compaction.
+    fn worst_case_fits_at_both_bounds() {
+        // 10000 - 500 - 2000 - 400 = 7100 is the last session size without compaction.
         let budget = budget();
-        let session = 7099;
-        assert!(!budget.needs_compaction(session));
-        let after_response = session + 1000;
-        let after_tool_result = after_response + 400;
-        // Summary request (PROMPT) plus its response (R) must fit next to the session.
-        let summary = 500 + after_tool_result + 1000;
+        let session = 7100;
         assert!(
-            summary <= 10_000,
+            !budget.needs_compaction(session),
+            "the session at the boundary must not trigger compaction"
+        );
+        assert!(
+            budget.needs_compaction(session + 1),
+            "one token more than the boundary must trigger compaction"
+        );
+        // Just below the threshold, one response R and one tool result T are added before the next request.
+        let response = 1000;
+        let tool_result = 400;
+        let after_turn = session + response + tool_result;
+        assert!(
+            budget.needs_compaction(after_turn),
+            "the grown session is over the threshold, so compaction runs before the next request"
+        );
+        // The summary request (PROMPT) and its response (R) must still fit next to the grown session.
+        let summary_request = 500;
+        assert!(
+            summary_request + after_turn + response <= 10_000,
             "PROMPT, the session, the response R and the result T must fit in MAX"
+        );
+    }
+
+    #[test]
+    fn bound_below_the_incompressible_sum_refuses_every_system_prompt() {
+        // MAX 1000 is below PROMPT 500 + 3R 3000 + T 400: no system prompt fits, and the bound is reported as zero.
+        let budget = Budget::new(1000, 500, 1000, 1000);
+        assert!(
+            matches!(
+                budget.check_startup(0),
+                Err(ContextError::SystemTooLarge { system: 0, limit: 0 })
+            ),
+            "even an empty system prompt is refused when the incompressible sum exceeds MAX"
+        );
+        assert!(
+            matches!(
+                budget.check_startup(u64::MAX),
+                Err(ContextError::SystemTooLarge { limit: 0, .. })
+            ),
+            "a huge system prompt is refused with the bound zero, without overflow"
+        );
+    }
+
+    #[test]
+    fn message_room_saturates_at_zero() {
+        // SYS 9500 alone makes 500 + 2000 + 400 + 9500 = 12400 > 10000: there is no room, and the room is not negative.
+        let budget = budget();
+        let refused = budget.check_user_message(9500, 1);
+        assert!(
+            matches!(
+                refused,
+                Err(ContextError::MessageTooLarge {
+                    size: 1,
+                    available: 0
+                })
+            ),
+            "a message is refused with zero room when the system prompt leaves none, got {refused:?}"
         );
     }
 

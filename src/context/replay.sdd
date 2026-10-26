@@ -53,6 +53,6 @@ Scenario: mode text round trips
 
 Tasks:
   [x] #1 Tests puis implémentation.
-  [ ] #4 Test manquant : @ReplayMode::IntraTurn sans aucun message utilisateur (voir #3).
+  [x] #4 Test manquant : @ReplayMode::IntraTurn sans aucun message utilisateur (voir #3).
   [?] #3 Posé à l'implémentation : en mode `IntraTurn` sans aucun message utilisateur, tous les messages de l'assistant sont du tour courant ; un émetteur vide vaut « pas d'émetteur ».
   [?] #2 @ModelProfile de ../session/segment.sdd porte le mode de rejeu en texte libre : le remplacer par @ReplayMode quand `agents` consomme ce module (même valeurs textuelles, donc sans montée de format).

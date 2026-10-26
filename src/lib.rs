@@ -9,7 +9,8 @@ mod session;
 
 pub use clock::{Clock, ManualClock, SystemClock, Timestamp};
 pub use context::{
-    Budget, ContextError, ContextResult, ReplayMode, UsageTracker, estimate_tokens, replayed_reasoning,
+    Budget, CompactionStrategy, ContextError, ContextResult, DefaultStrategy, Digest, ReplayMode, Summarizer,
+    UsageTracker, estimate_tokens, replayed_reasoning,
 };
 pub use session::{
     AgentRef, Backoff, BoundaryKind, CancelHandle, Event, EventKind, EventSink, FormatVersion, History,

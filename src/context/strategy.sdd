@@ -30,7 +30,8 @@ Raises:
 
 Must:
   @Summarizer et @CompactionStrategy sont des traits asynchrones à futurs `Send`, `Send + Sync`, utilisables par l'hôte : le crate fournit @DefaultStrategy, pas de résumeur concret.
-  @DefaultStrategy envoie au résumeur la session intégrale, sans élagage ni extrait conservé ; le texte de transcription contient chaque message dans l'ordre, avec son rôle, et le raisonnement rejoué selon le @ReplayMode donné à la construction.
+  @DefaultStrategy envoie au résumeur la session intégrale, sans élagage ni extrait conservé ; le texte de transcription contient chaque message dans l'ordre, avec son rôle, les appels d'outil de l'assistant (nom et arguments), le nom de l'outil de chaque résultat, et le raisonnement rejoué selon le @ReplayMode donné à la construction.
+  Dans la transcription, le contenu d'un message est rendu sur une ou plusieurs lignes sans ambiguïté : chaque message commence par une ligne `role: ` (`system: `, `user: `, `assistant: `, `tool <nom>: `, `boundary: `), les appels d'outil d'un message de l'assistant suivent ce message sur des lignes `assistant tool call <nom>: <arguments JSON compact>`, et le contenu multiligne reste lisible (aucun échappement exigé).
   La session qui suit une compaction se compose du prompt système (inchangé, porté par le segment et non recopié ici) puis de la sortie : frontière `Compaction` suivie du résumé comme message utilisateur.
   Le digest, s'il est retenu, est ajouté à la fin du message de résumé et ne contient que des nombres.
   Aucune compaction ne tombe entre un appel d'outil et son résultat : un historique avec appel en attente est refusé avant tout appel au résumeur.
@@ -47,6 +48,11 @@ Scenario: default strategy sends the whole session
   Given a history of four messages and a recording summarizer
   When the default strategy compacts it
   Then the summarizer received all four messages in order and the result is a Compaction boundary followed by the summary as a user message
+
+Scenario: tool calls and tool names are in the transcript
+  Given an assistant message with a tool call `rhai_pad` with arguments `{"script": "1+1"}` and its result
+  When the transcript is built
+  Then it contains the tool name `rhai_pad`, the arguments and the result content, in order
 
 Scenario: reasoning follows the replay mode
   Given an assistant message with reasoning, with replay mode AllTurns then None
@@ -74,6 +80,9 @@ Scenario: summarizer failure is reported
   Then it fails with Summarizer and the history given is unchanged
 
 Tasks:
-  [ ] #1 Tests (résumeur simulé) puis implémentation.
+  [x] #1 Tests (résumeur simulé) puis implémentation.
+  [x] #4 Rendre les appels d'outil et le nom de l'outil de chaque résultat dans la transcription, et le Scenario « tool calls and tool names are in the transcript » (défaut relevé au rapport du lot F2).
+  [ ] #6 Tests mineurs relevés : contenu multiligne, forme exacte de la ligne `reasoning: `, historique inchangé aussi sur le chemin de succès.
+  [?] #5 Posé à l'implémentation : préambule `The earlier part of this conversation was compacted. Summary of that part:`, digest `Session digest: N open tasks, M memories.`, ligne `reasoning: ` avant le message de l'assistant, erreur du résumeur propagée telle quelle.
   [?] #2 Le rôle du message de résumé (utilisateur) et son gabarit (préambule) sont posés ici ; le contenu du prompt de résumé relève du TBD de ./context.sdd.
   [?] #3 Le résumeur reçoit du texte et non des messages structurés : l'hôte peut préférer des messages. À confirmer avec `agents`.

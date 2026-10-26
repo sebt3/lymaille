@@ -84,13 +84,13 @@ Scenario: estimate rounds up twice
   Then the characters convert to 401 tokens (rounded up) and the margin gives 442 (rounded up)
 
 Tasks:
-  [ ] #3 Remplacer le test « estimate rounds up » par celui du Scenario corrigé (1001 caractères, 442).
-  [ ] #5 Tests manquants relevés par la validation : rapport `Some(0)` remplacé par l'estimation ; cumul qui ne diminue jamais, compaction comprise ; saturation du cumul ;
+  [x] #3 Remplacer le test « estimate rounds up » par celui du Scenario corrigé (1001 caractères, 442).
+  [x] #5 Tests manquants relevés par la validation : rapport `Some(0)` remplacé par l'estimation ; cumul qui ne diminue jamais, compaction comprise ; saturation du cumul ;
       cumul avec prompt estimé majoré ; règle du rapport inférieur par agent ; @estimate_tokens près de la valeur maximale ; @UsageTracker::estimate_chars ;
       @UsageTracker::set_session_estimate (remise à zéro des messages ajoutés).
   [?] #4 Posé à l'implémentation : la règle du rapport inférieur au précédent s'applique par agent (le cumul de `sub1` l'exige), la base `SESSION` suit le dernier rapport global ;
       complétion non rapportée comptée 0 ; prompt estimé compté majoré dans le cumul ; @UsageTracker::set_session_estimate remet à zéro les messages ajoutés ;
       `fill_permille` avec `max` nul rend la valeur maximale ; `estimate_chars` conservé et déclaré dans `Accepts` (il consomme le paramètre `chars_per_token_milli` du tracker).
       Un tracker sert une fenêtre de contexte, donc une session : un sous-agent qui a sa propre session a son propre tracker ; le cumul par agent d'un même tracker sert l'audit.
-  [ ] #1 Tests puis implémentation (rouverte : tests manquants, voir #3 et #5).
+  [x] #1 Tests puis implémentation.
   [?] #2 Le DSD ne dit pas si le cumul est persisté : @TokenCounters de ../session/state.sdd en porte le total ; l'agrégation par agent (sous-agents) est à brancher quand `delegation` existe.
