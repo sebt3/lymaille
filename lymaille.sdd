@@ -57,7 +57,7 @@ Tasks:
   [?] #2 Épingler dans ce manifeste les versions de `serde`, `serde_json`, `thiserror`, `tokio` et `tokio-util` posées
       par les specs de `session` : l'implémenteur les ajoute avec `cargo add`, le développeur principal confirme les
       majeures retenues.
-  [?] #4 Harnais : depuis que `tokio` est une dépendance, 4 entrées `disallowed-*` de ./clippy.toml (`tokio::fs::read`, `tokio::fs::read_to_string`,
+  [?] #4 Harnais (décidé par le développeur principal : `allow-invalid = true` sur ces entrées ET contrôle dans `scripts/check`, à faire exécuter par une tâche de harnais explicite) : depuis que `tokio` est une dépendance, 4 entrées `disallowed-*` de ./clippy.toml (`tokio::fs::read`, `tokio::fs::read_to_string`,
       `tokio::fs::write`, `tokio::process::Command`) émettent un avertissement de configuration (« does not refer to a reachable function/type »)
       parce que les features `fs` et `process` de `tokio` sont désactivées. Propositions : `allow-invalid = true` sur ces entrées, et un
       contrôle dans `scripts/check` qui fait échouer la batterie sur tout avertissement de configuration clippy (aujourd'hui silencieux).

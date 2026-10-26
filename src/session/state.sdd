@@ -85,10 +85,9 @@ Scenario: absent optional fields default
 
 Tasks:
   [x] #1 Tests puis implémentation.
-  [?] #4 Mutation : aucun mutateur public sur @SessionState (la spec n'en prévoit pas). La boucle de tour (hors de cette spec) a besoin de mutateurs `pub(crate)` ;
-      un hôte ne construit un état que par @SessionState::new puis par la librairie, et ne le lit que par accesseurs. Confirmer qu'aucune mutation publique n'est voulue.
-  [?] #5 `created_at` est conservé ; absent d'un document, il vaut l'époque Unix (0). Un état relu en 1.9 puis réécrit garde l'étiquette 1.9 bien que les champs inconnus
-      aient été perdus : faut-il réécrire en @FormatVersion::CURRENT à chaque sauvegarde ?
+  [x] #4 Décidé : aucun mutateur public sur @SessionState. La boucle de tour aura des mutateurs `pub(crate)` ; un hôte construit un état par @SessionState::new puis le confie à la librairie.
+  [ ] #5 Décidé : un état relu puis sauvegardé est réécrit en @FormatVersion::CURRENT (l'étiquette ne doit pas mentir sur le contenu). À réaliser avec son Scenario : relire un document 1.9 avec champ inconnu,
+      réécrire, constater `format` = 1.0 courant ; `created_at` absent vaut l'époque Unix (0).
   [?] #6 Aucun `Deserialize` public sur @SessionState (la lecture passe par @SessionState::from_json, qui vérifie la version d'abord) ; un JSON syntaxiquement
       invalide de format 2.0 rend @SessionError::Serialization et non IncompatibleFormat.
   [?] #2 Types de la todo, des watchers et des handles de runs : définis par `modules` (todo) et `delegation` (watchers, `FR-14`).
