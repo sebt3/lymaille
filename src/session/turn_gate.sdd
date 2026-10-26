@@ -52,4 +52,5 @@ Scenario: concurrent attempts
   Then exactly one obtains a permit
 
 Tasks:
-  [ ] #1 Tests puis implémentation.
+  [x] #1 Tests puis implémentation.
+  [?] #2 `is_active` et la libération au `drop` récupèrent un verrou empoisonné au lieu d'échouer (seul `try_begin` rend `Poisoned`) : confirmer.

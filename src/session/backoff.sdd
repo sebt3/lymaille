@@ -39,4 +39,4 @@ Scenario: very many attempts never overflow
   Then the last delay is 300 seconds
 
 Tasks:
-  [ ] #1 Tests puis implémentation.
+  [x] #1 Tests puis implémentation.

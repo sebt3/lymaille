@@ -166,7 +166,5 @@ redundant_pub_crate = { level = "allow", priority = 1 }
 
 [dependencies]
 serde = { version = "1.0.229", features = ["derive"] }
-thiserror = "2.0.21"
-
-[dev-dependencies]
 serde_json = "1.0.154"
+thiserror = "2.0.21"

@@ -27,7 +27,7 @@ Must:
 
 Depends on:
   serde
-  serde_json: en dev-dependency déjà présente, pour les tests
+  serde_json
 
 Scenario: empty identifiers are refused
   Given an empty string
@@ -53,6 +53,6 @@ Scenario: turn ids are successive
 
 Tasks:
   [x] #1 Tests puis implémentation.
-  [ ] #4 Désérialisation validante de @SessionId et @RunId (nécessaire à @SessionState), voir le Scenario correspondant.
+  [x] #4 Désérialisation validante de @SessionId et @RunId (nécessaire à @SessionState), voir le Scenario correspondant.
   [?] #3 Choix faits à l'implémentation : @TurnId::new accepte 0 ; @TurnId est copiable.
   [?] #2 Les identifiants sont-ils générés par la librairie (UUID, dépendance) ou toujours fournis par l'hôte ? Posé : fournis par l'hôte, aucune dépendance.

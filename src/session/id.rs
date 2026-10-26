@@ -3,7 +3,11 @@
 
 use std::fmt;
 
-use serde::Serialize;
+use serde::de::{self, Deserializer};
+use serde::{Deserialize, Serialize};
+
+/// Message of the deserialization error raised for an empty identifier.
+const EMPTY_IDENTIFIER: &str = "an identifier must not be empty";
 
 /// Identifier of a session, provided by the host. Never empty.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -31,6 +35,13 @@ impl SessionId {
 impl fmt::Display for SessionId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.value)
+    }
+}
+
+impl<'de> Deserialize<'de> for SessionId {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Self::new(value).ok_or_else(|| <D::Error as de::Error>::custom(EMPTY_IDENTIFIER))
     }
 }
 
@@ -63,8 +74,15 @@ impl fmt::Display for RunId {
     }
 }
 
+impl<'de> Deserialize<'de> for RunId {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Self::new(value).ok_or_else(|| <D::Error as de::Error>::custom(EMPTY_IDENTIFIER))
+    }
+}
+
 /// Rank of a turn in its session, starting at 1.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 #[non_exhaustive]
 pub struct TurnId {
@@ -128,6 +146,39 @@ mod tests {
         assert_eq!(
             turn_json, "3",
             "a turn identifier must serialize as a bare number"
+        );
+    }
+
+    #[test]
+    fn deserialization_refuses_the_empty_identifier() {
+        let session: SessionId =
+            serde_json::from_str("\"abc\"").expect("a non-empty text deserializes as a session identifier");
+        assert_eq!(
+            session.as_str(),
+            "abc",
+            "a session identifier must deserialize to the text it was written as"
+        );
+        let run: RunId =
+            serde_json::from_str("\"abc\"").expect("a non-empty text deserializes as a run identifier");
+        assert_eq!(
+            run.as_str(),
+            "abc",
+            "a run identifier must deserialize to the text it was written as"
+        );
+        assert!(
+            serde_json::from_str::<SessionId>("\"\"").is_err(),
+            "an empty text must not deserialize as a session identifier"
+        );
+        assert!(
+            serde_json::from_str::<RunId>("\"\"").is_err(),
+            "an empty text must not deserialize as a run identifier"
+        );
+        let turn: TurnId =
+            serde_json::from_str("3").expect("a bare number deserializes as a turn identifier");
+        assert_eq!(
+            turn,
+            TurnId::new(3),
+            "a turn identifier must deserialize from a bare number"
         );
     }
 

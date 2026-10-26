@@ -21,7 +21,8 @@ Returns:
 
 Must:
   Quand un secret en contient un autre, le plus long est masqué d'abord, pour ne laisser aucun reste.
-  Le masquage est idempotent.
+  Le masquage est idempotent tant qu'aucun secret ne commence ni ne finit par `*` ; sinon le `*` du masque peut se recombiner avec un
+    secret voisin, limite connue et assumée (aucun secret ne fuit pour autant : le masque ne révèle rien).
   Le `Debug` de @Redactor ne montre jamais un secret, seulement leur nombre.
   @Redactor n'est ni sérialisable ni cloné vers l'état persisté.
   Un texte sans secret est rendu inchangé.
@@ -61,5 +62,7 @@ Scenario: empty secret ignored
   Then the result is `hello`
 
 Tasks:
-  [ ] #1 Tests puis implémentation.
+  [x] #1 Tests puis implémentation.
+  [?] #3 Rejeter à l'ajout les secrets qui commencent ou finissent par `*` pour rendre l'idempotence inconditionnelle ? Non fait : les secrets réels
+      sont des jetons opaques ; à rouvrir si le cas se présente.
   [?] #2 Les secrets de petite taille (un caractère) masquent trop : seuil minimal à décider avec le développeur principal.
