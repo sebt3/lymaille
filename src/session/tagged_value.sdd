@@ -52,7 +52,7 @@ Scenario: unknown tag refused
   Then it fails
 
 Tasks:
-  [ ] #6 Test manquant : `Blob([1,2])` et `Array([Int(1),Int(2)])` restent distincts après aller-retour.
+  [x] #6 Test manquant : `Blob([1,2])` et `Array([Int(1),Int(2)])` restent distincts après aller-retour.
   [x] #1 Tests puis implémentation.
   [?] #5 Les Scenarios d'aller-retour passent par les dérivations serde : seule la règle des flottants non finis contraint le code. Le format d'étiquetage est un contrat
       de persistance (ne pas le modifier sans montée de version de format).

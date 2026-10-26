@@ -84,7 +84,13 @@ Scenario: absent optional fields default
   Then empty history, tables and counters are used
 
 Tasks:
-  [ ] #1 Tests puis implémentation.
+  [x] #1 Tests puis implémentation.
+  [?] #4 Mutation : aucun mutateur public sur @SessionState (la spec n'en prévoit pas). La boucle de tour (hors de cette spec) a besoin de mutateurs `pub(crate)` ;
+      un hôte ne construit un état que par @SessionState::new puis par la librairie, et ne le lit que par accesseurs. Confirmer qu'aucune mutation publique n'est voulue.
+  [?] #5 `created_at` est conservé ; absent d'un document, il vaut l'époque Unix (0). Un état relu en 1.9 puis réécrit garde l'étiquette 1.9 bien que les champs inconnus
+      aient été perdus : faut-il réécrire en @FormatVersion::CURRENT à chaque sauvegarde ?
+  [?] #6 Aucun `Deserialize` public sur @SessionState (la lecture passe par @SessionState::from_json, qui vérifie la version d'abord) ; un JSON syntaxiquement
+      invalide de format 2.0 rend @SessionError::Serialization et non IncompatibleFormat.
   [?] #2 Types de la todo, des watchers et des handles de runs : définis par `modules` (todo) et `delegation` (watchers, `FR-14`).
       Valeurs JSON opaques en attendant ; remplacer par des types nommés à ce moment, sans changer la version de format.
   [?] #3 L'empreinte de la définition d'agent est une chaîne opaque fournie par l'hôte ou le domaine `agents` ; l'algorithme n'est pas fixé ici.

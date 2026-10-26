@@ -68,7 +68,7 @@ Scenario: unparseable version never panics
   Then a message is produced
 
 Tasks:
-  [ ] #5 Tests manquants relevés par la validation : ordre global des messages (agent, toolsets par nom croissant, fonctions cassées) ; majeure différente ET plus
+  [x] #5 Tests manquants relevés par la validation : ordre global des messages (agent, toolsets par nom croissant, fonctions cassées) ; majeure différente ET plus
       ancien (2.0.0 vers 1.9.0) selon la décision de #4.
   [x] #1 Tests puis implémentation.
   [?] #4 Toolset à la fois de majeure différente et plus ancien (2.0.0 vers 1.9.0) : un seul message (majeure). Un second message de rétrogradation serait-il utile au LLM ?

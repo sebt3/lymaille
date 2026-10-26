@@ -197,6 +197,30 @@ mod tests {
     }
 
     #[test]
+    fn blob_and_array_of_integers_stay_distinct() {
+        let blob = TaggedValue::Blob(vec![1, 2]);
+        let array = TaggedValue::Array(vec![TaggedValue::Int(1), TaggedValue::Int(2)]);
+
+        let blob_json = serde_json::to_string(&blob).expect("a blob serializes");
+        let array_json = serde_json::to_string(&array).expect("an array serializes");
+        assert_ne!(
+            blob_json, array_json,
+            "a blob and an array of the same integers must not share a serialized form"
+        );
+
+        let blob_back = round_trip(&blob);
+        let array_back = round_trip(&array);
+        assert!(
+            matches!(&blob_back, TaggedValue::Blob(bytes) if bytes == &[1, 2]),
+            "the blob [1, 2] must come back as a blob, got {blob_back:?}"
+        );
+        assert!(
+            matches!(&array_back, TaggedValue::Array(items) if items.len() == 2 && items.iter().all(|item| matches!(item, TaggedValue::Int(_)))),
+            "the array of the integers 1 and 2 must come back as an array of integers, got {array_back:?}"
+        );
+    }
+
+    #[test]
     fn unknown_tag_refused() {
         let result: Result<TaggedValue, _> = serde_json::from_str(r#"{"type": "decimal", "value": "1.5"}"#);
         assert!(

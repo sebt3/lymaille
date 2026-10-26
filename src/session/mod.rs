@@ -14,6 +14,8 @@ mod notice;
 mod redact;
 mod segment;
 mod signals;
+mod state;
+mod store;
 mod tagged_value;
 mod turn_gate;
 
@@ -30,5 +32,7 @@ pub use notice::{Provenance, restore_notices};
 pub use redact::Redactor;
 pub use segment::{BoundaryKind, ModelProfile, Segment, SegmentContext};
 pub use signals::{Outcome, RunSignals};
+pub use state::{AgentRef, SessionState, TokenCounters};
+pub use store::{InMemoryStore, SessionStore};
 pub use tagged_value::TaggedValue;
 pub use turn_gate::{TurnGate, TurnPermit};

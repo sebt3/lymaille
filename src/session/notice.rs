@@ -244,4 +244,58 @@ mod tests {
             "a version that is not major.minor.patch must be compared as text, and a difference must produce a message"
         );
     }
+
+    #[test]
+    fn messages_follow_the_global_order() {
+        let saved = provenance("sha-1", &[("k8s", "1.4.0"), ("git", "0.1.0")]);
+        let current = provenance("sha-2", &[("k8s", "2.0.0"), ("vault", "3.0.0")]);
+        let broken = vec!["scale".to_owned()];
+        let notices = restore_notices(&saved, &current, &broken);
+        let [agent, git, k8s, vault_added, functions] = notices.as_slice() else {
+            panic!(
+                "the agent, three toolset changes and the broken functions must give five messages, got {notices:?}"
+            );
+        };
+        assert!(
+            agent.contains("agent definition"),
+            "the agent definition message must come first, got {agent:?}"
+        );
+        assert!(
+            git.contains("`git`") && git.contains("not available now"),
+            "the toolset git, absent now, must come first among the toolsets (ascending name), got {git:?}"
+        );
+        assert!(
+            k8s.contains("`k8s`") && k8s.contains("major version"),
+            "the toolset k8s, with a major change, must follow git, got {k8s:?}"
+        );
+        assert!(
+            vault_added.contains("`vault`")
+                && vault_added.contains("not available when the session was saved"),
+            "the toolset vault, added since the save, must follow k8s, got {vault_added:?}"
+        );
+        assert!(
+            functions.contains("scale"),
+            "the broken functions message must come last, got {functions:?}"
+        );
+    }
+
+    #[test]
+    fn major_change_and_older_gives_one_message() {
+        let saved = provenance("sha-1", &[("k8s", "2.0.0")]);
+        let current = provenance("sha-1", &[("k8s", "1.9.0")]);
+        let notices = restore_notices(&saved, &current, &[]);
+        let [notice] = notices.as_slice() else {
+            panic!(
+                "a toolset both of a different major and older must give exactly one message, got {notices:?}"
+            );
+        };
+        assert!(
+            notice.contains("major version") && notice.contains("2.0.0") && notice.contains("1.9.0"),
+            "the single message must be the major change, naming both versions (decision #4), got {notice:?}"
+        );
+        assert!(
+            !notice.contains("older"),
+            "no rollback message may be added when the major change already speaks (decision #4), got {notice:?}"
+        );
+    }
 }

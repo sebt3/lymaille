@@ -59,7 +59,7 @@ Must:
   Déclarer chaque sous-module et ré-exporter ce que les specs enfants exposent ; mod.rs ne contient aucun comportement.
 
 Tasks:
-  [ ] #1 Déclarer les sous-modules dans ./mod.rs au fil des specs enfants livrées.
+  [x] #1 Déclarer les sous-modules dans ./mod.rs au fil des specs enfants livrées.
   [?] #2 Boucle de tour (`agent-sessions/session#FR-4` à `FR-7`, `FR-14`, `AC-3`, `AC-8` à `AC-11`) : dépend du trait de
       fournisseur d'inférence (`agents`), du scratchpad (`scratchpad`) et de la fenêtre de contexte (`context-window`).
       Ne s'écrit qu'après leurs specs.
