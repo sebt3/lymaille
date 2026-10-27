@@ -41,7 +41,7 @@ et closures. `agent-sessions#CON-2` place le moteur dans `vynil-core`.
 - **FR-11 - MUST:** Le moteur enregistre d'office le seul groupe pur du socle commun de `vynil-core` (`core_pure_rhai_register`) ; les
   autres groupes (hôte : `get_env`, `log_*` ; attente : `sleep` ; fichiers ; `shell_run`) ne le sont que si la définition
   d'agent les accorde, quelles que soient les features avec lesquelles le processus hôte compile `vynil-core`. Livré par
-  `vynil-core` 0.9.0 (`#18`, `docs/vynil-core-shopping-list.md`).
+  `vynil-core` 0.9.0 (`#18`).
     - **Source:** agent-sessions#BR-2, agent-sessions#CON-3 ; user instruction, 2026-10-25
     - **Verified by:** `AC-10`
 
@@ -120,6 +120,10 @@ et closures. `agent-sessions#CON-2` place le moteur dans `vynil-core`.
     - **Consequences:** les workers du runtime restent libres pour l'inférence et les autres sessions ; le nombre de scripts
       simultanés est borné par le pool bloquant de tokio ; FR-10 est réalisable sans attendre le retour d'un appel.
     - **Source:** user instruction, 2026-10-25 ; Observed in: vynil-core `src/cancel.sdd`, `src/rt.sdd`
+    - **Amendement (user instruction, 2026-10-27) :** l'évaluation ne tourne pas dans `spawn_blocking` (pile de 2 Mio par défaut, qui
+      déborde à 512 niveaux d'appels en débogage et ferait avorter le processus hôte) mais dans un fil dédié
+      (`std::thread::Builder::stack_size`, taille mesurée) joint depuis une tâche async ; la portée `cancel::scope` et le hook
+      `on_progress` restent ceux décrits ci-dessus. Le nombre de scripts simultanés est borné par la librairie, plus par le pool bloquant.
 
 ## Faits vérifiés (Rhai 1.25.1)
 
@@ -129,7 +133,7 @@ Mesurés par les programmes de `spikes/rhai-1-25`, avec les features de `vynil-c
 - L'`AST` n'est pas sérialisable : la persistance des fonctions passe par leur texte source (DEC-1).
 - `vynil-core` 0.8.0 enregistrait d'office `get_env`, `sleep` et `log_*` ; avec les features `fs`, `shell` ou `password` du processus,
   il enregistre aussi les accès fichiers et `shell_run`. Le moteur est public, donc `on_progress` et les limites de taille se
-  posent depuis `lymaille`. La version 0.9.0 scinde ce socle en groupes publics (`docs/vynil-core-shopping-list.md`).
+  posent depuis `lymaille`. La version 0.9.0 scinde ce socle en groupes publics.
 - `AST::iter_functions` rend nom, paramètres, accès et commentaires de documentation des fonctions. Rhai ne type pas
   statiquement : un contrat de toolset se réduit à des noms et des paramètres (`toolsets`, FR-10).
 - Un pointeur de fonction ou une closure se sérialise **sans erreur** en chaîne, ou en tableau s'il capture ; relue, la

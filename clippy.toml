@@ -22,7 +22,18 @@ doc-valid-idents = ["Rhai", "MCP", "SpecDD", "Handlebars", "OpenAI", "..", "vLLM
 
 # `syn` appears twice in the graph, inherently: `rhai_codegen` (a dependency of `rhai` 1.27.0) uses `syn` 2, while
 # `serde_derive` and `thiserror` use `syn` 3. Not a mistake to fix in this crate. See `dsd/agent-sessions.md`, Open Issues.
-allowed-duplicate-crates = ["syn"]
+allowed-duplicate-crates = [
+  "syn",
+  # `cpufeatures` 0.2 (sha2, via vynil-core's sha256) and 0.3 (chacha20, via vynil-core's rand 0.10): temporary, inherent to
+  # vynil-core 0.9.0, tracked by https://github.com/vynil-org/vynil-core/issues/36.
+  "cpufeatures",
+  # `getrandom` 0.2 (const-random, via rhai's ahash), 0.3 (ahash) and 0.4 (vynil-core's rand 0.10): temporary, inherent to
+  # vynil-core 0.9.0, tracked by https://github.com/vynil-org/vynil-core/issues/36.
+  "getrandom",
+  # `r-efi` 5 (getrandom 0.3, via rhai's ahash) and 6 (getrandom 0.4, via vynil-core's rand 0.10): uefi target only in the
+  # graph, temporary, inherent to vynil-core 0.9.0, tracked by https://github.com/vynil-org/vynil-core/issues/36.
+  "r-efi",
+]
 
 # Architecture constraints of the design, enforced by the compiler.
 # Each exception is a `#[expect(clippy::disallowed_methods, reason = "...")]` at the single permitted place.

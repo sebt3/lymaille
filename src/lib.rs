@@ -21,10 +21,11 @@ pub use context::{
     UsageTracker, estimate_tokens, replayed_reasoning,
 };
 pub use scratchpad::{
-    CandidateSet, Catalog, CoreGroup, FunctionEntry, GrantedModule, GrantedSkill, GrantedToolset, Grants,
-    IntrospectionSource, LimitKind, NotFoundKind, Origin, Rendered, ScratchpadError, ScratchpadLimits,
-    ScratchpadResult, ScriptErrorClass, ScriptFunction, ScriptPosition, VariableInfo, full_text,
-    limits_notice, nearest, register_format_functions, render_value, suggest_for, truncate_middle,
+    CandidateSet, Catalog, CoreGroup, EngineBuilder, FunctionEntry, GrantedModule, GrantedSkill,
+    GrantedToolset, Grants, IntrospectionSource, LimitKind, NotFoundKind, Origin, Rendered, ScratchpadEngine,
+    ScratchpadError, ScratchpadLimits, ScratchpadResult, ScriptErrorClass, ScriptFunction, ScriptPosition,
+    VariableInfo, full_text, limits_notice, nearest, register_format_functions, render_value, suggest_for,
+    truncate_middle,
 };
 pub use session::{
     AgentRef, Backoff, BoundaryKind, CancelHandle, Event, EventKind, EventSink, FormatVersion, History,

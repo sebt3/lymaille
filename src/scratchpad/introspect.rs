@@ -18,13 +18,6 @@ use super::render::render_value;
 /// Longest preview of a variable, in characters.
 const PREVIEW_CHARS: usize = 60;
 /// Most results returned by `find`.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "wired by the engine, which waits for the vynil-core decision (lymaille.sdd #9)"
-    )
-)]
 const MAX_FIND_RESULTS: usize = 50;
 
 /// Where a function of the catalog comes from.
@@ -45,13 +38,6 @@ pub enum Origin {
 
 impl Origin {
     /// Kind of the origin, as `modules()` shows it: `core`, `format`, `host`, `module` or `script`.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "wired by the engine, which waits for the vynil-core decision (lymaille.sdd #9)"
-        )
-    )]
     const fn kind(&self) -> &'static str {
         match self {
             Self::Core(_) => "core",
@@ -63,13 +49,6 @@ impl Origin {
     }
 
     /// Label of the origin, as `functions()` shows it: `core:<group>`, `format`, `host`, `module:<name>` or `script`.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "wired by the engine, which waits for the vynil-core decision (lymaille.sdd #9)"
-        )
-    )]
     fn label(&self) -> String {
         match self {
             Self::Core(group) => format!("core:{group}"),
@@ -280,13 +259,6 @@ fn read_metadata(engine: &Engine) -> ScratchpadResult<Metadata> {
 }
 
 /// Signatures of the global functions of an engine.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "wired by the engine, which waits for the vynil-core decision (lymaille.sdd #9)"
-    )
-)]
 fn global_signatures(engine: &Engine) -> ScratchpadResult<BTreeSet<String>> {
     Ok(read_metadata(engine)?
         .functions
@@ -297,13 +269,6 @@ fn global_signatures(engine: &Engine) -> ScratchpadResult<BTreeSet<String>> {
 
 /// Runs one registration on an engine and returns the origin with the signatures it added, which the catalog attributes to
 /// that origin.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "wired by the engine, which waits for the vynil-core decision (lymaille.sdd #9)"
-    )
-)]
 pub(in crate::scratchpad) fn registration_step(
     engine: &mut Engine,
     origin: Origin,
@@ -354,13 +319,6 @@ impl ScriptFunction {
     }
 
     /// Signature, as `name(a, b)`.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "wired by the engine, which waits for the vynil-core decision (lymaille.sdd #9)"
-        )
-    )]
     fn signature(&self) -> String {
         format!("{}({})", self.name, self.params.join(", "))
     }
@@ -370,13 +328,6 @@ impl ScriptFunction {
 /// script functions set by `update` before each run.
 #[derive(Debug)]
 #[non_exhaustive]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "wired by the engine, which waits for the vynil-core decision (lymaille.sdd #9)"
-    )
-)]
 pub struct IntrospectionSource {
     grants: Grants,
     catalog: Catalog,
@@ -393,13 +344,6 @@ struct ScopeState {
 
 /// A function as introspection lists it, whatever its origin.
 #[derive(Debug, Clone)]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "wired by the engine, which waits for the vynil-core decision (lymaille.sdd #9)"
-    )
-)]
 struct View {
     path: String,
     signature: String,
@@ -409,13 +353,6 @@ struct View {
 
 /// A result of `find`.
 #[derive(Debug, Clone)]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "wired by the engine, which waits for the vynil-core decision (lymaille.sdd #9)"
-    )
-)]
 struct Found {
     kind: &'static str,
     name: String,
@@ -424,13 +361,6 @@ struct Found {
     haystack: String,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "wired by the engine, which waits for the vynil-core decision (lymaille.sdd #9)"
-    )
-)]
 impl IntrospectionSource {
     /// Shared state for an engine with these grants, this catalog and these limits.
     #[must_use]
@@ -683,13 +613,6 @@ impl IntrospectionSource {
 }
 
 /// Rows of `functions()` for a list of views.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "wired by the engine, which waits for the vynil-core decision (lymaille.sdd #9)"
-    )
-)]
 fn function_rows(views: &[View]) -> Array {
     views
         .iter()
@@ -705,13 +628,6 @@ fn function_rows(views: &[View]) -> Array {
 }
 
 /// A Rhai map of the given entries.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "wired by the engine, which waits for the vynil-core decision (lymaille.sdd #9)"
-    )
-)]
 fn record(entries: Vec<(&str, Dynamic)>) -> Dynamic {
     let mut map = Map::new();
     for (key, value) in entries {
@@ -721,13 +637,6 @@ fn record(entries: Vec<(&str, Dynamic)>) -> Dynamic {
 }
 
 /// A Rhai string of a text.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "wired by the engine, which waits for the vynil-core decision (lymaille.sdd #9)"
-    )
-)]
 fn text(value: &str) -> Dynamic {
     Dynamic::from(value.to_owned())
 }
@@ -754,13 +663,6 @@ pub fn limits_notice(limits: &ScratchpadLimits) -> String {
 
 /// Registers the introspection functions on an engine. Each is documented with its parameter names; they read the shared
 /// state and nothing else: no I/O, no clock.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "wired by the engine, which waits for the vynil-core decision (lymaille.sdd #9)"
-    )
-)]
 pub(in crate::scratchpad) fn register_introspection(engine: &mut Engine, source: &Arc<IntrospectionSource>) {
     let vars = Arc::clone(source);
     register(
@@ -1166,6 +1068,10 @@ mod tests {
             "fn does not see the scope: {text}"
         );
         assert!(text.contains("`const` does not exist"), "const: {text}");
+        assert!(
+            text.contains("A closure or a function pointer is not kept between calls"),
+            "closures are not persisted: {text}"
+        );
         assert!(text.contains("No duration limit"), "no duration limit: {text}");
         assert!(
             text.contains("capped at 8000 characters"),

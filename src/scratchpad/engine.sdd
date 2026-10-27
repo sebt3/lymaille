@@ -9,7 +9,6 @@ Owns:
   ./engine.rs
 
 References:
-  ../../docs/vynil-core-shopping-list.md
   ./grant.sdd
   ./limits.sdd
   ./introspect.sdd
@@ -146,7 +145,7 @@ Scenario: engine is shareable
   Then the assertion compiles
 
 Tasks:
-  [ ] #1 Tests puis implémentation : @base_engine d'abord (`const`, résolveur, `print`), puis les groupes, les modules, le crochet de progrès.
+  [x] #1 Tests puis implémentation : @base_engine d'abord (`const`, résolveur, `print`), puis les groupes, les modules, le crochet de progrès.
   [?] #2 Posé : le jeton d'annulation lu par `on_progress` est propre au fil et vit dans ce module (@RunScope), car `vynil_core::cancel::current` n'est pas public ; le jeton de `vynil-core` est installé en parallèle par ./run.sdd pour les appels natifs bloquants (`cancel::scope`). Deux jetons donc, le @CancelHandle de la crate faisant foi et celui de `vynil-core` en étant le miroir (voir ./run.sdd). Répond à la tâche #2 de ../session/cancel.sdd.
   [?] #3 Les features `fs` et `shell` de `vynil-core` : la crate `lymaille` doit-elle les relayer par des features Cargo propres, désactivées par défaut, ou ne jamais pouvoir accorder `Fs` et `Shell` ? Dépend du manifeste (`/Cargo.toml`, hors de cette spec) et de l'usage visé (aucun besoin de fichier ou de processus n'est exprimé par le DSD pour les agents d'alerte). À trancher par le développeur principal. Recommandation : relayer `fs` et `shell` par des features désactivées par défaut ; les Scenarios « only the pure group by default » et « unavailable group refused » se jouent avec et sans.
   [?] #4 Posé : le groupe pur et les fonctions de format sont toujours accordés ; la définition d'agent ne peut pas les retirer. Le DSD (`FR-11`) enregistre « d'office » le seul groupe pur ; les fonctions de format découlent de `FR-8`.
@@ -158,3 +157,9 @@ Tasks:
       fait échouer `cargo::multiple_crate_versions`, et la dépendance a été annulée. Les recommandations #3 (features `fs` et
       `shell` relayées par des features Cargo désactivées par défaut) et #7 (print et debug captés, plafonnés) restent la
       cible, à coder avec la dépendance.
+  [?] #10 Lot E2 (implémentation) : `Engine::new()` de Rhai charge le paquet de langage (`LanguageCorePackage`) dont le `sleep` bloque le fil sans point d'annulation (`agent-sessions/scratchpad#FR-4`) et qui expose `exit`, `take`, `tag`, `parse_json`, `get_fn_metadata_list`, qu'aucun groupe accordé ne fournit. @base_engine part donc de `Engine::new_raw()` et charge les autres paquets standard, dans le même ordre ; c'est une dérogation au `Must` « part de `Engine::new()` ». `parse_json` et `tag` ne sont plus disponibles. À confirmer par le développeur principal.
+  [?] #11 Lot E2 (bloqué) : `json_encode(value: Dynamic) -> string` et sa documentation exigent la feature `metadata` de `vynil-core` (sans elle, la signature est celle des types Rust : `json_encode(_: types::dynamic::Dynamic) -> core::result::Result<...>` et aucune documentation). Le test « functions carry signature and documentation » reste rouge avec la liste de features autorisée (`rhai`, `rt`) ; il passe avec `metadata` (vérifié puis annulé). Décision requise du développeur principal.
+  [?] #12 Lot E2 : @ScratchpadEngine ne garde pas l'`Arc<IntrospectionSource>` : la mise à jour de l'état avant chaque run (`update`) sera portée par ./run.sdd, qui devra détenir cet `Arc` (à ajouter alors). Accesseurs publics : @ScratchpadLimits, @Grants, @Catalog.
+  [?] #13 Lot E2 : la garde @RunScope n'installe pas le jeton de `vynil-core` (`vynil_core::cancel::scope` prend une fermeture, il n'y a pas de garde) : ./run.sdd enveloppe l'évaluation dans `vynil_core::cancel::scope` sur le même fil. Le texte capté se lit par la fonction libre `captured_output()`, non par une méthode de la garde (le tampon est par fil).
+  [?] #14 Lot E2 : `rhai()` (accès du run), @RunScope et `captured_output()` sont `pub(in crate::scratchpad)` avec `expect(dead_code)` tant que ./run.sdd ne les appelle pas ; ces attributs sont à retirer alors (sinon `unfulfilled_lint_expectations`).
+  [?] #15 Lot E2 : le test « import is closed » passe avec n'importe quel résolveur qui ne trouve pas de fichier ; la fermeture réelle du résolveur ne se mesure qu'avec un fichier `.rhai` présent à la racine. Le test ne la garantit donc pas ; la garantie est structurelle (`DummyModuleResolver`).

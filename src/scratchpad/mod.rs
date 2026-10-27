@@ -2,6 +2,7 @@
 //! and the bounded rendering and formatting of the results. This lot holds the pure parts; the engine, persistence,
 //! introspection and the `rhai_pad` tool come with the next ones.
 
+mod engine;
 mod error;
 mod format;
 mod grant;
@@ -10,6 +11,7 @@ mod limits;
 mod render;
 mod suggest;
 
+pub use engine::{EngineBuilder, ScratchpadEngine};
 pub use error::{
     LimitKind, NotFoundKind, ScratchpadError, ScratchpadResult, ScriptErrorClass, ScriptPosition,
 };

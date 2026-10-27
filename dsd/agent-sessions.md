@@ -434,6 +434,5 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
 ## Références
 
 - Méthode : https://specdd.ai/llms.txt et le plugin DSD (`.specdd/plugins/github.com/specdd/specdd/dsd/plugin.md`).
-- Shopping-list `vynil-core` : `docs/vynil-core-shopping-list.md`.
 - Langue : documents DSD et specs `.sdd` en français, règle posée dans `.specdd/bootstrap.project.md`.
 - Format des skills : https://agentskills.io/specification.
