@@ -1,0 +1,178 @@
+Spec: persist
+
+Purpose:
+  Persistance du scratchpad : le scope devient des variables étiquetées par leur type réel, les fonctions deviennent leur texte source, et la restauration
+    recompile les fonctions sans jamais rejouer un script. Détecte par type ce que Rhai sérialiserait mal (closures, pointeurs de fonction, valeurs non
+    sérialisables), l'exclut avec un avertissement et ne rejette pas le script (`agent-sessions/scratchpad#FR-2`, `agent-sessions/scratchpad#FR-7`,
+    `agent-sessions/scratchpad#DEC-1`, `agent-sessions/session#FR-3`, `agent-sessions/session#FR-9`, `agent-sessions/scratchpad#AC-1`,
+    `agent-sessions/scratchpad#AC-8`, `agent-sessions/session#AC-2`, `agent-sessions/session#AC-5`).
+
+Owns:
+  ./persist.rs
+
+References:
+  ../session/tagged_value.sdd
+  ../session/state.sdd
+  ../session/notice.sdd
+  ./introspect.sdd
+
+Depends on:
+  ../session/tagged_value.sdd
+  ./error.sdd
+  ./engine.sdd
+  ./introspect.sdd
+  rhai
+  serde_json
+
+Exposes:
+  @PersistWarning
+  @UnpersistableReason
+  @ScopeSnapshot
+  @FunctionSource
+  @Recompiled
+  @snapshot_scope
+  @to_tagged
+  @to_dynamic
+  @extract_function_sources
+  @recompile_functions
+  @restore_scope
+
+Accepts:
+  @snapshot_scope: une référence vers un @rhai::Scope.
+  @to_tagged: une référence vers un @rhai::Dynamic.
+  @to_dynamic: une référence vers un @TaggedValue.
+  @extract_function_sources: le @ScratchpadEngine et le texte d'un script qui a compilé.
+  @recompile_functions: le @ScratchpadEngine et la table des sources de fonctions de l'état (clé `nom/arité`, voir `Must`).
+  @restore_scope: la table des variables de l'état (nom vers @TaggedValue).
+
+Returns:
+  @snapshot_scope: un @ScopeSnapshot : les variables persistables (table ordonnée nom vers @TaggedValue) et les avertissements des variables exclues.
+  @to_tagged: le @TaggedValue de la valeur, ou la @UnpersistableReason (`Closure`, `FunctionPointer`, `UnsupportedType` avec le nom du type, `NonFiniteFloat`).
+  @to_dynamic: la valeur Rhai de même type réel que l'étiquette (`char` en `char`, `blob` en `blob`, entier en entier, flottant en flottant).
+  @extract_function_sources: la liste de @FunctionSource (clé `nom/arité` et texte source), dans l'ordre de définition du script.
+  @recompile_functions: un @Recompiled : l'AST des fonctions seules, et la liste des clés cassées, triée.
+  @restore_scope: un @rhai::Scope portant les variables, dans l'ordre des noms.
+  @PersistWarning: accesseurs `variable()`, `reason()` et `message()`, ce dernier le texte rendu au LLM (voir `Must`).
+
+Raises:
+  @extract_function_sources rend @ScratchpadError::Internal si le texte source d'une fonction du script ne peut pas être délimité (défaut de la crate, jamais une erreur du LLM) : la fonction n'est alors pas persistée et l'appelant en est informé.
+
+Must:
+  Détection par type, avant toute sérialisation, parce que Rhai sérialise un pointeur de fonction ou une closure sans erreur, en chaîne ou en tableau qui ne se restaure pas en valeur appelable (`agent-sessions#CON-4`).
+    Observed in: spikes/rhai-1-25 (`persistence`, S1 et S8).
+  Une valeur est exclue de la persistance, avec un @PersistWarning, quand elle est ou contient, à n'importe quelle profondeur d'un tableau ou d'une table : une closure (pointeur de fonction anonyme), un pointeur de fonction nommé, un flottant non fini, ou une valeur d'un type que @TaggedValue ne représente pas (un instant de `timestamp()`, un type personnalisé de module). La variable entière est exclue, jamais une moitié.
+  Types persistés : unité, booléen, entier, flottant fini, chaîne, `char`, `blob`, tableau, table (la liste de @TaggedValue). Une valeur partagée (capturée par une closure) est lue par sa valeur et se persiste comme une valeur ordinaire si elle est d'un type persistable : ce qui est exclu, c'est la closure, pas la variable captée.
+  Le texte d'un avertissement, en anglais, exact : `warning: variable `{name}` holds a closure and was not persisted; define a `fn` instead.`, `warning: variable `{name}` holds a function pointer and was not persisted; define a `fn` and call it by name instead.`, `warning: variable `{name}` holds a value of type `{type}` that cannot be persisted and was not persisted.`, `warning: variable `{name}` holds a non-finite number and was not persisted.`. Les avertissements sont rendus dans l'ordre des noms de variables.
+  Les variables exclues restent dans le scope vivant (le script n'est pas rejeté et peut les réutiliser jusqu'à la fin de la session) ; elles sont absentes de l'état persisté, donc absentes après restauration, le reste du scope étant restauré (`agent-sessions/scratchpad#AC-8`).
+  Un aller-retour @to_tagged puis @to_dynamic conserve le type : `char` reste `char`, `blob` reste `blob`, entier et flottant ne se confondent pas, tableaux et tables imbriqués sont égaux (`agent-sessions/session#AC-5`).
+  Les fonctions se persistent par leur texte source (`agent-sessions/scratchpad#DEC-1`), une entrée par fonction, clé `nom/arité` (par exemple `scale/2`) : la surcharge par arité de Rhai ne s'écrase pas, et une redéfinition de même nom et même arité remplace l'entrée. Le texte d'une fonction commence au premier commentaire de documentation `///` qui la précède (ou à `private`/`fn`) et finit à l'accolade fermante de son corps ; il inclut donc la documentation.
+  Le texte source d'une fonction se délimite avec l'analyseur lexical de Rhai (feature `internals`, `Engine::lex`), par appariement des accolades sur les jetons à profondeur zéro : les accolades dans les chaînes ou les commentaires n'entrent pas en compte.
+  La restauration recompile chaque source séparément avec le moteur de la session, ne conserve que les fonctions (`clone_functions_only`) et n'exécute jamais une instruction de niveau supérieur : aucun effet de bord n'est rejoué (`agent-sessions/scratchpad#DEC-1`).
+  Une source est cassée, et listée dans @Recompiled, quand : elle ne compile pas ; elle ne définit pas exactement la fonction de sa clé ; ou elle appelle, avec un chemin qualifié `module::fonction`, un module ou une fonction (nom et arité) que le catalogue du moteur de la session ne connaît pas (API de toolset disparue, `agent-sessions/session#AC-2`). Seuls les appels qualifiés par un module sont vérifiés : un appel non qualifié absent échoue à l'exécution avec les suggestions de ./suggest.sdd. Le catalogue est celui des seuls modules accordés (./introspect.sdd).
+  Une source cassée n'empêche pas la restauration du reste : les autres fonctions et toutes les variables sont restaurées. La liste des clés cassées est rendue triée par clé, c'est ce que @restore_notices (../session/notice.sdd) reçoit.
+  Aucune fonction restaurée n'élargit les capacités de la session : elle est recompilée par le moteur de la session, qui ne connaît que les modules accordés (`agent-sessions#BR-2`).
+
+Scenario: variable types survive a round trip
+  Given a scope holding the char `x`, a blob of three bytes, the integer 7, the float 7.0, the string `x` and a map holding an array
+  When snapshot_scope then restore_scope are applied
+  Then the restored values are a char, a blob, an integer, a float, a string and the same map, each of the original type
+
+Scenario: closure is excluded with a warning
+  Given a scope holding `let n = 3` and `let f = |x| x + 1`
+  When snapshot_scope is called
+  Then the snapshot holds `n` and not `f`
+  And one warning names `f`, says it holds a closure and suggests defining a `fn`
+
+Scenario: function pointer is excluded
+  Given a scope holding `let p = Fn("foo")`
+  When snapshot_scope is called
+  Then the warning names `p` and says it holds a function pointer
+
+Scenario: closure nested in a container
+  Given a scope holding `let m = #{ok: 1, cb: |x| x}` and `let a = [1, |x| x]`
+  When snapshot_scope is called
+  Then both `m` and `a` are excluded, each with a warning, and neither is persisted partially
+
+Scenario: captured variable stays persistable
+  Given `let k = 5; let g = |x| x + k`
+  When snapshot_scope is called
+  Then `k` is persisted with the value 5 and `g` is excluded with a warning
+
+Scenario: unsupported and non finite values
+  Given a scope holding a value from `timestamp()` and the float NaN
+  When snapshot_scope is called
+  Then both are excluded with their own warning text
+
+Scenario: warnings are ordered by variable name
+  Given two excluded variables `b` and `a`
+  When snapshot_scope is called
+  Then the warnings come in the order `a`, `b`
+
+Scenario: excluded variable stays usable until the session ends
+  Given a live scope holding an excluded closure
+  When snapshot_scope is called
+  Then the live scope still holds and can still call the closure
+
+Scenario: restore keeps the rest of the scope
+  Given a snapshot taken with one excluded closure and three plain variables
+  When the scope is restored
+  Then the closure variable is absent and the three variables are present
+
+Scenario: functions keep their source and documentation
+  Given the script `/// Doubles a.\nfn f(a) { a * 2 }\nlet x = 3;`
+  When extract_function_sources is called
+  Then one source is returned under the key `f/1` and its text is exactly the two lines of the function with the comment
+
+Scenario: braces in strings and comments do not confuse the extraction
+  Given a function whose body holds the string `"}"` and a comment `// }`
+  When extract_function_sources is called
+  Then the source holds the whole function
+
+Scenario: two functions and overloads
+  Given the script `fn f(a) { a }\nfn f(a, b) { a + b }\nprivate fn h() { 1 }`
+  When extract_function_sources is called
+  Then the keys are `f/1`, `f/2` and `h/0`
+
+Scenario: functions reused after recompilation
+  Given the function source `fn f(a) { a * 2 }` and a restored scope holding `let x = 3`
+  When recompile_functions is called and `f(x)` is evaluated with the AST
+  Then the result is 6 and nothing is reported broken
+
+Scenario: top level statements are never replayed
+  Given a source that defines `fn f() { 1 }` and a native counter incremented by a top level statement of the same text
+  When recompile_functions is called
+  Then the counter is not incremented
+
+Scenario: source that no longer compiles
+  Given the sources `fn ok() { 1 }` and `fn bad( { }`
+  When recompile_functions is called
+  Then `ok` is in the AST and `bad/0` is reported broken
+
+Scenario: vanished toolset API
+  Given the source `fn list() { grafana::loki_query("x") }` and an engine whose module `grafana` no longer has `loki_query`
+  When recompile_functions is called
+  Then `list/0` is reported broken and the other functions are kept
+
+Scenario: still valid toolset API
+  Given the same source and an engine whose module `grafana` exposes `loki_query` with one parameter
+  When recompile_functions is called
+  Then nothing is reported broken
+
+Scenario: unqualified call is not checked at restore
+  Given a source calling an unknown global function `nothing_here()`
+  When recompile_functions is called
+  Then the source is not reported broken
+
+Scenario: source defining another function than its key
+  Given the key `f/1` with a source that defines `g(a)`
+  When recompile_functions is called
+  Then `f/1` is reported broken
+
+Tasks:
+  [ ] #1 Tests puis implémentation, dans l'ordre : conversion `Dynamic` et @TaggedValue, détection et avertissements, extraction des sources, recompilation.
+  [?] #2 Extraction du texte source par fonction : l'AST de Rhai ne garde pas le texte (non sérialisable, Observed in: spikes/rhai-1-25 `persistence`, S3) ni l'étendue d'une fonction ; `iter_functions` ne rend que nom, paramètres, accès et commentaires. L'approche posée (jetons de `Engine::lex`, feature `internals`) est plausible mais non mesurée dans le spike. Un spike préalable, avant toute implémentation de ce fichier, doit confirmer que `lex` rend les positions de début de `fn`/`private`/`///` et de la fin du corps. Repli si elle échoue : persister, par script qui définit au moins une fonction, le texte entier du script réduit à ses fonctions, en conservant l'ordre des définitions (la clé de l'état serait alors un numéro d'ordre et non `nom/arité`) ; cela change `../session/state.sdd` (« fonctions : nom vers texte »). À valider par le développeur principal avant l'implémentation.
+  [?] #3 Détection d'une fonction disparue limitée aux appels qualifiés `module::fonction` : Rhai ne résout pas les noms de fonctions à la compilation, une vérification complète des appels non qualifiés exigerait de connaître tous les noms de fonctions intégrés. Le parcours des appels qualifiés (`AST::walk`, feature `internals`) est à confirmer par un spike. Limite assumée : une fonction cassée par un appel non qualifié (une fonction native retirée d'un groupe) n'est signalée qu'à son premier appel, avec les suggestions. À confirmer par le développeur principal.
+  [?] #4 Posé : la clé d'une fonction dans l'état est `nom/arité`. `../session/state.sdd` dit « nom vers texte source » sans fixer la forme du nom ; la table est ordonnée par clé, ce qui ne dépend pas de la forme.
+  [?] #5 Posé : les fonctions définies par un script qui échoue à l'exécution (après une compilation réussie) sont conservées ; un script qui échoue à la compilation n'en définit aucune. Les variables posées avant l'erreur d'exécution restent aussi dans le scope, Rhai ne les annulant pas.
+  [?] #6 Posé : @to_tagged est une fonction de la crate ; le passage `Dynamic` et @TaggedValue vit ici, pas dans ../session/tagged_value.sdd (qui ne dépend pas de Rhai, tâche #4 de cette spec).
+  [?] #7 Le `blob` de @TaggedValue passe en base64 (tâche #7 de ../session/tagged_value.sdd) : sans effet sur cette spec, qui n'en voit que le type.

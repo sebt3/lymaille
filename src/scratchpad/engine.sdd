@@ -1,0 +1,156 @@
+Spec: engine
+
+Purpose:
+  Construction du moteur Rhai d'une session : socle pur d'office, groupes accordés seulement, modules accordés, `const` désactivé, plafonds, aucune E/S,
+    annulation par le crochet de progrès (`agent-sessions/scratchpad#FR-4`, `agent-sessions/scratchpad#FR-11`, `agent-sessions/scratchpad#FR-12`,
+    `agent-sessions#BR-2`, `agent-sessions#CON-1`, `agent-sessions#CON-6`, `agent-sessions/scratchpad#DEC-3`).
+
+Owns:
+  ./engine.rs
+
+References:
+  ../../docs/vynil-core-shopping-list.md
+  ./grant.sdd
+  ./limits.sdd
+  ./introspect.sdd
+  ./format.sdd
+
+Depends on:
+  ./error.sdd
+  ./grant.sdd
+  ./limits.sdd
+  ./format.sdd
+  ./introspect.sdd
+  ../session/cancel.sdd
+  rhai
+  vynil-core
+  tokio
+
+Exposes:
+  @ScratchpadEngine
+  @EngineBuilder
+  @ScratchpadEngine::builder
+  @EngineBuilder::with_registration
+  @EngineBuilder::build
+  @base_engine
+
+Accepts:
+  @ScratchpadEngine::builder: les @ScratchpadLimits et les @Grants de la session.
+  @EngineBuilder::with_registration: une fermeture `FnOnce(&mut rhai::Engine) -> ScratchpadResult<()>` fournie par l'hôte ou par un domaine de confiance (`toolsets` pour `session_context()`, `modules` pour les fonctions natives MCP), exécutée une fois à la construction.
+  @base_engine: les @ScratchpadLimits ; fonction de crate (`pub(crate)`) partagée avec la construction des modules de toolset (`agent-sessions/toolsets`).
+
+Returns:
+  @EngineBuilder::build: un @ScratchpadEngine, ou @ScratchpadError::Engine.
+  @ScratchpadEngine: accesseurs en lecture seule vers les @ScratchpadLimits, les @Grants et le catalogue de fonctions de ./introspect.sdd ; le moteur Rhai lui-même n'est pas public (accès `pub(crate)`).
+  @base_engine: un @rhai::Engine réglé (voir `Must`), sans fonction accordée.
+
+Raises:
+  @ScratchpadError::Engine: groupe accordé dont `vynil-core` n'est pas compilé avec la feature nécessaire (`Fs` sans la feature `fs`, `Shell` sans la feature `shell`) ; fermeture d'enregistrement qui échoue ; module accordé dont le nom ou le contenu est refusé par Rhai.
+
+Must:
+  @base_engine part de `Engine::new()` de Rhai et pose, dans cet ordre : `disable_symbol("const")` (`agent-sessions/scratchpad#FR-12`) ; le résolveur de modules de Rhai remplacé par un résolveur factice qui refuse tout `import` (le résolveur par défaut de Rhai lit des fichiers du répertoire courant : une E/S, `agent-sessions#CON-1`) ; les gestionnaires `on_print` et `on_debug` remplacés pour qu'aucun texte n'atteigne la sortie standard ni la sortie d'erreur du processus (le texte est capté, voir `Must` suivant) ; les plafonds par @ScratchpadLimits::apply_to.
+  Le moteur de session et le moteur qui construit les modules de toolset sont tous deux issus de @base_engine : `const` y est une erreur de syntaxe (`agent-sessions/scratchpad#AC-11`). Ni l'hôte ni la librairie ne posent de constante dans le scope de session.
+  Le texte de `print` et de `debug` est capté dans un tampon du run en cours (voir @RunScope), plafonné au plafond de rendu, jamais écrit ailleurs ; hors d'un run (construction d'un module de toolset), il est jeté.
+  Le builder enregistre dans cet ordre : @base_engine ; le groupe pur du socle commun (`core_pure_rhai_register`, d'office, `agent-sessions/scratchpad#FR-11`) ; les fonctions de format de ./format.sdd (toujours accordées, pures) ; les groupes de @Grants dans l'ordre hôte, attente, fichiers, shell ; les modules de @Grants par `register_static_module` (appelables en `nom::fonction()`) ; les fermetures d'enregistrement ; le catalogue et les fonctions d'introspection de ./introspect.sdd. Le catalogue attribue à chaque groupe, à chaque fermeture et à chaque module ce qu'il a ajouté (différence des signatures du moteur avant et après chaque étape).
+  Aucun groupe n'est enregistré s'il n'est pas dans @Grants, quelles que soient les features avec lesquelles le processus compile `vynil-core` : la construction part de `Engine::new()`, jamais de `Script::new_bare`, et n'appelle que les enregistreurs de groupe accordés (`agent-sessions/scratchpad#FR-11`, `agent-sessions/scratchpad#AC-10`). `get_env`, `log_*`, `sleep`, `file_*` et `shell_run` sont des fonctions introuvables, et absentes de l'introspection, tant que leur groupe n'est pas accordé.
+  Les dépendances d'un toolset ne sont pas atteignables : seuls les modules de @Grants sont enregistrés (`agent-sessions/toolsets#FR-2`).
+  Le crochet `on_progress` lit un jeton d'annulation propre au fil d'évaluation (voir @RunScope) : absent, il ne fait rien ; annulé, il interrompt le script en rendant le jeton d'arrêt de Rhai, ce que @ScratchpadError::from_rhai classe en `Cancelled`. Une interruption est possible entre deux opérations de Rhai (200 ms environ dans la mesure du spike) ; pendant un appel natif bloquant, c'est le pont de `vynil-core` qui rend la main (voir ./run.sdd).
+    Observed in: spikes/rhai-1-25 (`persistence`, S5).
+  @RunScope est une garde `pub(crate)` qu'ouvre ./run.sdd autour d'une évaluation : elle installe sur le fil courant le @CancelHandle du run et le tampon de sortie, et les rétablit à sa destruction, y compris sur panique. Deux évaluations concurrentes sur deux fils ne se voient pas (l'état est par fil, jamais global au processus).
+  Le @ScratchpadEngine est `Send + Sync` (Rhai est compilé avec `sync`, `agent-sessions/scratchpad#DEC-2`) : un seul moteur sert tous les runs d'une session, il se partage derrière un `Arc`.
+  L'API publique n'accepte que des types de la crate et les types de Rhai déjà exposés par les specs de ./grant.sdd ; la fermeture d'enregistrement est la seule porte vers le moteur brut.
+
+Must not:
+  Appeler `Script::new_bare` ni aucun enregistreur de `vynil-core` hors des groupes accordés et du groupe pur.
+  Poser `set_max_operations`, un délai ou tout garde-fou de durée (./limits.sdd).
+  Enregistrer `http`, `k8s`, `s3`, `oci` ni aucun module de `vynil-core` en dehors de ce que les fermetures d'enregistrement de l'hôte y ajoutent explicitement.
+  Lire un fichier, l'environnement ou l'horloge système.
+
+Scenario: only the pure group by default
+  Given an engine built with no granted group, even when the process links `vynil-core` with its `fs` and `shell` features
+  When a script evaluates `json_encode(#{a: 1})`
+  Then it returns the JSON text
+  And `get_env("PATH")`, `sleep(1)`, `file_read("/etc/hostname")` and `shell_run("ls")` are each a function-not-found error
+
+Scenario: ungranted functions are absent from introspection
+  Given the same engine
+  When the catalog is read
+  Then it contains `json_encode` and none of `get_env`, `sleep`, `file_read`, `shell_run`
+
+Scenario: a granted group is registered
+  Given an engine whose grants hold Host
+  When a script evaluates `get_env("LYMAILLE_ABSENT")`
+  Then it returns the empty string
+  And `sleep(1)` is still a function-not-found error
+
+Scenario: unavailable group refused
+  Given grants that hold the group Fs and a build of `vynil-core` without the `fs` feature
+  When the builder builds
+  Then it fails with an Engine error that names the group
+
+Scenario: const is a syntax error
+  Given a session engine and a toolset-building engine from base_engine
+  When a script evaluates `const C = #{a: 1}; C.a = 2`
+  Then both return a syntax error, no process panic occurs
+  And `let c = #{a: 1}; c.a = 2; c.a` returns `2` on both
+
+Scenario: import is closed
+  Given a session engine
+  When a script evaluates `import "anything" as m; 1`
+  Then it returns an error and no file was read
+
+Scenario: print never reaches the process output
+  Given a session engine and a run scope
+  When a script evaluates `print("hello"); debug("world")`
+  Then the process standard output and error are unchanged and the run scope holds the captured text
+
+Scenario: granted module is callable and an ungranted one is not
+  Given grants with a module `grafana` exposing `loki_query`
+  When scripts call `grafana::loki_query("x")` and `other::f()`
+  Then the first runs and the second is a module-not-found error
+
+Scenario: toolset dependency stays out of reach
+  Given a toolset module that imported a dependency module `dep` when it was built
+  When a script calls `ts::f()` which uses `dep`, then `dep::secret()` and `ts::secret()`
+  Then the first works and the other two are not-found errors
+    Observed in: spikes/rhai-1-25 (`private_dependencies`, S9).
+
+Scenario: cancellation stops a Rhai loop
+  Given a run scope holding a handle cancelled 200 milliseconds after the start
+  When the engine evaluates `loop { }`
+  Then evaluation ends with a cancellation within one second
+
+Scenario: no handle installed, no interruption
+  Given no run scope on the thread
+  When the engine evaluates a short loop
+  Then it completes normally
+
+Scenario: scopes do not cross threads
+  Given a run scope open on thread A holding a cancelled handle
+  When thread B evaluates a script on the same engine
+  Then thread B is not interrupted
+
+Scenario: registration closure runs once and its functions are catalogued
+  Given a registration closure that adds a native function `session_context`
+  When the engine is built
+  Then a script can call it and the catalog lists it, attributed to the closure
+
+Scenario: failing registration closure
+  Given a registration closure that returns an error
+  When the builder builds
+  Then it fails with an Engine error
+
+Scenario: engine is shareable
+  Given a built engine
+  When asserted for Send and Sync
+  Then the assertion compiles
+
+Tasks:
+  [ ] #1 Tests puis implémentation : @base_engine d'abord (`const`, résolveur, `print`), puis les groupes, les modules, le crochet de progrès.
+  [?] #2 Posé : le jeton d'annulation lu par `on_progress` est propre au fil et vit dans ce module (@RunScope), car `vynil_core::cancel::current` n'est pas public ; le jeton de `vynil-core` est installé en parallèle par ./run.sdd pour les appels natifs bloquants (`cancel::scope`). Deux jetons donc, le @CancelHandle de la crate faisant foi et celui de `vynil-core` en étant le miroir (voir ./run.sdd). Répond à la tâche #2 de ../session/cancel.sdd.
+  [?] #3 Les features `fs` et `shell` de `vynil-core` : la crate `lymaille` doit-elle les relayer par des features Cargo propres, désactivées par défaut, ou ne jamais pouvoir accorder `Fs` et `Shell` ? Dépend du manifeste (`/Cargo.toml`, hors de cette spec) et de l'usage visé (aucun besoin de fichier ou de processus n'est exprimé par le DSD pour les agents d'alerte). À trancher par le développeur principal. Recommandation : relayer `fs` et `shell` par des features désactivées par défaut ; les Scenarios « only the pure group by default » et « unavailable group refused » se jouent avec et sans.
+  [?] #4 Posé : le groupe pur et les fonctions de format sont toujours accordés ; la définition d'agent ne peut pas les retirer. Le DSD (`FR-11`) enregistre « d'office » le seul groupe pur ; les fonctions de format découlent de `FR-8`.
+  [?] #5 Posé : le résolveur de modules est factice (tout `import` échoue). Les modules accordés s'appellent par chemin de module statique, jamais par `import`. Si un jour le LLM doit pouvoir importer un module accordé, remplacer par un résolveur statique des seuls modules accordés.
+  [?] #6 Posé : les standard packages de Rhai (dont `timestamp()` et ses `Instant`) restent chargés, comme dans `vynil-core`. Les valeurs d'instant ne sont pas persistables (avertissement de ./persist.sdd). Aucune horloge de la crate n'est lue.
+  [?] #7 Le texte de `print` et de `debug` est capté, plafonné et rendu devant la valeur (voir ./run.sdd) : comportement qui n'est pas dans le DSD (`FR-5` ne parle que de la valeur finale). Sans cette décision, le texte est jeté silencieusement, ce qui déroute un LLM qui débogue par `print`. À confirmer par le développeur principal. Recommandation : capter et rendre.
+  [?] #8 Un script qui attrape par `try/catch` l'erreur d'annulation d'un appel natif continue jusqu'à l'opération Rhai suivante, où `on_progress` l'arrête (l'arrêt demandé par ce crochet n'est pas rattrapable par `catch`) : à vérifier par un test sur la version de Rhai épinglée.

@@ -1,0 +1,57 @@
+Spec: scratchpad
+
+Purpose:
+  Moteur d'exécution Rhai lié à la session : scope persistant, tool natif `rhai_pad`, introspection, limites du bac à sable, rendu borné des sorties, persistance
+    des variables et des fonctions. Réalise `agent-sessions/scratchpad` (/dsd/agent-sessions/scratchpad.md). Ce répertoire consomme `vynil-core` en version
+    publiée (socle commun par groupes, pont `rt::block_on`, jeton d'annulation de fil) ; il ne contient ni boucle de tour ni stockage.
+
+Structure:
+  ./mod.rs: déclarations et ré-exports du module
+  ./error.rs: erreur du module, erreurs de Rhai classées avec position
+  ./limits.rs: plafonds de mémoire, profondeurs, aucune limite de durée
+  ./grant.rs: description abstraite de ce que la définition d'agent accorde
+  ./engine.rs: construction du moteur d'une session
+  ./render.rs: rendu borné d'une valeur
+  ./format.rs: fonctions de formatage exposées au LLM
+  ./persist.rs: scope vers variables étiquetées, fonctions par texte source, restauration
+  ./introspect.rs: catalogue et fonctions d'introspection
+  ./suggest.rs: candidats les plus proches parmi les éléments accordés
+  ./run.rs: le pad et l'exécution d'un appel de `rhai_pad`
+
+Owns:
+  ./mod.rs
+
+References:
+  ../../lymaille.sdd
+  ../../dsd/agent-sessions/scratchpad.md
+  ../../docs/vynil-core-shopping-list.md
+  ../clock.sdd
+  ../session/session.sdd
+  ./error.sdd
+  ./limits.sdd
+  ./grant.sdd
+  ./engine.sdd
+  ./render.sdd
+  ./format.sdd
+  ./persist.sdd
+  ./introspect.sdd
+  ./suggest.sdd
+  ./run.sdd
+
+Must:
+  Ne réaliser aucune E/S : ni fichier, ni processus, ni environnement, ni sortie standard ; le moteur n'a pas de résolveur de modules par fichier et capte `print` et `debug` (`agent-sessions#CON-1`, `agent-sessions#CON-3`).
+  Ne lire l'horloge que par @Clock ; ne jamais appeler `std::thread::sleep` ni une attente sans point d'annulation (`agent-sessions#FR-4`).
+  N'enregistrer que le groupe pur du socle commun de `vynil-core` et les groupes que la définition d'agent accorde, quelles que soient les features avec lesquelles `vynil-core` est compilé ; aucun groupe de fonctions non accordé n'est atteignable ni visible (`agent-sessions#BR-2`, `agent-sessions/scratchpad#FR-11`).
+  Désactiver `const` dans tout moteur qu'il construit (`agent-sessions/scratchpad#FR-12`).
+  N'imposer aucune limite de durée ni de nombre d'opérations à un script (`agent-sessions/scratchpad#FR-4`) ; l'arrêt d'une boucle est l'annulation par l'hôte.
+  Exécuter chaque script dans `tokio::task::spawn_blocking` avec une portée d'annulation (`agent-sessions/scratchpad#DEC-3`) ; ne dépendre ni de `toolsets`, ni de `modules`, ni de la boucle de tour : les entrées venues d'eux passent par ./grant.sdd.
+  Ne paniquer jamais hors des tests : toute panique d'une évaluation est contenue et rendue en erreur interne.
+  Rendre l'API publique conforme au harnais : énumérations et structures publiques `#[non_exhaustive]` avec constructeurs, rustdoc en anglais, au plus cinq paramètres par fonction.
+  Déclarer chaque sous-module dans ./mod.rs et ré-exporter ce que les specs enfants exposent ; ./mod.rs ne contient aucun comportement.
+
+Tasks:
+  [ ] #1 Déclarer les sous-modules dans ./mod.rs au fil des specs enfants livrées.
+  [?] #2 Dépendances à épingler dans `/Cargo.toml` (hors de cette spec) et features : `rhai` avec `sync`, `serde`, `internals`, `metadata` ; `vynil-core` avec les features `rhai` et `rt` (et, selon ./engine.sdd #3, `fs` et `shell` relayées) ; `serde`, `serde_json`, `thiserror`, `tokio` (`rt`, `rt-multi-thread`, `sync`, `time`, `macros`) et `tokio-util` pour @CancelHandle. À consigner par le développeur principal dans `/lymaille.sdd` (tâche #2) ; ce répertoire ne les épingle pas.
+  [?] #3 Déclarations à faire hors de ce répertoire : `/src/lib.sdd` (module `scratchpad` et ré-exports) et `/lymaille.sdd` (`References`). Non faites ici.
+  [?] #4 Dépendances d'autres domaines, posées par ce domaine et non encore spécifiées : `toolsets` (enregistre `session_context()` par @EngineBuilder::with_registration, construit ses modules avec @base_engine, fournit @GrantedModule, @GrantedToolset, @GrantedSkill, embarque @limits_notice dans le skill intégré) ; `modules` (modules MCP en @GrantedModule) ; `session` (la boucle de tour appelle @Scratchpad::run et range @PadSnapshot dans l'état) ; `agents` (plafonds de mémoire dans @SandboxLimits, voir ./limits.sdd #3).
+  [?] #5 Mesures préalables (spikes courts, avant l'implémentation de ./persist.sdd et ./introspect.sdd) : délimitation du texte d'une fonction par `Engine::lex`, parcours des appels qualifiés par `AST::walk`, champs du JSON de métadonnées de Rhai, attrapage de l'arrêt de `on_progress` par `try/catch`. Les résultats alimentent `Observed in:` des specs concernées.

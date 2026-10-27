@@ -11,10 +11,18 @@ Owns:
 Exposes:
   @ScriptRecord
   @McpRecord
+  @ScriptInput
+  @McpInput
+
+  @ScriptInput et @McpInput sont des types publics `#[non_exhaustive]`, construits uniquement par leur constructeur ; ils
+    regroupent les entrées pour rester sous le seuil d'arguments du harnais (5), sans `#[expect]`. Leurs champs sont privés
+    et ils sont `Copy` (pas de champ à initialiser à la main).
 
 Accepts:
-  @ScriptRecord::new: un @Redactor, le plafond de rendu en caractères, le nom de l'agent, le texte du script, le résultat, la durée, l'erreur éventuelle.
-  @McpRecord::new: un @Redactor, le rôle MCP, le nom de la fonction, les arguments JSON, le statut, la durée.
+  @ScriptRecord::new: un @Redactor, le plafond de rendu en caractères, une @ScriptInput.
+  @ScriptInput::new: le nom de l'agent, le texte du script, le résultat, la durée. @ScriptInput::with_error: l'erreur éventuelle.
+  @McpRecord::new: un @Redactor, une @McpInput.
+  @McpInput::new: le rôle MCP, le nom de la fonction, les arguments JSON, le statut, la durée.
 
 Returns:
   @ScriptRecord: agent, script masqué complet, résultat masqué et tronqué, `original_len` (nombre de caractères du résultat masqué avant troncature), `truncated`, durée en millisecondes, erreur masquée.
@@ -61,4 +69,4 @@ Scenario: MCP arguments are masked
 Tasks:
   [x] #1 Tests puis implémentation.
   [?] #2 @ScriptRecord::new (7 paramètres) et @McpRecord::new (6) portent un `#[expect(clippy::too_many_arguments)]` ; décidé le 2026-10-27 : regrouper en structure d'entrée nommée (nouveau type public), sans exception de lint.
-  [ ] #3 Regrouper les paramètres de @ScriptRecord::new et @McpRecord::new en structures d'entrée nommées et retirer les `#[expect]`.
+  [x] #3 Regrouper les paramètres de @ScriptRecord::new et @McpRecord::new en structures d'entrée nommées et retirer les `#[expect]`.

@@ -26,7 +26,10 @@ Must:
   @EventKind est `#[non_exhaustive]` et couvre : usage de tokens (prompt, complétion), todo modifiée, Memory modifiée (niveau et
     identifiant seulement, jamais le corps), script exécuté (@ScriptRecord), appel MCP (@McpRecord), dépassement de délai
     (`Overrun`, avec la durée écoulée), réessai d'inférence (numéro, délai en millisecondes, classe de l'erreur), début de tour,
-    fin de tour (issue de type @Outcome, réponse complète), fin de run.
+    fragment de texte streamé (`TextDelta`, avec le tour et le texte du fragment), fin de tour (issue de type @Outcome, réponse
+    complète), fin de run.
+  `TextDelta` porte un fragment de la réponse en cours ; les fragments d'un tour arrivent dans l'ordre d'émission, et la réponse
+    complète reste dans `TurnEnded`.
   @Event se sérialise en JSON et se désérialise à l'identique (l'hôte peut le journaliser).
   @EventSink::emit ne bloque pas et ne peut pas échouer vers la librairie ; il est utilisable depuis plusieurs threads.
   @RecordingSink conserve l'ordre d'émission ; @NullSink jette tout.
@@ -49,6 +52,11 @@ Scenario: event round trips through JSON
   When serialized then deserialized
   Then it equals the original
 
+Scenario: text fragments keep their order
+  Given a @RecordingSink and three `TextDelta` events of one turn carrying `Bon`, `jour` and `!`
+  When events is read
+  Then the three fragments come back in the same order, each with its turn and its text
+
 Scenario: recording sink is shareable across threads
   Given a @RecordingSink shared by four threads each emitting ten events
   When all finish
@@ -61,6 +69,10 @@ Tasks:
       Durées en millisecondes. À confirmer, notamment l'issue dans `RunEnded`.
   [ ] #5 Secrets (décidé : la session masque) : `TurnEnded.response` et `InferenceRetry.error_class` passent par le @Redactor dans la boucle de tour, avant émission ; le Must
       « aucun événement ne porte de secret » doit alors être tenu par la librairie. À réaliser avec la boucle de tour (../session/session.sdd #2) ; prévoir un constructeur d'événement qui masque.
-  [?] #2 Variante de fragment de streaming (TBD de `agent-sessions/session`, Questions ouvertes) : non incluse. Si le choix
-      est « fragments comme événements », ajouter une variante `TextDelta`.
+  [x] #2 Variante de fragment de streaming `TextDelta { turn, text }` : décidé le 2026-10-27 (fragments comme événements, cf.
+      `./session.sdd` #4). Champs choisis au plus petit, cohérents avec `TurnStarted` (tour) et `TurnEnded` (texte).
+  [?] #6 Un secret coupé entre deux fragments ne serait pas reconnu par le @Redactor fragment par fragment. La boucle de tour
+      doit masquer le flux avant émission, avec une fenêtre de report tant que le début d'un secret peut encore se compléter :
+      règle non écrite ici, à trancher avec la boucle de tour (`../session/session.sdd` #2).
+  [?] #7 Le texte d'un `TextDelta` est un texte de réponse : il passe par le @Redactor de la boucle de tour comme `TurnEnded.response` (#5).
   [?] #3 Événements de délégation (démarrage, fin de sous-agent, watcher déclenché) : définis par le domaine `delegation`.

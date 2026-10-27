@@ -11,15 +11,22 @@ Exposes:
   @Redactor
 
 Accepts:
-  @Redactor::add_secret: une chaîne ; une chaîne vide est ignorée.
+  @Redactor::add_secret: une chaîne ; une chaîne vide est ignorée ; une chaîne non vide de moins de 6 caractères (comptés en
+    caractères, pas en octets) est refusée.
   @Redactor::redact: un texte.
   @Redactor::redact_json: une valeur `serde_json::Value`.
 
 Returns:
+  @Redactor::add_secret: `Ok(())` si le secret est retenu ou ignoré (chaîne vide) ; sinon l'erreur ci-dessous.
   @Redactor::redact: le texte où chaque occurrence d'un secret est remplacée par `***`.
   @Redactor::redact_json: la valeur où chaque chaîne (valeurs et clés d'objet) est masquée de même.
 
+Raises:
+  @SessionError::SecretTooShort: à l'ajout d'un secret non vide de moins de 6 caractères. Le secret n'est pas retenu et le
+    message ne le contient pas.
+
 Must:
+  Un secret de moins de 6 caractères n'est jamais retenu : il masquerait trop (`agent-sessions/session#FR-8`, décision du 2026-10-27).
   Quand un secret en contient un autre, le plus long est masqué d'abord, pour ne laisser aucun reste.
   Le masquage est idempotent tant qu'aucun secret ne commence ni ne finit par `*` ; sinon le `*` du masque peut se recombiner avec un
     secret voisin, limite connue et assumée (aucun secret ne fuit pour autant : le masque ne révèle rien).
@@ -32,9 +39,11 @@ Must not:
 
 Depends on:
   serde_json
+  ./error.sdd
 
 Can modify:
   /Cargo.toml: ajout de `serde_json` seulement.
+  ./error.rs: variante `SecretTooShort` seulement (voir ./error.sdd).
 
 Scenario: a secret is masked everywhere
   Given a redactor holding `tok-123`
@@ -42,9 +51,25 @@ Scenario: a secret is masked everywhere
   Then the result is `Bearer *** and ***`
 
 Scenario: longest secret first
-  Given secrets `abc` and `abcdef`
-  When redacting `xabcdefx`
+  Given secrets `abcdef` and `abcdefgh`
+  When redacting `xabcdefghx`
   Then the result is `x***x`
+
+Scenario: short secret refused
+  Given a redactor
+  When the secret `abc` is added
+  Then it fails with SecretTooShort, the text of the error does not contain `abc`
+  And redacting `abc` leaves `abc` unchanged
+
+Scenario: secret of six characters accepted
+  Given a redactor
+  When the secret `s3cr3t` is added
+  Then it is accepted and redacting `s3cr3t` gives `***`
+
+Scenario: length counted in characters
+  Given a redactor
+  When a secret of five `é` is added, then a secret of six `é`
+  Then the five are refused with SecretTooShort and the six are accepted
 
 Scenario: json strings and keys
   Given a redactor holding `s3cr3t`
@@ -66,4 +91,7 @@ Tasks:
   [?] #3 Rejeter à l'ajout les secrets qui commencent ou finissent par `*` pour rendre l'idempotence inconditionnelle ? Non fait : les secrets réels
       sont des jetons opaques ; à rouvrir si le cas se présente.
   [x] #2 Décidé le 2026-10-27 : un secret de moins de 6 caractères est refusé à l'ajout avec une erreur explicite (il masquerait trop).
-  [ ] #4 Refuser à l'ajout un secret de moins de 6 caractères (nouvelle erreur, tests puis implémentation, Scenario ci-dessus à ajouter).
+  [x] #4 Refuser à l'ajout un secret de moins de 6 caractères (nouvelle erreur, tests puis implémentation, Scenario ci-dessus à ajouter).
+  [?] #5 La chaîne vide reste ignorée (Scenario « empty secret ignored », Accepts) et n'est pas refusée : elle ne masque rien, donc
+      ne fuit pas. Le texte « moins de 6 caractères » de la décision l'inclurait ; à trancher par le développeur principal.
+  [?] #6 La variante `SecretTooShort` est ajoutée à `SessionError` (`./error.rs`, hors `Owns` de cette spec) : voir `./error.sdd` #4.

@@ -1,0 +1,105 @@
+Spec: limits
+
+Purpose:
+  Plafonds du scratchpad : profondeurs de Rhai conservées, plafonds de mémoire par défaut et surchargeables par définition d'agent, plafond de rendu,
+    et absence délibérée de limite de durée et de nombre d'opérations (`agent-sessions/scratchpad#FR-4`, `agent-sessions/scratchpad#AC-3`,
+    `agent-sessions/scratchpad#AC-7`).
+
+Owns:
+  ./limits.rs
+
+Depends on:
+  rhai
+
+Exposes:
+  @ScratchpadLimits
+  @ScratchpadLimits::new
+  @ScratchpadLimits::with_max_string_bytes
+  @ScratchpadLimits::with_max_array_len
+  @ScratchpadLimits::with_max_map_len
+  @ScratchpadLimits::with_render_cap_chars
+  @ScratchpadLimits::apply_to
+
+Accepts:
+  @ScratchpadLimits::new: aucun argument, rend les valeurs par défaut.
+  @ScratchpadLimits::with_max_string_bytes, @ScratchpadLimits::with_max_array_len, @ScratchpadLimits::with_max_map_len: un entier strictement positif ; zéro est refusé (`None`).
+  @ScratchpadLimits::with_render_cap_chars: un nombre de caractères (`u64`, type du plafond de @SandboxLimits), converti sans panique (saturant vers `usize`) ; zéro est accepté.
+  @ScratchpadLimits::apply_to: une référence mutable vers le @rhai::Engine à régler.
+
+Returns:
+  Un accesseur en lecture seule par plafond : `max_string_bytes`, `max_array_len`, `max_map_len`, `render_cap_chars`.
+  @ScratchpadLimits::apply_to: l'unité ; le moteur porte ensuite les plafonds de mémoire et de profondeur.
+
+Must:
+  Valeurs par défaut : chaîne 16 Mio (`16 * 1024 * 1024` octets UTF-8), tableau 1 000 000 d'éléments, table 100 000 entrées, rendu 8 000 caractères.
+  Profondeurs fixes, non surchargeables, celles de `vynil-core` : expression 256, expression dans une fonction 128, niveaux d'appel 512.
+  @ScratchpadLimits::apply_to pose ces cinq réglages de Rhai (taille de chaîne, de tableau, de table, profondeurs d'expression, niveaux d'appel) et rien d'autre.
+  @ScratchpadLimits::apply_to ne pose jamais de limite d'opérations ni de durée : le nombre d'opérations reste celui de Rhai par défaut, illimité (`agent-sessions/scratchpad#FR-4`). Un script long est légitime ; l'arrêt d'une boucle infinie est l'annulation par l'hôte (./engine.sdd).
+  Un plafond de mémoire de zéro est refusé car Rhai lit zéro comme « illimité » : un réglage à zéro lèverait silencieusement le garde-fou qui protège le processus hôte.
+  Les plafonds de mémoire s'appliquent aussi aux valeurs rendues par les fonctions natives (un appel MCP trop gros échoue par une erreur, sans troncature).
+    Observed in: spikes/rhai-1-25 (`persistence`, S4).
+  Les plafonds appartiennent au moteur d'une session : deux moteurs réglés par deux @ScratchpadLimits différents ne s'influencent pas (un emballement dans une session n'affecte pas les autres).
+  @ScratchpadLimits est copiable, comparable, et se construit uniquement par ses constructeurs ; il n'est ni sérialisé ni persisté (il se dérive de la définition d'agent à chaque démarrage).
+
+Scenario: defaults
+  Given default limits
+  When read
+  Then the string limit is 16777216 bytes, the array limit 1000000, the map limit 100000 and the render cap 8000 characters
+
+Scenario: overrides
+  Given limits built with a string limit of 1000 and a render cap of 500
+  When read
+  Then they report 1000 and 500 and keep the other defaults
+
+Scenario: zero memory limit refused
+  Given a string, array or map limit of zero
+  When the limit is set
+  Then nothing is produced
+
+Scenario: zero render cap accepted
+  Given a render cap of zero
+  When it is set
+  Then the limits report a cap of zero
+
+Scenario: render cap conversion never panics
+  Given a render cap of the largest `u64`
+  When it is set
+  Then the cap is the largest `usize` and nothing panics
+
+Scenario: limits are applied to an engine
+  Given an engine and default limits
+  When apply_to is called
+  Then the engine reports the three memory limits, expression depths 256 and 128 and call levels 512
+
+Scenario: no operation or time limit
+  Given an engine configured by apply_to
+  When a script runs a loop of five million iterations
+  Then it completes without an operation-limit error
+  And the engine reports no maximum of operations
+
+Scenario: string over the limit stops the script
+  Given an engine with a string limit of 1000 bytes
+  When a script builds a string of 2000 characters
+  Then evaluation fails with a data-too-large error
+
+Scenario: native result over the limit fails
+  Given a native function returning a string of 2000 characters on an engine limited to 1000 bytes
+  When a script calls it
+  Then evaluation fails with a data-too-large error and nothing is truncated
+
+Scenario: call depth exceeded
+  Given a script function that calls itself without end
+  When a script calls it on an engine configured by apply_to
+  Then evaluation stops with a stack-overflow error
+
+Scenario: limits are per engine
+  Given two engines configured with a string limit of 1000 and 1 mebibyte
+  When a string of 100000 characters is built on each
+  Then it fails on the first and succeeds on the second
+
+Tasks:
+  [ ] #1 Tests puis implémentation.
+  [ ] #2 Test de l'AC-3 (« un script de plus de deux minutes n'est pas interrompu ») : durée réelle trop longue pour la batterie. Il se vérifie par l'absence de limite d'opérations et par les deux Scenarios « no operation or time limit » ci-dessus ; un test marqué long (`#[ignore]`, lancé hors CI) peut jouer les deux minutes réelles avec une fonction native qui attend.
+  [?] #3 Surcharge « par définition d'agent » (`agent-sessions/scratchpad#FR-4`) : @SandboxLimits (domaine `agents`, ../agents/definition.sdd) ne porte aujourd'hui que le délai de script et le plafond de rendu. Pour surcharger les trois plafonds de mémoire, @SandboxLimits doit gagner trois champs optionnels (chaîne, tableau, table), avec montée de l'empreinte de définition (`fingerprint`). À trancher par le développeur principal. Recommandation : étendre @SandboxLimits (champs `Option`, absents = défauts), sans quoi FR-4 n'est pas tenue.
+  [?] #4 Posé : « 16 Mio » est lu comme 16 mébioctets (`16 * 1024 * 1024`) d'octets UTF-8, la taille de chaîne de Rhai étant comptée en octets ; un LLM qui construit une chaîne multi-octets atteint donc le plafond avant 16 millions de caractères. Écart sans conséquence pour le garde-fou.
+  [?] #5 Posé : le délai de script de @SandboxLimits n'est pas lu ici : un dépassement de délai n'est qu'un événement `Overrun` de la boucle de tour (`agent-sessions#FR-5`) ; aucune limite de durée n'est posée sur le moteur.

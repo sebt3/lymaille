@@ -23,6 +23,7 @@ Raises:
   @SessionError::TurnActive: un tour est déjà actif pour la session, porte l'identifiant.
   @SessionError::PendingToolCall: un message utilisateur ne peut s'insérer entre un appel d'outil et son résultat.
   @SessionError::Poisoned: un verrou interne empoisonné.
+  @SessionError::SecretTooShort: un secret non vide de moins de 6 caractères est refusé à l'ajout (`./redact.sdd`) ; le message ne contient pas le secret.
 
 Must:
   @SessionError est `#[non_exhaustive]` et dérive `thiserror::Error` ; chaque variante a un texte `Display` en anglais.
@@ -34,7 +35,8 @@ Must:
 
   Les textes Display sont : `session store failed: {m}`, `session serialization failed: {m}`,
     `incompatible session format: saved version M.m, current version M.m`, `a turn is already active for session {id}`,
-    `a user message cannot be inserted between a tool call and its result`, `an internal lock was poisoned`.
+    `a user message cannot be inserted between a tool call and its result`, `an internal lock was poisoned`,
+    `a secret must be at least 6 characters long`.
 
 Scenario: display texts are stable
   Given each variant built with sample data
@@ -45,5 +47,7 @@ Scenario: display texts are stable
 Tasks:
   [x] #1 Tests des textes Display, puis l'énumération.
   [x] #3 `IncompatibleFormat` porte deux @FormatVersion (enregistrée et courante) ; le Display est inchangé.
+  [?] #4 La variante `SecretTooShort` (redact.sdd #4) est ajoutée ici alors que ce fichier ne figurait pas dans le périmètre de la tâche
+      redact : à valider par le développeur principal.
   [?] #2 Les erreurs d'inférence (transitoire, permanente, dépassement de contexte, `agent-sessions#FR-6`) se classent
       dans le module `agents`, pas ici : confirmer.

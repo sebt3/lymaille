@@ -1,0 +1,124 @@
+Spec: render
+
+Purpose:
+  Rendu borné d'une valeur Rhai renvoyée au LLM : texte tel quel pour une chaîne, JSON compact pour le reste, plafond en caractères, troncature qui garde le début et la fin
+    avec un avis explicite (`agent-sessions/scratchpad#FR-5`, `agent-sessions/scratchpad#AC-4`, `agent-sessions#DEC-9`).
+
+Owns:
+  ./render.rs
+
+Depends on:
+  rhai
+  serde_json
+
+Exposes:
+  @Rendered
+  @render_value
+  @full_text
+  @truncate_middle
+  @Rendered::text
+  @Rendered::original_chars
+  @Rendered::truncated
+
+Accepts:
+  @render_value: une référence vers un @rhai::Dynamic et un plafond en caractères (`usize`).
+  @full_text: une référence vers un @rhai::Dynamic.
+  @truncate_middle: un texte et un plafond en caractères.
+
+Returns:
+  @full_text: la représentation textuelle complète de la valeur, sans plafond (voir `Must`).
+  @render_value, @truncate_middle: un @Rendered : le texte rendu, le nombre de caractères de l'original (`original_chars`) et `truncated` (vrai seulement si des caractères ont été retirés). @Rendered est `#[non_exhaustive]`, a un constructeur et des accesseurs en lecture seule.
+
+Must:
+  Représentation d'une valeur (@full_text) : une chaîne (`ImmutableString`) est rendue telle quelle, sans guillemets ; un `char` en une chaîne d'un caractère ; l'unité `()` en le texte `()` ; un entier, un booléen en leur texte ; un flottant fini en son texte et un flottant non fini en son texte Rhai (`NaN`, `inf`), jamais `null` ; un tableau et une table en JSON compact (sans espace superflu), les clés d'une table dans l'ordre trié de Rhai ; un `blob` en `[blob: N bytes]` (N octets) ; toute autre valeur, ou une valeur que la sérialisation JSON refuse, en le texte d'affichage de Rhai pour cette valeur. Les chaînes imbriquées dans un tableau ou une table sont celles du JSON (échappées, entre guillemets).
+  Les caractères se comptent en valeurs scalaires Unicode (`chars`), jamais en octets : une troncature ne coupe jamais au milieu d'un caractère multi-octets.
+  @render_value rend le texte de @full_text tel quel quand il ne dépasse pas le plafond (`truncated` faux, y compris à égalité exacte). Au-delà, @truncate_middle s'applique.
+  @truncate_middle garde le début et la fin du texte et place au milieu l'avis suivant, exact, où `{omitted}` et `{total}` sont les nombres de caractères retirés et du texte d'origine :
+    `\n[... output truncated: {omitted} of {total} characters omitted. Store the result in a variable and extract the useful part before returning it ...]\n`.
+  La longueur totale du texte rendu, avis compris, n'excède jamais le plafond : `place = plafond - longueur de l'avis`, le début garde `ceil(place / 2)` caractères et la fin `floor(place / 2)` ; `omitted = total - place`. La longueur de l'avis se calcule avec les vrais nombres (le nombre de chiffres de `omitted` est celui de `total` au plus : on réserve la largeur de `total`).
+  Quand le plafond est inférieur ou égal à la longueur de l'avis, le texte rendu est le début de l'avis, coupé au plafond, sans début ni fin du texte d'origine ; un plafond de zéro rend le texte vide avec `truncated` vrai si le texte d'origine est non vide.
+  Un texte vide n'est jamais tronqué.
+  Le rendu est déterministe : même valeur, même texte. Il ne masque aucun secret (le masquage se fait avant la troncature, dans ./run.sdd) et ne lit aucune horloge ni E/S.
+
+Scenario: a string is rendered without quotes
+  Given the string value `hello`
+  When rendered with a cap of 100
+  Then the text is `hello` and truncated is false
+
+Scenario: a map is rendered as compact JSON
+  Given the map `#{b: 2, a: "x"}`
+  When rendered with a cap of 100
+  Then the text is `{"a":"x","b":2}`
+
+Scenario: scalars and unit
+  Given the values `42`, `1.5`, `true`, the char `x` and `()`
+  When each is rendered
+  Then the texts are `42`, `1.5`, `true`, `x` and `()`
+
+Scenario: non finite float keeps its Rhai text
+  Given the float NaN and the float infinity
+  When rendered
+  Then the texts are `NaN` and `inf`, never `null`
+
+Scenario: blob is described, not dumped
+  Given a blob of three bytes
+  When rendered
+  Then the text is `[blob: 3 bytes]`
+
+Scenario: a non serializable value falls back to its display
+  Given a function pointer value
+  When rendered
+  Then a text is produced and nothing panics
+
+Scenario: text at exactly the cap is untouched
+  Given a string of 8000 characters
+  When rendered with a cap of 8000
+  Then the text is unchanged and truncated is false
+
+Scenario: oversized output is truncated with a notice
+  Given a string of 20000 characters
+  When rendered with a cap of 8000
+  Then the text has at most 8000 characters, starts with the first characters of the original and ends with its last characters
+  And the middle holds the notice stating the exact number of omitted characters (20000 minus the kept ones) out of `20000` and inviting to extract the useful part
+  And truncated is true and original_chars is 20000
+
+Scenario: head and tail sizes
+  Given a string of 1000 characters, a cap of 400 and a notice of known length
+  When rendered
+  Then the head holds ceil(place/2) characters, the tail floor(place/2), and the total equals the cap or is one character shorter
+
+Scenario: truncation does not split a multi-byte character
+  Given 20000 characters `é` and a cap of 1000
+  When rendered
+  Then every character of the text is `é` or part of the notice, and the text is valid
+
+Scenario: cap smaller than the notice
+  Given a long string and a cap of 10
+  When rendered
+  Then the text is the first 10 characters of the notice and truncated is true
+
+Scenario: zero cap
+  Given a non empty string and a cap of zero
+  When rendered
+  Then the text is empty and truncated is true
+
+Scenario: empty text is never truncated
+  Given an empty string and a cap of zero
+  When rendered
+  Then the text is empty and truncated is false
+
+Scenario: full text has no cap
+  Given an array of 100000 integers
+  When full_text is called
+  Then the whole compact JSON is returned
+
+Scenario: rendering is deterministic
+  Given a map with ten keys inserted in two different orders
+  When both are rendered
+  Then the texts are equal
+
+Tasks:
+  [ ] #1 Tests puis implémentation.
+  [?] #2 Posé : @full_text construit le texte entier puis @truncate_middle le coupe. La mémoire est bornée par les plafonds de ./limits.sdd pour chaque collection, mais pas pour leur imbrication (un tableau de 1 000 000 de tableaux de 1 000 000 d'éléments dépasserait). Un écrivain qui ne retient que le début et la fin pendant la sérialisation est possible ; il n'est pas posé tant qu'un besoin n'est pas établi.
+  [?] #3 Posé : l'unité se rend `()` (pas vide, pas `null`) pour qu'un script sans valeur finale soit lisible par le LLM ; un `blob` se rend en description (le LLM l'encode lui-même avec `base64_encode`).
+  [?] #4 Posé : le texte de l'avis est en anglais, constant, et ne dépend d'aucun nom de fonction du toolset ; il renvoie à « a variable » de façon générique (le LLM connaît les fonctions de ./format.sdd par l'introspection).

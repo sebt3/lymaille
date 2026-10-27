@@ -52,6 +52,13 @@ pub enum EventKind {
         /// Rank of the turn in its session.
         turn: TurnId,
     },
+    /// A fragment of the streamed text of a turn, in emission order. The complete response comes with `TurnEnded`.
+    TextDelta {
+        /// Rank of the turn the fragment belongs to.
+        turn: TurnId,
+        /// Text of the fragment.
+        text: String,
+    },
     /// A turn ended with its outcome and its complete response.
     TurnEnded {
         /// Rank of the turn in its session.
@@ -154,8 +161,8 @@ mod tests {
     use crate::clock::Timestamp;
     use crate::session::{EventSink as _, Outcome, RunId, SessionId, TurnId};
 
-    /// Names of the ten variants of [`EventKind`], in the order of [`one_of_each_kind`].
-    const ALL_VARIANTS: [&str; 10] = [
+    /// Names of the eleven variants of [`EventKind`], in the order of [`one_of_each_kind`].
+    const ALL_VARIANTS: [&str; 11] = [
         "TokenUsage",
         "TodoChanged",
         "MemoryChanged",
@@ -164,6 +171,7 @@ mod tests {
         "Overrun",
         "InferenceRetry",
         "TurnStarted",
+        "TextDelta",
         "TurnEnded",
         "RunEnded",
     ];
@@ -195,22 +203,25 @@ mod tests {
                 EventKind::Script(crate::session::ScriptRecord::new(
                     &crate::session::Redactor::new(),
                     10,
-                    "agent-a",
-                    "print(1)",
-                    "1",
-                    std::time::Duration::from_millis(4),
-                    None,
+                    crate::session::ScriptInput::new(
+                        "agent-a",
+                        "print(1)",
+                        "1",
+                        std::time::Duration::from_millis(4),
+                    ),
                 )),
             ),
             (
                 "McpCall",
                 EventKind::McpCall(crate::session::McpRecord::new(
                     &crate::session::Redactor::new(),
-                    "monitoring",
-                    "query",
-                    &serde_json::json!({"expr": "up"}),
-                    "ok",
-                    std::time::Duration::from_millis(9),
+                    crate::session::McpInput::new(
+                        "monitoring",
+                        "query",
+                        &serde_json::json!({"expr": "up"}),
+                        "ok",
+                        std::time::Duration::from_millis(9),
+                    ),
                 )),
             ),
             ("Overrun", EventKind::Overrun { elapsed_ms: 90_000 }),
@@ -223,6 +234,13 @@ mod tests {
                 },
             ),
             ("TurnStarted", EventKind::TurnStarted { turn: TurnId::new(3) }),
+            (
+                "TextDelta",
+                EventKind::TextDelta {
+                    turn: TurnId::new(3),
+                    text: "Bon".to_owned(),
+                },
+            ),
             (
                 "TurnEnded",
                 EventKind::TurnEnded {
@@ -252,6 +270,7 @@ mod tests {
             EventKind::Overrun { .. } => "Overrun",
             EventKind::InferenceRetry { .. } => "InferenceRetry",
             EventKind::TurnStarted { .. } => "TurnStarted",
+            EventKind::TextDelta { .. } => "TextDelta",
             EventKind::TurnEnded { .. } => "TurnEnded",
             EventKind::RunEnded { .. } => "RunEnded",
         }
@@ -274,11 +293,42 @@ mod tests {
     }
 
     #[test]
+    fn text_fragments_keep_their_order() {
+        let sink = RecordingSink::new();
+        let fragments = ["Bon", "jour", "!"];
+        for text in fragments {
+            sink.emit(Event::new(
+                session(),
+                Timestamp::from_millis(5),
+                EventKind::TextDelta {
+                    turn: TurnId::new(3),
+                    text: text.to_owned(),
+                },
+            ));
+        }
+        let received: Vec<String> = sink
+            .events()
+            .into_iter()
+            .map(|event| {
+                let EventKind::TextDelta { turn, text } = event.kind else {
+                    panic!("only text fragments were emitted")
+                };
+                assert_eq!(turn, TurnId::new(3), "each fragment must carry its turn");
+                text
+            })
+            .collect();
+        assert_eq!(
+            received, fragments,
+            "the three fragments must come back with their text, in the order they were emitted"
+        );
+    }
+
+    #[test]
     fn event_round_trips_through_json() {
         let kinds = one_of_each_kind();
         assert!(
             kinds.iter().map(|(name, _)| *name).eq(ALL_VARIANTS),
-            "the samples must cover each of the ten variants of EventKind, in order"
+            "the samples must cover each of the eleven variants of EventKind, in order"
         );
         for (name, kind) in &kinds {
             assert_eq!(

@@ -1,0 +1,231 @@
+Spec: run
+
+Purpose:
+  Le scratchpad d'une session et l'exécution d'un appel du tool natif `rhai_pad` : scope et fonctions conservés d'un appel à l'autre, évaluation hors des workers
+    du runtime, annulation, résultat rendu et borné, avertissements de persistance, masquage des secrets, enregistrement d'audit, instantané pour la persistance
+    et restauration (`agent-sessions/scratchpad#FR-1`, `agent-sessions/scratchpad#FR-2`, `agent-sessions/scratchpad#FR-5` à `FR-7`,
+    `agent-sessions/scratchpad#FR-10`, `agent-sessions/scratchpad#DEC-1`, `agent-sessions/scratchpad#DEC-3`, `agent-sessions/session#FR-8`, `agent-sessions#CON-3`).
+
+Owns:
+  ./run.rs
+
+References:
+  ../session/audit.sdd
+  ../session/cancel.sdd
+  ../session/redact.sdd
+  ../session/state.sdd
+  ../clock.sdd
+
+Depends on:
+  ./engine.sdd
+  ./error.sdd
+  ./grant.sdd
+  ./introspect.sdd
+  ./limits.sdd
+  ./persist.sdd
+  ./render.sdd
+  ./suggest.sdd
+  ../session/audit.sdd
+  ../session/cancel.sdd
+  ../session/redact.sdd
+  ../session/tagged_value.sdd
+  ../clock.sdd
+  rhai
+  vynil-core
+  tokio
+
+Exposes:
+  @Scratchpad
+  @RunEnv
+  @RunOutcome
+  @RunStatus
+  @PadSnapshot
+  @Restored
+  @Scratchpad::new
+  @Scratchpad::restore
+  @Scratchpad::run
+  @Scratchpad::snapshot
+
+Accepts:
+  @Scratchpad::new: un @ScratchpadEngine partagé (`Arc`) ; rend un pad vide (scope vide, aucune fonction).
+  @Scratchpad::restore: le @ScratchpadEngine, la table des variables de l'état (nom vers @TaggedValue) et la table des sources de fonctions (clé vers texte) ; rend un @Restored : le pad et la liste triée des clés de fonctions cassées (pour @restore_notices de ../session/notice.sdd).
+  @Scratchpad::run: le texte du script, le @CancelHandle du run et un @RunEnv ; fonction asynchrone.
+  @RunEnv::new: le nom de l'agent, une référence vers le @Redactor de la session et une référence vers l'horloge (@Clock).
+  @Scratchpad::snapshot: aucun argument.
+
+Returns:
+  @RunOutcome (`#[non_exhaustive]`, accesseurs en lecture seule) : `text` (le résultat du tool pour le LLM, déjà plafonné et masqué), `status` (@RunStatus : `Ok`, `Failed` avec une @ErrorClass, ou `Cancelled`), `truncated`, les avertissements de persistance (@PersistWarning) et l'enregistrement d'audit (@ScriptRecord, ../session/audit.sdd). La boucle de tour émet l'événement de script à partir de cet enregistrement ; ce fichier n'émet rien.
+  @Scratchpad::snapshot: un @PadSnapshot : variables persistables (table ordonnée nom vers @TaggedValue), sources de fonctions (clé vers texte) et avertissements des variables exclues. C'est ce que la boucle de tour range dans @SessionState.
+
+Must:
+  Variables et fonctions se conservent d'un appel au suivant : un `let` de niveau supérieur reste dans le scope, une `fn` reste appelable (`agent-sessions/scratchpad#AC-1`). Le scope est celui d'un seul pad, jamais partagé entre sessions.
+  Chaque run : (1) refuse de démarrer, sans effet sur le pad, si le @CancelHandle est déjà annulé (statut `Cancelled`) ; (2) lit l'heure par l'horloge injectée (début et fin, durée en millisecondes) ; (3) pose l'instantané d'introspection (variables, fonctions du LLM) avant d'évaluer ; (4) évalue le script dans `tokio::task::spawn_blocking`, jamais dans une tâche async (`agent-sessions/scratchpad#DEC-3`) ; (5) rend le résultat.
+  Dans la tâche bloquante, dans cet ordre : ouverture d'un @RunScope (jeton du run pour le crochet de progrès et tampon de sortie, ./engine.sdd) puis de `vynil_core::cancel::scope` avec le jeton miroir ; compilation du script ; fusion de l'AST du script avec l'AST des fonctions du pad (`AST::merge`) ; évaluation avec le scope persistant (`eval_ast_with_scope`) ; enregistrement des fonctions du script dans le pad si la compilation a réussi (les instructions de niveau supérieur ne sont jamais conservées) ; calcul de l'instantané de persistance.
+    Observed in: spikes/rhai-1-25 (`scope_visibility`, B) : fonctions conservées comme AST croissant fusionné à chaque script.
+  Un script qui ne compile pas est une erreur de syntaxe rendue au LLM et ne change rien au pad ; un script qui échoue à l'exécution conserve ce qu'il a posé dans le scope et les fonctions qu'il a définies.
+  Annulation, pont `CancelHandle` vers jeton de `vynil-core` : avant la tâche bloquante, un jeton `vynil_core::cancel::CancelToken` est créé, et une tâche async courte attend `CancelHandle::cancelled` pour annuler ce jeton ; elle est arrêtée à la fin du run. Le jeton de `vynil-core` est celui que lisent `rt::block_on` et `sleep` pendant un appel natif bloquant (annulation en 25 ms environ) ; celui de la crate est celui que lit le crochet de progrès entre deux opérations de Rhai. Quand le @CancelHandle est annulé à l'issue du run, quelle que soit l'erreur de Rhai, le statut est `Cancelled` (`agent-sessions/scratchpad#FR-10`, `agent-sessions/scratchpad#AC-9`).
+  Un appel MCP ou d'inférence qui ne rend jamais est abandonné à l'annulation du run : le futur est détruit et le run se termine dans le délai d'une annulation, sans attendre l'appel (`agent-sessions/scratchpad#AC-9`).
+  Une panique de la tâche bloquante (défaut de Rhai ou d'une fonction native) est interceptée à la frontière de la tâche et rendue comme @ScratchpadError::Internal ; le verrou du pad empoisonné par cette panique est récupéré (l'état laissé par l'évaluation est conservé) : aucune panique ne traverse `run`, et le pad reste utilisable.
+  Rendu, dans cet ordre : le texte capté par `print` et `debug` pendant le script (plafonné, une ligne par appel), puis la valeur finale par @render_value, puis les avertissements de persistance, un par ligne. Le texte entier est masqué par @Redactor::redact avant la troncature, puis la valeur est tronquée de sorte que le total ne dépasse pas le plafond de rendu (`agent-sessions/scratchpad#FR-5`, `agent-sessions/scratchpad#AC-4`, `agent-sessions#CON-3`) ; les avertissements et le texte capté ne sont jamais coupés avant la valeur : le plafond de la valeur est le plafond de rendu moins la longueur des avertissements et du texte capté, plancher à zéro.
+  Erreur : le texte rendu est le `Display` de @ScratchpadError, complété des suggestions de ./suggest.sdd (candidats parmi les seuls éléments accordés), masqué des secrets, puis plafonné au plafond de rendu par @truncate_middle. Le statut est `Failed` avec la classe de l'erreur.
+  Avertissements de persistance : calculés à la fin de chaque run sur le scope vivant. Un avertissement pour une variable donnée est rendu au premier run qui la voit non persistable et n'est pas répété aux runs suivants tant qu'elle reste dans le même état ; il redevient possible si la variable disparaît ou devient persistable puis ne l'est plus. Les avertissements ne font pas échouer le script : le statut reste `Ok` (`agent-sessions/scratchpad#FR-7`).
+  Enregistrement d'audit : @ScriptRecord est construit avec le nom de l'agent, le texte complet du script, le résultat entier non plafonné (@full_text de la valeur, ou le texte de l'erreur), la durée et l'erreur éventuelle ; il masque et plafonne lui-même (`agent-sessions/session#AC-4`). Le record est rendu même si le run échoue ou est annulé. Le script n'est jamais tronqué.
+  L'instantané d'un pad restauré puis non modifié est égal à celui qui a servi à le restaurer, aux variables non persistables près.
+  Restauration : les variables sont reposées dans le scope par @restore_scope ; les fonctions sont recompilées par @recompile_functions ; le pad ne rejoue aucun script (`agent-sessions/scratchpad#DEC-1`) ; les clés cassées sont rendues dans @Restored. Après restauration, `f(x)` s'évalue comme avant la sauvegarde (`agent-sessions/scratchpad#AC-1`).
+  Un seul run évalue à la fois par pad : le verrou du pad sérialise les runs concurrents ; l'exclusion d'un tour actif par session (@TurnGate) rend ce cas exceptionnel.
+  Le runtime de l'hôte est un runtime tokio multi-thread (`agent-sessions#CON-6`) ; sur un runtime `current_thread`, un appel natif asynchrone depuis un script rend l'erreur explicite de `vynil-core` (rendue au LLM comme erreur d'exécution), le script lui-même s'exécute.
+  Le pad et ses valeurs sont `Send + Sync`. Aucune E/S, aucune horloge système en direct : le temps passe par @Clock.
+
+Must not:
+  Évaluer un script dans une tâche async ou sur un worker du runtime.
+  Rejouer un script à la restauration.
+  Émettre des événements, lire l'état de session ou appeler le fournisseur d'inférence : la boucle de tour s'en charge.
+  Interrompre un run sur le temps écoulé ou le nombre d'opérations (`agent-sessions#FR-5`).
+  Rendre au LLM un texte non masqué.
+
+Scenario: variables and functions persist across calls
+  Given a first call `let x = 3; fn f(a) { a * 2 }` and a second call `f(x)`
+  When both runs complete in the same pad
+  Then the second result text is `6` and the status is Ok
+
+Scenario: persistence survives a restore
+  Given the same two calls, a snapshot taken after the first, and a pad restored from that snapshot on a fresh engine
+  When `f(x)` is run on the restored pad
+  Then the result is `6` and no function is reported broken
+
+Scenario: syntax error leaves the pad untouched
+  Given a pad holding `let x = 3`
+  When the script `let y = ;` is run
+  Then the status is Failed(Syntax), the text has the position, and `x` is still 3 and `y` does not exist
+
+Scenario: runtime error keeps earlier effects
+  Given the script `let a = 1; throw "boom"; let b = 2`
+  When it is run
+  Then the status is Failed(Runtime), the text contains `boom`, and `a` exists and `b` does not
+
+Scenario: redefinition replaces a function
+  Given a pad where `fn f() { 1 }` was defined
+  When `fn f() { 2 }` is run, then `f()` is run
+  Then the last result is `2` and the snapshot holds a single `f/0`
+
+Scenario: call depth is an error rendered to the LLM
+  Given a script function that calls itself without end
+  When it is run
+  Then the status is Failed(Limit) and the text is a limit error naming the call depth
+
+Scenario: long scripts are not interrupted
+  Given a script that runs a long native wait
+  When it is run without cancelling
+  Then it completes normally with the status Ok
+
+Scenario: oversized result is truncated with a notice
+  Given a render cap of 1000 and a script returning a string of 5000 characters
+  When it is run
+  Then the text has at most 1000 characters with the start, the end and the truncation notice, truncated is true and the status is Ok
+
+Scenario: string beyond the memory limit
+  Given default limits and a script that doubles a string until it exceeds 16 mebibytes
+  When it is run
+  Then the status is Failed(Limit), the text is the limit error, and a second pad on another engine in the same process runs normally
+
+Scenario: closure variable warns without failing
+  Given the script `let n = 3; let f = |x| x + n; n`
+  When it is run, then the snapshot is taken
+  Then the text is `3` followed by the closure warning naming `f`, the status is Ok, and the snapshot lacks `f` but holds `n`
+
+Scenario: the warning is not repeated
+  Given a pad where the previous run already warned about `f`
+  When another script `n + 1` is run
+  Then its text carries no warning
+
+Scenario: restored pad lacks the excluded variable
+  Given the pad above and a pad restored from its snapshot
+  When `n` and then `f` are evaluated on the restored pad
+  Then `n` is 3 and `f` is a variable-not-found error
+
+Scenario: cancellation of a never returning native call
+  Given a native function that blocks on a future that never completes through the `vynil-core` bridge
+  When the handle is cancelled 100 milliseconds after the run starts
+  Then the run ends with the status Cancelled in under 500 milliseconds and the future was dropped
+
+Scenario: cancellation of a Rhai loop
+  Given the script `loop { }`
+  When the handle is cancelled after 100 milliseconds
+  Then the run ends with the status Cancelled in under one second
+
+Scenario: cancelled before start
+  Given a handle already cancelled
+  When a script is run
+  Then the status is Cancelled and the pad is unchanged and the script did not execute
+
+Scenario: cancellation wins over the error it caused
+  Given a native function that returns the `vynil-core` cancellation error when cancelled
+  When the handle is cancelled during the run
+  Then the status is Cancelled, not Failed(Runtime)
+
+Scenario: the evaluation does not use a runtime worker
+  Given a runtime with two worker threads and a script that loops for one second
+  When two such runs are started together with another async task that increments a counter every 10 milliseconds
+  Then the counter keeps advancing during both runs
+
+Scenario: a panic is contained
+  Given a native function that panics
+  When a script calls it
+  Then the status is Failed(Internal), no panic crosses run, and the next script on the same pad runs normally
+
+Scenario: secrets are masked in text and audit
+  Given a redactor holding `tok-123456` and a script returning `Bearer tok-123456`
+  When it is run
+  Then the text contains `***` and not the secret, and the audit record holds neither the secret in the script, the result nor the error
+
+Scenario: errors are masked and suggested
+  Given a redactor holding `tok-123456` and the script `grafana::loki_queryy("tok-123456")` with a granted module `grafana::loki_query`
+  When it is run
+  Then the text names `grafana::loki_query` as the closest candidate and does not contain the secret
+  And no suggestion names a function of an ungranted module
+
+Scenario: print output is rendered before the value
+  Given the script `print("step 1"); 42`
+  When it is run
+  Then the text is `step 1` on its own line followed by `42`, and nothing reached the process output
+
+Scenario: warnings and value share the render cap
+  Given a render cap of 300, a script returning 5000 characters and creating a closure variable
+  When it is run
+  Then the whole text is at most 300 characters and still ends with the closure warning
+
+Scenario: audit record carries the script and the duration
+  Given a manual clock advanced by 250 milliseconds during the run
+  When a script is run
+  Then the audit record holds the full script text, the agent name and a duration of 250 milliseconds
+
+Scenario: audit record is built on failure
+  Given a failing script
+  When it is run
+  Then the audit record holds the masked error and the status is Failed
+
+Scenario: const is refused
+  Given the script `const C = #{a: 1}; C.a = 2`
+  When it is run
+  Then the status is Failed(Syntax) and no panic occurs, and `let c = #{a: 1}; c.a = 2; c.a` returns `2`
+
+Scenario: only granted modules are reachable, even through a function the LLM defined (domain AC-1)
+  Given a pad on an agent granted only a read toolset, and a script defining `fn w() { writer::delete() }`
+  When `w()` is run
+  Then the status is Failed(NotFound) with no suggestion naming `writer`, and the module `writer` was not reached
+
+Scenario: runs on one pad are serialized
+  Given two runs started together on the same pad
+  When both complete
+  Then their effects are applied one after the other and the scope holds both results
+
+Tasks:
+  [ ] #1 Tests puis implémentation, dans l'ordre : pad et persistance entre appels, erreurs et rendu, avertissements, annulation (jeton miroir), audit et masquage, restauration.
+  [?] #2 Posé : le pad est un type de ce fichier et la boucle de tour (domaine `session`, tâche #2 de ../session/session.sdd) l'emploie ; elle range @PadSnapshot dans @SessionState (mutateurs `pub(crate)`) et émet l'événement de script depuis @ScriptRecord. Ce fichier ne dépend pas de @SessionState.
+  [?] #3 Le masquage des secrets dans le texte renvoyé au LLM (et non seulement dans les événements) est posé ici d'après `agent-sessions#CON-3` (« ni dans les sorties renvoyées au LLM »). La spec de ../session/redact.sdd limite son `Purpose` aux événements : à élargir à un seul endroit, ou à confirmer que le masquage de la sortie du tool se fait ici. À valider par le développeur principal ; recommandation : élargir le `Purpose` de ../session/redact.sdd.
+  [?] #4 Posé : le texte de `print` et de `debug` est rendu devant la valeur (voir ./engine.sdd #7). À confirmer par le développeur principal.
+  [?] #5 Posé : le pont d'annulation est une tâche async qui attend `CancelHandle::cancelled` et annule le jeton de `vynil-core`, car `vynil_core::cancel::current` est interne et que les deux jetons sont de types différents (réponse à la tâche #2 de ../session/cancel.sdd). Un second jeton dans l'autre sens n'est pas nécessaire, l'hôte n'annulant que par @CancelHandle.
+  [?] #6 Posé : un avertissement de persistance est rendu une seule fois par variable et par état (voir `Must`) pour ne pas encombrer chaque sortie ; il se rend de nouveau si la variable change d'état. Le DSD (`FR-7`) dit « à la fin d'un script » sans fixer la répétition. Alternative : à chaque script tant que la variable existe.
+  [?] #7 @ScriptRecord::new prend 7 paramètres (limite de clippy : 5) ; la tâche #3 de ../session/audit.sdd le remplace par une structure d'entrée nommée. Ce fichier s'écrit contre cette structure, pas contre les 7 paramètres.
+  [?] #8 Posé : une annulation à l'entrée n'ouvre aucun enregistrement d'audit de script exécuté mais rend tout de même un @ScriptRecord (statut annulé, durée zéro) pour que la boucle de tour garde la trace du script demandé ; à confirmer avec la boucle de tour.
+  [?] #9 Posé : `run` ne borne pas le nombre de scripts simultanés au-delà du pool bloquant de tokio (`agent-sessions/scratchpad#DEC-3`) ; la pression sur ce pool relève de l'hôte.

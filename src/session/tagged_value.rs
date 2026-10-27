@@ -3,16 +3,18 @@
 
 use std::collections::BTreeMap;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
 use serde::ser::{SerializeStruct as _, Serializer};
 use serde::{Deserialize, Serialize};
 
 /// A variable value of the scratchpad, tagged with its real type.
 ///
 /// JSON serialization tags each value with an explicit type field, such as `{"type": "char", "value": "x"}`, so that a
-/// `char`, a string, an integer, a float and a blob never run into each other. A non-finite float cannot be written in
-/// JSON: its serialization fails instead of writing `null`.
+/// `char`, a string, an integer, a float and a blob never run into each other. A blob is written as standard base64
+/// text. A non-finite float cannot be written in JSON: its serialization fails instead of writing `null`.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+#[serde(try_from = "Wire")]
 #[non_exhaustive]
 pub enum TaggedValue {
     /// The unit value.
@@ -27,12 +29,55 @@ pub enum TaggedValue {
     Char(char),
     /// A string.
     String(String),
-    /// Raw bytes, serialized as an array of integers.
+    /// Raw bytes, serialized as standard base64 text.
     Blob(Vec<u8>),
     /// An ordered array of values.
     Array(Vec<Self>),
     /// A table of values, ordered by key so that the serialization is reproducible.
     Map(BTreeMap<String, Self>),
+}
+
+/// Form read back from JSON, before the blob text is decoded into bytes by [`TaggedValue`]'s `TryFrom` conversion.
+#[derive(Deserialize)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+enum Wire {
+    Unit,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    Char(char),
+    String(String),
+    Blob(String),
+    Array(Vec<Self>),
+    Map(BTreeMap<String, Self>),
+}
+
+impl TryFrom<Wire> for TaggedValue {
+    type Error = String;
+
+    fn try_from(wire: Wire) -> Result<Self, Self::Error> {
+        Ok(match wire {
+            Wire::Unit => Self::Unit,
+            Wire::Bool(value) => Self::Bool(value),
+            Wire::Int(value) => Self::Int(value),
+            Wire::Float(value) => Self::Float(value),
+            Wire::Char(value) => Self::Char(value),
+            Wire::String(value) => Self::String(value),
+            Wire::Blob(text) => Self::Blob(STANDARD.decode(text).map_err(|error| error.to_string())?),
+            Wire::Array(items) => Self::Array(
+                items
+                    .into_iter()
+                    .map(Self::try_from)
+                    .collect::<Result<Vec<_>, String>>()?,
+            ),
+            Wire::Map(table) => Self::Map(
+                table
+                    .into_iter()
+                    .map(|(key, value)| Ok((key, Self::try_from(value)?)))
+                    .collect::<Result<BTreeMap<_, _>, String>>()?,
+            ),
+        })
+    }
 }
 
 /// Writes a value as `{"type": tag, "value": value}`.
@@ -68,7 +113,7 @@ impl Serialize for TaggedValue {
             }
             Self::Char(value) => write_tagged(serializer, "char", value),
             Self::String(value) => write_tagged(serializer, "string", value),
-            Self::Blob(bytes) => write_tagged(serializer, "blob", bytes),
+            Self::Blob(bytes) => write_tagged(serializer, "blob", &STANDARD.encode(bytes)),
             Self::Array(items) => write_tagged(serializer, "array", items),
             Self::Map(table) => write_tagged(serializer, "map", table),
         }
@@ -217,6 +262,24 @@ mod tests {
         assert!(
             matches!(&array_back, TaggedValue::Array(items) if items.len() == 2 && items.iter().all(|item| matches!(item, TaggedValue::Int(_)))),
             "the array of the integers 1 and 2 must come back as an array of integers, got {array_back:?}"
+        );
+    }
+
+    #[test]
+    fn blob_is_written_in_base64() {
+        let json = serde_json::to_string(&TaggedValue::Blob(vec![1, 2, 255])).expect("a blob serializes");
+        assert_eq!(
+            json, r#"{"type":"blob","value":"AQL/"}"#,
+            "a blob must be written as standard base64 text, not as an array of integers"
+        );
+    }
+
+    #[test]
+    fn invalid_base64_blob_refused() {
+        let result: Result<TaggedValue, _> = serde_json::from_str(r#"{"type": "blob", "value": "!!"}"#);
+        assert!(
+            result.is_err(),
+            "a blob whose value is not valid base64 must fail to deserialize, not be read as empty bytes"
         );
     }
 

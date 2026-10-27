@@ -10,6 +10,49 @@ use serde_json::Value;
 
 use super::Redactor;
 
+/// Inputs of a script record, grouped so that [`ScriptRecord::new`] keeps a short signature. Built with
+/// [`ScriptInput::new`] and, when the script raised an error, [`ScriptInput::with_error`].
+#[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
+pub struct ScriptInput<'input> {
+    /// Name of the agent that ran the script.
+    agent: &'input str,
+    /// Complete script text.
+    script: &'input str,
+    /// Result of the script, before masking and truncation.
+    result: &'input str,
+    /// Duration of the script.
+    duration: Duration,
+    /// Error raised by the script, when there was one.
+    error: Option<&'input str>,
+}
+
+impl<'input> ScriptInput<'input> {
+    /// Inputs of a script run that raised no error.
+    #[must_use]
+    pub const fn new(
+        agent: &'input str,
+        script: &'input str,
+        result: &'input str,
+        duration: Duration,
+    ) -> Self {
+        Self {
+            agent,
+            script,
+            result,
+            duration,
+            error: None,
+        }
+    }
+
+    /// Sets the error raised by the script.
+    #[must_use]
+    pub const fn with_error(mut self, error: &'input str) -> Self {
+        self.error = Some(error);
+        self
+    }
+}
+
 /// Audit record of one executed script. Every text is masked; the result is also truncated to the rendering cap.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -32,31 +75,55 @@ pub struct ScriptRecord {
 
 impl ScriptRecord {
     /// Builds the record of a script run, masking every field and truncating the result to `render_cap` characters.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "audit.sdd lists seven inputs for a script record; grouping them would add a public type the spec does not name"
-    )]
     #[must_use]
-    pub fn new(
-        redactor: &Redactor,
-        render_cap: usize,
-        agent: &str,
-        script: &str,
-        result: &str,
-        duration: Duration,
-        error: Option<&str>,
-    ) -> Self {
+    pub fn new(redactor: &Redactor, render_cap: usize, input: ScriptInput<'_>) -> Self {
         // Masking comes first, so that a secret cut by the cap leaves no fragment behind.
-        let masked_result = redactor.redact(result);
+        let masked_result = redactor.redact(input.result);
         let original_len = masked_result.chars().count();
         Self {
-            agent: agent.to_owned(),
-            script: redactor.redact(script),
+            agent: input.agent.to_owned(),
+            script: redactor.redact(input.script),
             result: masked_result.chars().take(render_cap).collect(),
             original_len,
             truncated: original_len > render_cap,
-            duration_ms: duration_millis(duration),
-            error: error.map(|text| redactor.redact(text)),
+            duration_ms: duration_millis(input.duration),
+            error: input.error.map(|text| redactor.redact(text)),
+        }
+    }
+}
+
+/// Inputs of an MCP call record, grouped so that [`McpRecord::new`] keeps a short signature.
+#[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
+pub struct McpInput<'input> {
+    /// Role of the MCP server in the session.
+    role: &'input str,
+    /// Name of the called MCP function.
+    function: &'input str,
+    /// Arguments of the call.
+    arguments: &'input Value,
+    /// Status of the call.
+    status: &'input str,
+    /// Duration of the call.
+    duration: Duration,
+}
+
+impl<'input> McpInput<'input> {
+    /// Inputs of an MCP call: role, function, arguments, status and duration.
+    #[must_use]
+    pub const fn new(
+        role: &'input str,
+        function: &'input str,
+        arguments: &'input Value,
+        status: &'input str,
+        duration: Duration,
+    ) -> Self {
+        Self {
+            role,
+            function,
+            arguments,
+            status,
+            duration,
         }
     }
 }
@@ -79,25 +146,14 @@ pub struct McpRecord {
 
 impl McpRecord {
     /// Builds the record of an MCP call, masking its texts and arguments.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "audit.sdd lists six inputs for an MCP record; grouping them would add a public type the spec does not name"
-    )]
     #[must_use]
-    pub fn new(
-        redactor: &Redactor,
-        role: &str,
-        function: &str,
-        arguments: &Value,
-        status: &str,
-        duration: Duration,
-    ) -> Self {
+    pub fn new(redactor: &Redactor, input: McpInput<'_>) -> Self {
         Self {
-            role: redactor.redact(role),
-            function: redactor.redact(function),
-            arguments: redactor.redact_json(arguments),
-            status: redactor.redact(status),
-            duration_ms: duration_millis(duration),
+            role: redactor.redact(input.role),
+            function: redactor.redact(input.function),
+            arguments: redactor.redact_json(input.arguments),
+            status: redactor.redact(input.status),
+            duration_ms: duration_millis(input.duration),
         }
     }
 }
@@ -113,7 +169,7 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{McpRecord, ScriptRecord};
+    use super::{McpInput, McpRecord, ScriptInput, ScriptRecord};
     use crate::session::Redactor;
 
     fn script_record(
@@ -123,15 +179,9 @@ mod tests {
         result: &str,
         error: Option<&str>,
     ) -> ScriptRecord {
-        ScriptRecord::new(
-            redactor,
-            cap,
-            "agent-a",
-            script,
-            result,
-            Duration::from_millis(12),
-            error,
-        )
+        let input = ScriptInput::new("agent-a", script, result, Duration::from_millis(12));
+        let input = error.map_or(input, |text| input.with_error(text));
+        ScriptRecord::new(redactor, cap, input)
     }
 
     #[test]
@@ -179,7 +229,9 @@ mod tests {
     #[test]
     fn script_and_result_never_leak_a_secret() {
         let mut redactor = Redactor::new();
-        redactor.add_secret("tok-123");
+        redactor
+            .add_secret("tok-123")
+            .expect("a seven-character secret is accepted");
         let record = script_record(
             &redactor,
             100,
@@ -218,15 +270,12 @@ mod tests {
     #[test]
     fn mcp_arguments_are_masked() {
         let mut redactor = Redactor::new();
-        redactor.add_secret("tok-123");
-        let record = McpRecord::new(
-            &redactor,
-            "monitoring",
-            "query",
-            &json!({"auth": "tok-123"}),
-            "ok",
-            Duration::from_millis(3),
-        );
+        redactor
+            .add_secret("tok-123")
+            .expect("a seven-character secret is accepted");
+        let arguments = json!({"auth": "tok-123"});
+        let input = McpInput::new("monitoring", "query", &arguments, "ok", Duration::from_millis(3));
+        let record = McpRecord::new(&redactor, input);
         assert_eq!(
             record.arguments,
             json!({"auth": "***"}),
@@ -237,7 +286,9 @@ mod tests {
     #[test]
     fn redaction_happens_before_truncation() {
         let mut redactor = Redactor::new();
-        redactor.add_secret("tok-123");
+        redactor
+            .add_secret("tok-123")
+            .expect("a seven-character secret is accepted");
         let record = script_record(&redactor, 4, "print(1)", "ab tok-123", None);
         assert_eq!(
             record.result, "ab *",
@@ -266,7 +317,9 @@ mod tests {
     #[test]
     fn records_serialize_without_secret_fields() {
         let mut redactor = Redactor::new();
-        redactor.add_secret("tok-123");
+        redactor
+            .add_secret("tok-123")
+            .expect("a seven-character secret is accepted");
         let record = script_record(&redactor, 100, "s", "tok-123", None);
         let json = serde_json::to_string(&record).expect("a script record serializes");
         assert!(

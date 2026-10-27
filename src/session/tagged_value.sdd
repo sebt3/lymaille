@@ -16,6 +16,8 @@ Accepts:
 Must:
   La sérialisation JSON étiquette chaque valeur par un champ de type explicite (`{"type": "char", "value": "x"}`) : un `char` et une
     chaîne d'un caractère, un entier et un flottant de même valeur, un `blob` et un tableau d'entiers ne se confondent jamais après un aller-retour.
+  Un `Blob` s'écrit en base64 standard avec remplissage (`{"type": "blob", "value": "AQL/"}` pour les octets 1, 2, 255) ; sa valeur
+    JSON est une chaîne, jamais un tableau d'entiers. Un `value` de `blob` qui n'est pas du base64 valide est une erreur à la lecture.
   Un aller-retour sérialisation puis désérialisation rend une valeur égale, imbriquée comprise.
   Un `Float` non fini (NaN, infini) n'est pas représentable en JSON : sa sérialisation échoue avec une erreur de sérialisation,
     elle ne rend pas `null` en silence ; l'appelant l'exclut avec l'avertissement de `agent-sessions/scratchpad#FR-7`.
@@ -25,6 +27,7 @@ Must:
 Depends on:
   serde
   serde_json
+  base64
 
 Scenario: char, blob and integer keep their type
   Given a char `x`, a blob of three bytes and the integer 7
@@ -51,12 +54,28 @@ Scenario: unknown tag refused
   When deserialized
   Then it fails
 
+Scenario: blob is written in base64
+  Given a blob of the three bytes 1, 2, 255
+  When serialized
+  Then the JSON is `{"type":"blob","value":"AQL/"}`
+
+Scenario: blob and array of integers stay distinct in base64
+  Given a blob of the bytes 1, 2 and an array of the integers 1, 2
+  When each is serialized then deserialized
+  Then the blob comes back as a blob and the array as an array of integers
+
+Scenario: invalid base64 blob refused
+  Given the JSON `{"type": "blob", "value": "!!"}`
+  When deserialized
+  Then it fails
+
 Tasks:
   [x] #6 Test manquant : `Blob([1,2])` et `Array([Int(1),Int(2)])` restent distincts après aller-retour.
   [x] #1 Tests puis implémentation.
   [?] #5 Les Scenarios d'aller-retour passent par les dérivations serde : seule la règle des flottants non finis contraint le code. Le format d'étiquetage est un contrat
       de persistance (ne pas le modifier sans montée de version de format).
   [x] #2 Décidé le 2026-10-27 : le `blob` s'encode en base64 (dépendance `base64`).
-  [ ] #7 Passer l'encodage du `blob` du tableau d'entiers à base64 (code, tests, Scenarios ; format de persistance : montée de version de format à trancher, la crate n'étant pas publiée).
+  [x] #7 Passer l'encodage du `blob` du tableau d'entiers à base64 (code, tests, Scenarios ; format de persistance : montée de version de format à trancher, la crate n'étant pas publiée).
+  [?] #8 Le format de persistance change pour le `blob` (tableau d'entiers → base64) sans montée de `FormatVersion::CURRENT` (1.0) : `./format.sdd` ne prévoit pas de migration, et la crate n'est pas publiée. Une session écrite avant ce changement porte un `blob` en tableau et ne se relit plus. À trancher : monter la version de format ou accepter la rupture avant publication.
   [x] #3 Décidé le 2026-10-27 : horodatages et décimaux hors périmètre tant qu'aucun besoin n'est établi (`agent-sessions/session`, décision du 2026-10-27).
   [?] #4 Le passage entre `rhai::Dynamic` et @TaggedValue vit dans `scratchpad` : cette spec ne dépend pas de Rhai.

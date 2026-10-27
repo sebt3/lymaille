@@ -185,4 +185,16 @@ Mesurés par les programmes de `spikes/rhai-1-25`, avec les features de `vynil-c
 
 ## Réalisation SpecDD
 
-`TBD` : aucune spec `.sdd` n'existe encore.
+Specs créées dans `src/scratchpad/` (une par fichier source prévu, spec de répertoire comprise) :
+
+- `scratchpad.sdd` : spec de répertoire (frontière : aucune E/S ni horloge système, seuls les groupes accordés, `const` désactivé).
+- `error.sdd` : erreur du module, erreurs de Rhai classées et rendues avec position (FR-6, AC-3, AC-7, AC-11).
+- `limits.sdd` : plafonds de mémoire et profondeurs, aucune limite de durée (FR-4, AC-3, AC-7).
+- `grant.sdd` : description abstraite de ce que la définition d'agent accorde (groupes, modules, toolsets, skills ; FR-11, FR-3).
+- `engine.sdd` : moteur d'une session, groupes accordés, `const`, résolveur fermé, crochet d'annulation (FR-11, FR-12, DEC-3, AC-10, AC-11).
+- `render.sdd` : rendu borné, JSON compact, troncature début et fin avec avis (FR-5, AC-4).
+- `format.sdd` : fonctions de formatage exposées au LLM (FR-8, AC-5).
+- `persist.sdd` : variables étiquetées, détection des closures, fonctions par texte source, restauration (FR-2, FR-7, DEC-1, AC-1, AC-8).
+- `introspect.sdd` : catalogue, introspection et recherche `find` (FR-3, FR-9, AC-2, AC-6).
+- `suggest.sdd` : candidats les plus proches parmi les seuls éléments accordés (FR-6, AC-12).
+- `run.sdd` : le pad et l'exécution d'un appel de `rhai_pad` (FR-1, FR-5, FR-7, FR-10, DEC-3, AC-1, AC-4, AC-8, AC-9).

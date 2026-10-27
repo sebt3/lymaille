@@ -1,0 +1,142 @@
+Spec: introspect
+
+Purpose:
+  Introspection que le LLM appelle depuis Rhai : variables du scope, modules accordés, fonctions avec signature et documentation, toolsets et skills, avec une recherche
+    lexicale `find`. Ne montre que ce qui est accordé, jamais les dépendances d'un toolset (`agent-sessions/scratchpad#FR-3`, `agent-sessions/scratchpad#AC-2`,
+    `agent-sessions/scratchpad#AC-6`, `agent-sessions/scratchpad#FR-9`, `agent-sessions/toolsets#FR-2`, `agent-sessions#FR-2`).
+
+Owns:
+  ./introspect.rs
+
+References:
+  ./grant.sdd
+  ./suggest.sdd
+  ./render.sdd
+
+Depends on:
+  ./grant.sdd
+  ./limits.sdd
+  ./render.sdd
+  rhai
+  serde_json
+
+Exposes:
+  @Catalog
+  @FunctionEntry
+  @Origin
+  @IntrospectionSource
+  @VariableInfo
+  @Catalog::build
+  @Catalog::functions
+  @Catalog::contains
+  @IntrospectionSource::new
+  @IntrospectionSource::update
+  @register_introspection
+  @limits_notice
+
+Accepts:
+  @Catalog::build: le @rhai::Engine déjà garni, les @Grants, et les étapes d'enregistrement avec les signatures qu'elles ont ajoutées (groupe du socle, format, hôte, module accordé), pour les attribuer à une @Origin.
+  @IntrospectionSource::new: les @Grants (toolsets et skills), le @Catalog et les @ScratchpadLimits (pour `rules()`) ; rend un état partagé entre le moteur et les runs.
+  @IntrospectionSource::update: la liste des @VariableInfo du scope et la liste des fonctions publiques définies par le LLM (nom, paramètres, commentaires de documentation), posées avant chaque run par ./run.sdd.
+  @register_introspection: une référence mutable vers le @rhai::Engine et une @IntrospectionSource ; enregistre les fonctions Rhai décrites en `Handles`.
+  @limits_notice: les @ScratchpadLimits ; rend le texte des limites du bac à sable.
+
+Returns:
+  @Catalog::functions: les @FunctionEntry : chemin d'appel (`json_encode`, `grafana::loki_query`), signature, documentation (commentaires `///` joints par des retours à la ligne, ou absente), @Origin (`Core` avec le nom du groupe, `Format`, `Host`, `Module` avec le nom, `Script`).
+  @Catalog::contains: vrai si une fonction de ce chemin et de cette arité est enregistrée dans une origine accordée.
+  @limits_notice: un texte anglais décrit en `Must`.
+
+Handles:
+  Fonctions Rhai enregistrées par @register_introspection, toutes documentées (commentaire et noms de paramètres) et pures vis-à-vis du moteur (elles lisent l'état partagé) :
+    `vars()` : tableau de tables `#{name, type, preview}` (aperçu : rendu de ./render.sdd plafonné à 60 caractères) ; l'instantané date du début du run (une variable créée par le script en cours apparaît au run suivant).
+    `modules()` : tableau de tables `#{name, kind, functions}` ; `kind` vaut `core`, `format`, `host` ou `module` ; `functions` est le nombre de fonctions.
+    `functions()`, `functions(origin)` : tableau de tables `#{path, signature, doc, origin}` ; sans argument toutes, avec un nom de module accordé ses fonctions ; avec `"global"` les fonctions globales (socle, format, hôte) ; avec `"script"` les fonctions définies par le LLM. Un nom inconnu est une erreur de script qui liste les modules accordés.
+    `toolsets()` : tableau de tables `#{name, description}` ; `skills()` : tableau de tables `#{name, description, toolset}` (`toolset` vaut `()` si le skill n'est pas rattaché).
+    `find(query)` : recherche lexicale (voir `Must`) ; tableau de tables `#{kind, name, path, text}` où `kind` vaut `function`, `module`, `toolset` ou `skill`, `path` est le chemin d'appel d'une fonction ou le nom, et `text` est la signature suivie de la documentation (fonction) ou la description (toolset, skill).
+    `rules()` : le texte de @limits_notice pour les limites du moteur de la session.
+
+Must:
+  La surface visible est exactement celle de @Grants plus les fonctions du socle pur, de format et de l'hôte, plus les fonctions que le LLM a définies : un groupe, un module ou un toolset non accordé n'apparaît dans aucune de ces fonctions ni dans @Catalog (`agent-sessions#BR-2`, `agent-sessions/scratchpad#AC-10`).
+  Les dépendances d'un toolset sont filtrées : l'export de métadonnées de Rhai (`gen_fn_metadata_to_json`) place l'import d'un module de toolset en sous-module de ce module. @Catalog::build ne retient d'un module que les fonctions de son niveau direct et d'un sous-module que s'il est lui-même accordé par nom ; tout autre sous-module est ignoré (`agent-sessions/toolsets#FR-2`).
+    Observed in: spikes/rhai-1-25 (`private_dependencies`) ; `agent-sessions/toolsets#FR-2`.
+  Les fonctions du socle sont attribuées à leur groupe par la différence des signatures du moteur avant et après chaque enregistrement (`docs/vynil-core-shopping-list.md`, N1) ; les fonctions d'un module accordé le sont par son nom. Les signatures et les commentaires viennent des métadonnées de Rhai (feature `metadata`) : `json_encode(value: Dynamic) -> string` et non `json_encode(Dynamic)`. Les champs lus du JSON de métadonnées sont ceux de Rhai (`name`, `signature`, `numParams`, `docComments`) ; ils sont à confirmer à l'implémentation.
+  Les fonctions définies par le LLM se lisent à chaque appel depuis l'état partagé (accès `Public` seulement ; les `private` ne se listent pas), avec leurs commentaires `///` comme documentation.
+  @Catalog est construit une fois à la construction du moteur ; seul l'état partagé de @IntrospectionSource change ensuite. L'état partagé est protégé par un verrou dont l'empoisonnement est récupéré (jamais de panique).
+  `find` : la requête est découpée en mots (séparés par des blancs) ; un élément correspond quand chaque mot apparaît, sans tenir compte de la casse, dans son chemin, sa signature, sa documentation ou sa description. Les résultats sont triés : correspondance exacte du nom ou du chemin d'abord, puis nom contenant le mot, puis le reste, puis ordre alphabétique du chemin ; au plus 50 résultats. Une requête vide ou blanche est une erreur de script. La recherche porte sur les fonctions, modules, toolsets et skills accordés, jamais sur un élément non accordé (`agent-sessions/scratchpad#AC-2`).
+  @limits_notice rend un texte anglais court qui contient, au minimum : les fonctions définies par `fn` ne voient pas les variables du scope mais reçoivent leurs arguments (et lisent le ToolsetContext par `session_context()`) ; une closure ou un pointeur de fonction n'est pas persisté, définir une `fn` ; `const` n'existe pas ; aucune limite de durée ; le plafond de rendu en caractères et les plafonds de mémoire de la session (valeurs de ./limits.sdd) ; un résultat tronqué se réduit en extrayant la partie utile avec les fonctions de ./format.sdd. Le skill intégré de `toolsets` (`agent-sessions/toolsets#FR-18`) l'embarque.
+  Les fonctions d'introspection n'écrivent ni ne lisent rien d'autre que cet état : pas de E/S, pas d'horloge.
+
+Scenario: search returns functions and skills limited to the granted modules
+  Given grants with a module `grafana` exposing `loki_query` documented as `Runs a Loki query`, a skill `loki-debug`, and an ungranted module `other` exposing `loki_secret`
+  When a script evaluates `find("loki")`
+  Then the results hold `grafana::loki_query` and the skill `loki-debug`
+  And nothing names `other::loki_secret`
+
+Scenario: search is case insensitive and multi word
+  Given the same grants
+  When a script evaluates `find("LOKI query")`
+  Then `grafana::loki_query` is returned and a skill without both words is not
+
+Scenario: search ranking
+  Given functions named `query`, `loki_query` and a function whose documentation mentions `query`
+  When a script evaluates `find("query")`
+  Then the exact name comes first, then the name containing `query`, then the documentation match
+
+Scenario: search is bounded and rejects an empty query
+  Given more than 50 matching functions
+  When `find("a")` is evaluated, then `find("  ")`
+  Then 50 results are returned and the second call fails with a script error
+
+Scenario: toolset dependency is invisible
+  Given a toolset module `ts` built from a script that imported a dependency `dep`
+  When `modules()`, `functions()` and `find("secret")` are evaluated
+  Then none mentions `dep` or `secret`, while `ts` and its own functions appear
+
+Scenario: ungranted groups are absent
+  Given an engine whose grants hold no group
+  When `functions("global")` is evaluated
+  Then it lists the pure group and the format functions and none of `get_env`, `sleep`, `file_read`, `shell_run`
+
+Scenario: functions carry signature and documentation
+  Given the pure group
+  When `functions()` is evaluated
+  Then `json_encode` appears with the signature `json_encode(value: Dynamic) -> string` and a non empty documentation
+
+Scenario: functions defined by the LLM are listed with their documentation
+  Given a pad where `/// Doubles a.\nfn f(a) { a * 2 }` was defined and the shared state updated
+  When `functions("script")` is evaluated
+  Then `f` appears with the documentation `Doubles a.`
+  And a `private fn` does not
+
+Scenario: variables are listed with type and preview
+  Given a scope holding `let n = 3` and `let s = "hello"`
+  When `vars()` is evaluated after the state is updated
+  Then the entries are `n` with type `i64` and preview `3`, and `s` with type `string` and preview `hello`
+
+Scenario: modules and unknown origin
+  Given grants with modules `grafana` and `k8s`
+  When `modules()` is evaluated, then `functions("nope")`
+  Then both modules appear with their kind and function count, and the second call fails with a script error listing `grafana` and `k8s`
+
+Scenario: toolsets and skills
+  Given grants with a toolset and two skills, one attached to it
+  When `toolsets()` and `skills()` are evaluated
+  Then the lists hold the names and descriptions and the unattached skill has `()` as its toolset
+
+Scenario: rules mention the sandbox limits
+  Given limits with a render cap of 8000
+  When `rules()` is evaluated
+  Then the text says that functions do not see the scope variables, that closures are not persisted, that `const` does not exist, that nothing limits duration and that output is capped at 8000 characters
+
+Scenario: introspection is independent of the shared state lock
+  Given the shared state with a poisoned lock
+  When any introspection function is evaluated
+  Then it returns its result and nothing panics
+
+Tasks:
+  [ ] #1 Tests puis implémentation : @Catalog (filtrage et attribution) d'abord, puis les fonctions Rhai.
+  [?] #2 Les noms des fonctions d'introspection (`vars`, `modules`, `functions`, `toolsets`, `skills`, `find`, `rules`) sont posés ; seul `find` est nommé par le DSD (`agent-sessions/scratchpad#AC-2`). Ils sont à confirmer avec l'auteur du skill intégré (`agent-sessions/toolsets#FR-18`) : le skill enseigne ces noms, ils sont un contrat avec les modèles.
+  [?] #3 Posé : l'instantané des variables date du début du run. Une fonction native de Rhai ne lit pas le scope ; le rendre dynamique exigerait un crochet `on_var` plus lourd. À rouvrir si le LLM s'en plaint.
+  [?] #4 Posé : la recherche `find` ne porte pas sur les variables ni sur les corps de skill (jamais préchargés dans la fenêtre, `agent-sessions/toolsets#FR-7`) ; elle porte sur nom, description, titre et documentation (`agent-sessions/scratchpad#FR-3`).
+  [?] #5 Les champs lus dans le JSON de métadonnées de Rhai (`name`, `signature`, `numParams`, `docComments`) sont ceux que le spike a observés de façon partielle (`spikes/rhai-1-25`, S6 ne lit que la présence des noms et des commentaires). À confirmer par un test dès l'implémentation ; la structure des modules imbriqués (`modules` par nom) aussi.
+  [?] #6 Le texte exact du skill intégré sur `rhai_pad` (`agent-sessions/scratchpad#FR-9`) relève de `toolsets` ; ce fichier fournit le bloc @limits_notice qu'il peut embarquer ou citer. À valider quand `toolsets` sera spécifié.

@@ -29,6 +29,9 @@ pub enum SessionError {
     /// An internal lock was poisoned.
     #[error("an internal lock was poisoned")]
     Poisoned,
+    /// A secret shorter than six characters was offered to the redactor. It is not retained, and the text carries no part of it.
+    #[error("a secret must be at least 6 characters long")]
+    SecretTooShort,
 }
 
 /// Result of the session module.
@@ -66,6 +69,10 @@ mod tests {
                 "a user message cannot be inserted between a tool call and its result",
             ),
             (SessionError::Poisoned, "an internal lock was poisoned"),
+            (
+                SessionError::SecretTooShort,
+                "a secret must be at least 6 characters long",
+            ),
         ];
         for (error, expected) in cases {
             assert_eq!(

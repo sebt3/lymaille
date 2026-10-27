@@ -1,0 +1,84 @@
+Spec: grant
+
+Purpose:
+  Description abstraite de ce que la définition d'agent accorde au scratchpad : groupes de fonctions du socle commun de `vynil-core`, modules Rhai, toolsets et skills.
+    Le scratchpad la reçoit de l'hôte ou du domaine `toolsets` et ne dépend ni des toolsets ni des modules MCP (`agent-sessions#BR-2`,
+    `agent-sessions/scratchpad#FR-11`, `agent-sessions/scratchpad#FR-3`).
+
+Owns:
+  ./grant.rs
+
+Depends on:
+  rhai
+
+Exposes:
+  @Grants
+  @CoreGroup
+  @GrantedModule
+  @GrantedToolset
+  @GrantedSkill
+
+Accepts:
+  @Grants::new: aucun argument, rend une description vide (ne contient que le groupe pur, toujours accordé).
+  @Grants::with_group: un @CoreGroup (`Host`, `Sleep`, `Fs`, `Shell`) ; le groupe pur (`core_pure_rhai_register`) n'est pas dans l'énumération car il est enregistré d'office.
+  @Grants::with_module: un @GrantedModule ; rend `None` si le nom est déjà pris par un autre module accordé.
+  @Grants::with_toolset: un @GrantedToolset ; rend `None` si le nom est déjà pris par un autre toolset.
+  @Grants::with_skill: un @GrantedSkill ; rend `None` si le nom est déjà pris par un autre skill.
+  @GrantedModule::new: un nom de module et un module Rhai partagé (@rhai::Shared de @rhai::Module) ; rend `None` si le nom n'est pas un identifiant Rhai valide.
+  @GrantedToolset::new: un nom et une description ; rend `None` si l'un est vide ou blanc.
+  @GrantedSkill::new: un nom, une description et le nom optionnel du toolset auquel le skill est rattaché ; rend `None` si le nom ou la description est vide ou blanc.
+
+Returns:
+  Des accesseurs en lecture seule : groupes accordés (ensemble ordonné), modules, toolsets et skills (dans l'ordre d'ajout).
+
+Must:
+  La définition d'agent est la seule source de ce qui est accordé (`agent-sessions#BR-2`) : @Grants ne déduit rien et n'a aucune valeur par défaut qui accorde un groupe, un module ou un toolset.
+  Un nom de module est un identifiant Rhai : ASCII alphanumérique et `_`, ne commence pas par un chiffre, n'est pas un mot réservé de Rhai (`let`, `fn`, `import`, `const`, `global`, `this`, ...), non vide. Le module est appelé en Rhai par `nom::fonction()`.
+  Les noms de modules, de toolsets et de skills sont uniques chacun dans leur catégorie : deux ajouts du même nom ne s'accumulent pas.
+  Un toolset décrit seulement ce que l'introspection liste (nom et description) : son module, s'il en a un, est un @GrantedModule distinct de même nom, que `toolsets` construit. Les dépendances d'un toolset ne figurent jamais dans @Grants (`agent-sessions/toolsets#FR-2`).
+  Aucun secret : un @GrantedModule porte du code et des liaisons que l'hôte a déjà résolus, @Grants ne contient ni référence ni identifiant d'authentification.
+  Les types sont `#[non_exhaustive]` et se construisent par constructeur ; ils sont `Clone`, `Debug` (le `Debug` d'un @GrantedModule ne montre que le nom) et `Send + Sync`.
+
+Must not:
+  Dépendre de `toolsets` ni de `modules` : ces domaines produisent des @GrantedModule, @GrantedToolset et @GrantedSkill, le scratchpad ne les connaît pas.
+
+Scenario: nothing is granted by default
+  Given a new @Grants
+  When read
+  Then it has no group, module, toolset or skill
+
+Scenario: groups accumulate in a set
+  Given a @Grants to which Host is added twice and Sleep once
+  When the groups are read
+  Then they are Host and Sleep
+
+Scenario: duplicate names refused
+  Given a @Grants holding a module `grafana`
+  When another module `grafana` is added
+  Then nothing is produced and the first module is kept
+
+Scenario: invalid module name refused
+  Given the names `1abc`, `a-b`, ``, `fn` and `let`
+  When a @GrantedModule is built with each
+  Then nothing is produced for each
+
+Scenario: valid module name accepted
+  Given the name `grafana_prod`
+  When a @GrantedModule is built
+  Then it is produced and exposes its name
+
+Scenario: blank toolset and skill refused
+  Given a toolset with an empty name and a skill with a blank description
+  When each is built
+  Then nothing is produced
+
+Scenario: debug hides the module content
+  Given a @GrantedModule holding functions
+  When formatted with Debug
+  Then only the name appears
+
+Tasks:
+  [ ] #1 Tests puis implémentation.
+  [?] #2 Posé : les types d'entrée sont définis ici, dans le scratchpad, plutôt que de dépendre de `toolsets` et `modules` non encore spécifiés. Quand ces domaines seront écrits, ils produiront ces types (ou une conversion vers eux) ; si leur forme diverge, c'est cette spec qui change, pas l'inverse.
+  [?] #3 La liste des mots réservés de Rhai est celle de la version épinglée : un test vérifie le refus par l'analyseur de Rhai (un module nommé d'un mot réservé ne compile pas dans `nom::f()`) plutôt qu'une liste figée dans le code.
+  [?] #4 Posé : le rattachement d'un skill à un toolset (`toolset`) n'est pas validé contre @Grants::with_toolset ; l'introspection affiche ce que l'hôte fournit.

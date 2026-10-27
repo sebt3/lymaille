@@ -21,8 +21,9 @@ pub use context::{
 };
 pub use session::{
     AgentRef, Backoff, BoundaryKind, CancelHandle, Event, EventKind, EventSink, FormatVersion, History,
-    InMemoryStore, Label, LabelAuthor, LabelTarget, Labels, McpRecord, Message, ModelSnapshot, NullSink,
-    Outcome, Provenance, Reasoning, RecordingSink, Redactor, RunId, RunSignals, ScriptRecord, Segment,
-    SegmentContext, SessionError, SessionId, SessionResult, SessionState, SessionStore, SleepOutcome,
-    TaggedValue, TokenCounters, ToolCall, TurnGate, TurnId, TurnPermit, restore_notices,
+    InMemoryStore, Label, LabelAuthor, LabelTarget, Labels, McpInput, McpRecord, Message, ModelSnapshot,
+    NullSink, Outcome, Provenance, Reasoning, RecordingSink, Redactor, RunId, RunSignals, ScriptInput,
+    ScriptRecord, Segment, SegmentContext, SessionError, SessionId, SessionResult, SessionState,
+    SessionStore, SleepOutcome, TaggedValue, TokenCounters, ToolCall, TurnGate, TurnId, TurnPermit,
+    restore_notices,
 };

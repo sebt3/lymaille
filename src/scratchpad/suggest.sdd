@@ -1,0 +1,112 @@
+Spec: suggest
+
+Purpose:
+  Candidats les plus proches quand une fonction, un module ou une variable est introuvable, pris parmi les seuls éléments accordés. Rend les erreurs de Rhai
+    exploitables par le LLM sans jamais lui révéler un élément non accordé (`agent-sessions/scratchpad#FR-6`, `agent-sessions/scratchpad#AC-12`,
+    `agent-sessions#BR-2`).
+
+Owns:
+  ./suggest.rs
+
+References:
+  ./introspect.sdd
+  ./error.sdd
+
+Depends on:
+  ./introspect.sdd
+  ./error.sdd
+
+Exposes:
+  @suggest_for
+  @nearest
+  @CandidateSet
+
+Accepts:
+  @CandidateSet::new: les chemins d'appel des fonctions visibles (@Catalog et fonctions définies par le LLM, ./introspect.sdd), les noms des modules accordés et les noms des variables du scope. Aucun autre élément n'entre dans l'ensemble.
+  @nearest: un nom demandé, une liste de candidats (chaînes) et un nombre maximal de suggestions.
+  @suggest_for: une @ScratchpadError::NotFound (genre, nom, nom de la fonction du script où elle est survenue) et un @CandidateSet.
+
+Returns:
+  @nearest: au plus le nombre demandé de candidats, du plus proche au plus éloigné, à distance égale par ordre alphabétique, sans doublon.
+  @suggest_for: l'erreur reçue enrichie de ses suggestions (@ScratchpadError::with_suggestions), ou inchangée quand aucun candidat n'est assez proche ; pour une variable introuvable dans une fonction du script, l'erreur porte en plus l'indication décrite en `Must`.
+
+Must:
+  Les candidats sont choisis par genre : fonction introuvable parmi les chemins de fonctions visibles ; module introuvable parmi les noms de modules accordés (et, à défaut, les modules des chemins visibles) ; variable introuvable parmi les variables du scope.
+  Aucune suggestion ne nomme un élément absent de l'ensemble : une fonction d'un module non accordé, une dépendance de toolset ou une fonction d'un groupe non accordé n'est jamais suggérée, même si elle est la plus proche (`agent-sessions/scratchpad#AC-12`).
+  Distance : la distance d'édition de Levenshtein sur les caractères (valeurs scalaires Unicode), sensible à la casse. Pour un nom demandé non qualifié (sans `::`), elle se calcule aussi contre le dernier segment de chaque chemin candidat, et la plus petite des deux retient le candidat : `loki_querry` désigne `grafana::loki_query`. Pour un nom qualifié, la distance porte sur le chemin entier.
+  Seuil : un candidat est retenu si sa distance est au plus `clamp(longueur du nom demandé / 3, 1, 3)`. Au plus trois suggestions sont rendues.
+  Distance zéro (le nom existe mais l'appel a la mauvaise arité ou les mauvais types) : le candidat est rendu avec sa signature (`grafana::loki_query(query: string, range: string) -> map`) au lieu de son seul chemin, pour que le LLM voie les paramètres attendus.
+  Un nom demandé vide ou sans candidat assez proche ne produit aucune suggestion ; la fonction ne panique jamais, y compris sur un nom très long (la distance est calculée en une complexité bornée par le produit des longueurs, les noms de plus de 128 caractères étant tronqués à 128).
+  Variable introuvable alors que l'erreur est survenue dans une fonction du script (@ScratchpadError::NotFound portant le nom de cette fonction) et que le nom est une variable du scope : l'erreur est complétée de l'indication `functions cannot see scope variables: pass `{name}` as an argument`, parce qu'une `fn` du script ne lit pas le scope.
+    Observed in: spikes/rhai-1-25 (`scope_visibility`) : `Variable not found` dans une `fn` qui lit une variable du scope.
+  Le résultat est déterministe et ne dépend d'aucun état global.
+
+Scenario: typo in a function name
+  Given the visible functions `grafana::loki_query` and `grafana::prom_query`
+  When a script calls `grafana::loki_queryy`
+  Then the error names `grafana::loki_query` as the closest candidate
+
+Scenario: unqualified name matches the last segment
+  Given the visible function `grafana::loki_query`
+  When a script calls `loki_querry("x")`
+  Then the suggestion is `grafana::loki_query`
+
+Scenario: no suggestion names an ungranted function
+  Given the visible function `grafana::loki_query` and an ungranted module `other` exposing `loki_queryx`
+  When a script calls `grafana::loki_queryy`
+  Then the only suggestion is `grafana::loki_query` and `other::loki_queryx` appears nowhere in the message
+
+Scenario: dependency of a toolset is never suggested
+  Given a toolset `ts` that imports a dependency `dep` exposing `secret`
+  When a script calls `ts::secrt`
+  Then the error has no suggestion
+
+Scenario: ungranted group function is never suggested
+  Given an engine without the Host group
+  When a script calls `get_envv("X")`
+  Then the error has no suggestion, `get_env` not being granted
+
+Scenario: unknown module
+  Given the granted modules `grafana` and `k8s`
+  When a script calls `grafan::loki_query("x")`
+  Then the suggestion is the module `grafana`
+
+Scenario: arity mismatch shows the signature
+  Given the visible function `grafana::loki_query(query: string, range: string) -> map`
+  When a script calls `grafana::loki_query("x")`
+  Then the suggestion is that signature
+
+Scenario: threshold excludes far names
+  Given the visible function `grafana::loki_query`
+  When a script calls `zzzzzzzz()`
+  Then the error has no suggestion
+
+Scenario: at most three suggestions, ordered by distance then name
+  Given five visible functions at distance 1 from the requested name
+  When suggestions are computed
+  Then three come back in alphabetical order
+
+Scenario: variable typo
+  Given the scope variables `pods` and `nodes`
+  When a script reads `podz`
+  Then the suggestion is `pods`
+
+Scenario: function cannot see scope variables
+  Given a scope variable `x` and a script function `fn f() { x }`
+  When `f()` is called and fails with variable not found
+  Then the message tells the LLM to pass `x` as an argument
+
+Scenario: very long and empty names
+  Given a name of 10000 characters and an empty name
+  When suggestions are computed
+  Then no suggestion is returned and nothing panics
+
+Scenario: the order of candidates does not matter
+  Given the same candidates in two different orders
+  When suggestions are computed
+  Then the results are equal
+
+Tasks:
+  [ ] #1 Tests puis implémentation.
+  [?] #2 Posé : seuil, plafond de trois suggestions et distance de Levenshtein. Réglages à ajuster à la mesure sur le jeu de tâches de référence (`agent-sessions#Risques`) ; ils n'affectent aucune règle de sécurité (le périmètre des candidats ne change pas).
+  [?] #3 Posé : les fonctions que le LLM a définies lui-même sont des candidats (elles sont dans le scope de session et n'élargissent rien, `agent-sessions#BR-2`).

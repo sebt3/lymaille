@@ -1,0 +1,116 @@
+Spec: error
+
+Purpose:
+  Erreur typée unique du module scratchpad. Classe les erreurs de Rhai (syntaxe, exécution, fonction ou module introuvable, limite, annulation)
+    et les rend au LLM avec leur position et un message exploitable (`agent-sessions/scratchpad#FR-6`, `agent-sessions/scratchpad#AC-3`,
+    `agent-sessions/scratchpad#AC-7`, `agent-sessions/scratchpad#AC-11`). Nommée @ScratchpadError, comme @SessionError : un type nommé `Error` est refusé par le lint `error_impl_error`.
+
+Owns:
+  ./error.rs
+
+Depends on:
+  rhai
+  thiserror
+
+Exposes:
+  @ScratchpadError
+  @ScratchpadResult
+  @ScriptPosition
+  @NotFoundKind
+  @LimitKind
+  @ErrorClass
+  @ScratchpadError::from_rhai
+  @ScratchpadError::class
+  @ScratchpadError::with_suggestions
+
+Accepts:
+  @ScriptPosition::new: une ligne et une colonne, toutes deux à partir de 1 ; zéro est refusé (`None`).
+  @ScratchpadError::from_rhai: une référence vers l'erreur d'évaluation de Rhai (@rhai::EvalAltResult).
+  @ScratchpadError::with_suggestions: la liste des candidats les plus proches, ordonnée ; sans effet sur une variante autre que @ScratchpadError::NotFound.
+
+Returns:
+  @ScratchpadError::class: la @ErrorClass de l'erreur (`Syntax`, `Runtime`, `NotFound`, `Limit`, `Cancelled`, `Engine`, `Internal`), pour les signaux de qualité et l'audit sans en exposer le texte.
+  @ScratchpadError::from_rhai: l'erreur classée selon la table du `Must`.
+
+Raises:
+  @ScratchpadError::Syntax: script qui ne compile pas ; porte le message de Rhai et la position quand elle est connue.
+  @ScratchpadError::Runtime: erreur d'exécution quelconque (`throw` du script, fonction native en échec, mauvais type d'argument).
+  @ScratchpadError::NotFound: fonction, module ou variable introuvable ; porte le genre (@NotFoundKind), le nom demandé sans les types d'arguments, la position, le nom de la fonction du script où l'erreur est survenue si elle y est survenue, et les suggestions (vides par défaut).
+  @ScratchpadError::Limit: dépassement d'un plafond ; porte le genre (@LimitKind : profondeur d'appel, profondeur d'expression, taille de chaîne, de tableau ou de table, autre), le message et la position.
+  @ScratchpadError::Cancelled: exécution interrompue par l'annulation du run.
+  @ScratchpadError::Engine: construction du moteur impossible (groupe non accordable, enregistrement refusé), message texte.
+  @ScratchpadError::Internal: défaut interne (tâche bloquante interrompue par une panique, verrou empoisonné irrécupérable), message texte.
+
+Must:
+  @ScratchpadError est `#[non_exhaustive]`, dérive `thiserror::Error`, `Debug`, `Clone`, `PartialEq` et `Eq` ; @ScratchpadResult est l'alias `Result<T, ScratchpadError>`. @ScriptPosition, @NotFoundKind, @LimitKind et @ErrorClass sont `#[non_exhaustive]` ; la structure @ScriptPosition a un constructeur.
+  Les textes `Display` sont en anglais et c'est le texte rendu au LLM. Avec ` at line L, column C` omis quand la position est inconnue :
+    `syntax error at line L, column C: {message}`, `runtime error at line L, column C: {message}`,
+    `{kind} not found at line L, column C: {name}` (genre en minuscules : `function`, `module`, `variable`) suivi, quand la liste de suggestions n'est pas vide, de `. Closest candidates: a, b, c`,
+    `limit exceeded ({kind}) at line L, column C: {message}` (genres : `call depth`, `expression depth`, `string size`, `array size`, `map size`, `other`),
+    `script cancelled`, `scratchpad engine failed: {message}`, `scratchpad internal failure: {message}`.
+  Classement de @ScratchpadError::from_rhai, par variante de Rhai : erreur d'analyse (`ErrorParsing`) vers `Syntax` ; fonction introuvable (`ErrorFunctionNotFound`) vers `NotFound` de genre fonction, dont le nom est le texte de la signature coupé avant le premier ` (` (Rhai y joint les types des arguments) ; module introuvable (`ErrorModuleNotFound`) vers `NotFound` de genre module ; variable introuvable (`ErrorVariableNotFound`) vers `NotFound` de genre variable ; dépassement de pile (`ErrorStackOverflow`) vers `Limit` de profondeur d'appel ; profondeur d'expression dépassée (erreur d'analyse de profondeur maximale) vers `Limit` de profondeur d'expression ; taille de donnée dépassée (`ErrorDataTooLarge`) vers `Limit` de taille de chaîne, de tableau ou de table selon le type nommé par Rhai ; trop d'opérations, de modules ou de variables vers `Limit` autre ; arrêt demandé par le crochet de progrès (`ErrorTerminated`) vers `Cancelled` ; toute autre variante vers `Runtime`.
+  Une erreur enveloppée par Rhai dans un appel de fonction du script (`ErrorInFunctionCall`) ou de module (`ErrorInModule`) est dépliée jusqu'à sa cause : la classe et la position retenues sont celles de la cause (la plus interne qui a une position), et le nom de la fonction du script qui l'a appelée est conservé pour les erreurs `NotFound` ; pour les autres classes il préfixe le message par `in function {name}: `.
+  La position est celle de Rhai (@rhai::Position) : ligne et colonne à partir de 1, absente quand Rhai ne la connaît pas. Le message ne répète pas la position (Rhai la suffixe à son propre texte ; elle est retirée du message).
+  Aucune panique : une variante inconnue de Rhai tombe dans `Runtime` avec le texte de Rhai.
+  Le texte d'une erreur peut contenir des noms et des fragments du script du LLM : l'appelant (./run.sdd) masque les secrets avant de le rendre ou de l'enregistrer ; ce type ne les connaît pas.
+
+Scenario: display texts are stable
+  Given each variant built with sample data and a position at line 3 and column 5
+  When formatted with Display
+  Then the text matches the documented wording
+  And a variant without position omits the ` at line, column` part
+
+Scenario: syntax error carries its position
+  Given the script `let x = ;` compiled by Rhai
+  When the error is converted with from_rhai
+  Then it is a Syntax error with a position on line 1
+
+Scenario: runtime error from throw
+  Given the script `throw "boom"` evaluated by Rhai
+  When the error is converted
+  Then it is a Runtime error whose message contains `boom`
+
+Scenario: function not found without argument types
+  Given the script `grafana::loki_queryy("x")` evaluated on an engine with module `grafana`
+  When the error is converted
+  Then it is a NotFound error of kind function whose name is `grafana::loki_queryy` without argument types
+
+Scenario: module and variable not found
+  Given the scripts `nomod::f()` and `unknown_var + 1`
+  When each error is converted
+  Then they are NotFound errors of kind module (name `nomod`) and variable (name `unknown_var`)
+
+Scenario: call depth exceeded is a limit
+  Given a recursive function that exceeds the call depth
+  When the error is converted
+  Then it is a Limit error of kind call depth
+
+Scenario: oversized data is a limit of the matching kind
+  Given an engine with a maximum string size and a script that builds a longer string
+  When the error is converted
+  Then it is a Limit error of kind string size
+
+Scenario: termination is a cancellation
+  Given a script stopped by the progress hook
+  When the error is converted
+  Then it is Cancelled and its class is `Cancelled`
+
+Scenario: inner position and function name are kept
+  Given the function `fn f() { missing_fn() }` called from a script
+  When the error is converted
+  Then it is a NotFound error whose position is the inner call and whose function name is `f`
+
+Scenario: suggestions are appended
+  Given a NotFound error and the suggestions `grafana::loki_query`
+  When with_suggestions is applied and the error formatted
+  Then the text ends with `. Closest candidates: grafana::loki_query`
+
+Scenario: zero position refused
+  Given a line of zero
+  When a position is built
+  Then nothing is produced
+
+Tasks:
+  [ ] #1 Tests des textes `Display`, des classements de `from_rhai` (un test par variante de Rhai listée) et du dépliage des erreurs enveloppées, puis l'énumération.
+  [?] #2 Posé : @ScratchpadError::class et @ErrorClass existent pour que le signal de qualité « nombre d'erreurs Rhai » (`agent-sessions/session#FR-13`) et l'audit comptent par classe sans retenir de texte ; la boucle de tour (domaine `session`) les consomme.
+  [?] #3 Posé : le genre « profondeur d'expression » vient d'une erreur d'analyse de Rhai (profondeur maximale d'expression) et non d'une erreur d'exécution : à vérifier par un test dès l'implémentation, le classement de `Syntax` ou de `Limit` découlant de la variante réellement produite.

@@ -19,7 +19,7 @@ mod store;
 mod tagged_value;
 mod turn_gate;
 
-pub use audit::{McpRecord, ScriptRecord};
+pub use audit::{McpInput, McpRecord, ScriptInput, ScriptRecord};
 pub use backoff::Backoff;
 pub use cancel::{CancelHandle, SleepOutcome};
 pub use error::{SessionError, SessionResult};
