@@ -32,6 +32,7 @@ References:
   ./src/session/session.sdd
   ./src/context/context.sdd
   ./src/agents/agents.sdd
+  ./src/scratchpad/scratchpad.sdd
 
 Must:
   Rester une librairie pure : aucune E/S de stockage, de processus, d'environnement ni d'horloge système en direct

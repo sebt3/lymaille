@@ -12,7 +12,7 @@ mod profile;
 mod provider;
 
 pub use catalog::{AgentStore, InMemoryCatalog, ProfileStore, ProviderStore};
-pub use definition::{AgentDefinition, AgentKind, MemoryRights, SandboxLimits};
+pub use definition::{AgentDefinition, AgentKind, SandboxLimits};
 pub use error::{AgentsError, AgentsResult};
 pub use inference::{
     ErrorClass, InferenceError, InferenceProvider, InferenceRequest, InferenceResponse, ReportedUsage,

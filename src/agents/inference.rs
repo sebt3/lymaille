@@ -185,6 +185,47 @@ pub trait InferenceProvider: Send + Sync {
         &self,
         request: InferenceRequest,
     ) -> impl Future<Output = Result<InferenceResponse, InferenceError>> + Send;
+
+    /// Sends `request`, streams the text of the answer to `fragments` in emission order, and returns the complete response.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`InferenceError`] carrying its [`ErrorClass`] when the call fails.
+    fn stream<F>(
+        &self,
+        request: InferenceRequest,
+        mut fragments: F,
+    ) -> impl Future<Output = Result<InferenceResponse, InferenceError>> + Send
+    where
+        F: FnMut(&str) + Send,
+    {
+        async move {
+            let response = self.complete(request).await?;
+            emit_whole(&response, &mut fragments);
+            Ok(response)
+        }
+    }
+}
+
+/// Emits the text of the assistant message of `response` as one fragment. An empty text emits nothing.
+fn emit_whole<F: FnMut(&str)>(response: &InferenceResponse, fragments: &mut F) {
+    let text = match response.message() {
+        Message::Assistant { content, .. } => content.as_str(),
+        Message::System { .. }
+        | Message::User { .. }
+        | Message::ToolResult { .. }
+        | Message::Boundary { .. } => "",
+    };
+    if !text.is_empty() {
+        fragments(text);
+    }
+}
+
+/// Emits each scripted fragment, in order.
+fn emit_scripted<F: FnMut(&str)>(scripted: &[String], fragments: &mut F) {
+    for fragment in scripted {
+        fragments(fragment.as_str());
+    }
 }
 
 /// Classifies an HTTP status: `Some` class for a failure, `None` for a success.
@@ -210,10 +251,11 @@ pub struct ScriptedProvider {
     state: Mutex<ScriptState>,
 }
 
-/// State of a scripted provider: the results still to give and the requests received.
+/// State of a scripted provider: the results still to give, the fragments of each of them, and the requests received.
 #[derive(Debug)]
 struct ScriptState {
     script: VecDeque<Result<InferenceResponse, InferenceError>>,
+    fragments: VecDeque<Vec<String>>,
     requests: Vec<InferenceRequest>,
 }
 
@@ -224,9 +266,21 @@ impl ScriptedProvider {
         Self {
             state: Mutex::new(ScriptState {
                 script: VecDeque::from(script),
+                fragments: VecDeque::new(),
                 requests: Vec::new(),
             }),
         }
+    }
+
+    /// Scripts the fragments of each result, in the order of the script. A result without fragments is streamed as one
+    /// fragment.
+    #[must_use]
+    pub fn with_fragments(mut self, fragments: Vec<Vec<String>>) -> Self {
+        self.state
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner)
+            .fragments = VecDeque::from(fragments);
+        self
     }
 
     /// Returns the requests received so far, in order.
@@ -239,19 +293,21 @@ impl ScriptedProvider {
             .clone()
     }
 
-    /// Records `request`, then takes the next prepared result. An exhausted script is a permanent error.
-    fn next(&self, request: InferenceRequest) -> Result<InferenceResponse, InferenceError> {
-        let next = {
+    /// Records `request`, then takes the next prepared result with its scripted fragments. An exhausted script is a
+    /// permanent error, with no fragment.
+    fn next(&self, request: InferenceRequest) -> (Result<InferenceResponse, InferenceError>, Vec<String>) {
+        let (next, fragments) = {
             let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
             state.requests.push(request);
-            state.script.pop_front()
+            (state.script.pop_front(), state.fragments.pop_front())
         };
-        next.unwrap_or_else(|| {
+        let result = next.unwrap_or_else(|| {
             Err(InferenceError::new(
                 ErrorClass::Permanent,
                 "script exhausted".to_owned(),
             ))
-        })
+        });
+        (result, fragments.unwrap_or_default())
     }
 }
 
@@ -260,7 +316,26 @@ impl InferenceProvider for ScriptedProvider {
         &self,
         request: InferenceRequest,
     ) -> impl Future<Output = Result<InferenceResponse, InferenceError>> + Send {
-        std::future::ready(self.next(request))
+        std::future::ready(self.next(request).0)
+    }
+
+    fn stream<F>(
+        &self,
+        request: InferenceRequest,
+        mut fragments: F,
+    ) -> impl Future<Output = Result<InferenceResponse, InferenceError>> + Send
+    where
+        F: FnMut(&str) + Send,
+    {
+        let (result, scripted) = self.next(request);
+        if let Ok(response) = &result {
+            if scripted.is_empty() {
+                emit_whole(response, &mut fragments);
+            } else {
+                emit_scripted(&scripted, &mut fragments);
+            }
+        }
+        std::future::ready(result)
     }
 }
 
@@ -435,6 +510,95 @@ mod tests {
             texts.len(),
             4,
             "no scripted result may be used twice: four distinct responses expected"
+        );
+    }
+
+    /// A provider that implements only `complete`, to test the default streaming method.
+    #[derive(Debug)]
+    struct CompleteOnly {
+        answer: InferenceResponse,
+    }
+
+    impl super::InferenceProvider for CompleteOnly {
+        fn complete(
+            &self,
+            _request: InferenceRequest,
+        ) -> impl Future<Output = Result<InferenceResponse, InferenceError>> + Send {
+            std::future::ready(Ok(self.answer.clone()))
+        }
+    }
+
+    #[tokio::test]
+    async fn default_stream_emits_the_whole_answer_as_one_fragment() {
+        let provider = CompleteOnly {
+            answer: answer("Bonjour"),
+        };
+        let mut received: Vec<String> = Vec::new();
+        let response = provider
+            .stream(request("default"), |fragment: &str| {
+                received.push(fragment.to_owned());
+            })
+            .await
+            .expect("the default stream must answer like complete");
+        assert_eq!(
+            response,
+            answer("Bonjour"),
+            "the response of the stream must be the one complete returns"
+        );
+        assert_eq!(
+            received,
+            vec!["Bonjour"],
+            "the default stream must emit the whole answer as one fragment"
+        );
+    }
+
+    #[tokio::test]
+    async fn scripted_fragments_arrive_in_order() {
+        let provider = ScriptedProvider::new(vec![Ok(answer("Bonjour!"))]).with_fragments(vec![vec![
+            "Bon".to_owned(),
+            "jour".to_owned(),
+            "!".to_owned(),
+        ]]);
+        let mut received: Vec<String> = Vec::new();
+        let response = provider
+            .stream(request("streamed"), |fragment: &str| {
+                received.push(fragment.to_owned());
+            })
+            .await
+            .expect("the scripted reply must be given");
+        assert_eq!(
+            received,
+            vec!["Bon", "jour", "!"],
+            "the scripted fragments must arrive in order"
+        );
+        assert_eq!(
+            response.message(),
+            &Message::assistant("Bonjour!", None, Vec::new()),
+            "the response is the complete scripted answer, not the fragments"
+        );
+        assert_eq!(
+            provider.requests().len(),
+            1,
+            "the streamed request must be recorded"
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_stream_emits_no_fragment() {
+        let provider = ScriptedProvider::new(vec![Err(transient("down"))]);
+        let mut received: Vec<String> = Vec::new();
+        let result = provider
+            .stream(request("failing"), |fragment: &str| {
+                received.push(fragment.to_owned());
+            })
+            .await;
+        assert!(
+            matches!(&result, Err(error) if error.class() == ErrorClass::Transient),
+            "a failed stream must fail with the scripted class, got {result:?}"
+        );
+        assert!(
+            received.is_empty(),
+            "a failed stream must emit no fragment, got {received:?}"
         );
     }
 

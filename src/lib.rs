@@ -10,9 +10,9 @@ mod session;
 
 pub use agents::{
     AgentDefinition, AgentKind, AgentStore, AgentsError, AgentsResult, DetectedModel, ErrorClass,
-    InMemoryCatalog, InferenceError, InferenceProvider, InferenceRequest, InferenceResponse, MemoryRights,
-    ModelProfile, ProfileStore, Provider, ProviderLevel, ProviderStore, ReportedUsage, ResolvedProfile,
-    SamplingParams, SandboxLimits, ScriptedProvider, classify_status,
+    InMemoryCatalog, InferenceError, InferenceProvider, InferenceRequest, InferenceResponse, ModelProfile,
+    ProfileStore, Provider, ProviderLevel, ProviderStore, ReportedUsage, ResolvedProfile, SamplingParams,
+    SandboxLimits, ScriptedProvider, classify_status,
 };
 pub use clock::{Clock, ManualClock, SystemClock, Timestamp};
 pub use context::{

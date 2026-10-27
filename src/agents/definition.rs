@@ -1,6 +1,7 @@
 //! Agent definition, main or sub-agent: identifier, kind, templated system prompt, model profile name and parameters,
-//! reachable modules and toolsets, Memory rights per level, sandbox limits, context strategy, delegable sub-agents or
-//! output schema, and its fingerprint (`agent-sessions/agents#FR-1`, `FR-2`, `FR-8`, `agent-sessions/session#FR-2`).
+//! reachable modules and toolsets, sandbox limits, context strategy, delegable sub-agents or output schema, and its
+//! fingerprint (`agent-sessions/agents#FR-1`, `FR-2`, `FR-8`, `agent-sessions/session#FR-2`). The definition carries no
+//! Memory right: access to a Memory level is decided by the toolsets (`agent-sessions/modules#FR-4`).
 
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -19,78 +20,6 @@ pub enum AgentKind {
     Main,
     /// A sub-agent, delegated to by a main agent. It returns an output schema and does not delegate.
     Sub,
-}
-
-/// Rights of the Memory granted to an agent. Every right is absent by default: nothing is granted.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "the four rights are independent permissions of the Memory, not a state machine"
-)]
-#[non_exhaustive]
-pub struct MemoryRights {
-    #[serde(default)]
-    read: bool,
-    #[serde(default)]
-    write_user: bool,
-    #[serde(default)]
-    write_project: bool,
-    #[serde(default)]
-    write_session: bool,
-}
-
-impl MemoryRights {
-    /// Sets the read right.
-    #[must_use]
-    pub const fn with_read(mut self, allowed: bool) -> Self {
-        self.read = allowed;
-        self
-    }
-
-    /// Sets the write right on the user level.
-    #[must_use]
-    pub const fn with_write_user(mut self, allowed: bool) -> Self {
-        self.write_user = allowed;
-        self
-    }
-
-    /// Sets the write right on the project level.
-    #[must_use]
-    pub const fn with_write_project(mut self, allowed: bool) -> Self {
-        self.write_project = allowed;
-        self
-    }
-
-    /// Sets the write right on the session level.
-    #[must_use]
-    pub const fn with_write_session(mut self, allowed: bool) -> Self {
-        self.write_session = allowed;
-        self
-    }
-
-    /// Tells whether the Memory can be read.
-    #[must_use]
-    pub const fn read(self) -> bool {
-        self.read
-    }
-
-    /// Tells whether the user level can be written.
-    #[must_use]
-    pub const fn write_user(self) -> bool {
-        self.write_user
-    }
-
-    /// Tells whether the project level can be written.
-    #[must_use]
-    pub const fn write_project(self) -> bool {
-        self.write_project
-    }
-
-    /// Tells whether the session level can be written.
-    #[must_use]
-    pub const fn write_session(self) -> bool {
-        self.write_session
-    }
 }
 
 /// Limits of the sandbox of an agent: the delay of a script and the render cap of an output, in characters.
@@ -138,8 +67,6 @@ pub struct AgentDefinition {
     modules: Vec<String>,
     #[serde(default)]
     toolsets: Vec<String>,
-    #[serde(default)]
-    memory: MemoryRights,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     sandbox: Option<SandboxLimits>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -163,12 +90,6 @@ impl AgentDefinition {
             sampling: None,
             modules: Vec::new(),
             toolsets: Vec::new(),
-            memory: MemoryRights {
-                read: false,
-                write_user: false,
-                write_project: false,
-                write_session: false,
-            },
             sandbox: None,
             context_strategy: None,
             delegable: Vec::new(),
@@ -194,13 +115,6 @@ impl AgentDefinition {
     #[must_use]
     pub fn with_toolsets(mut self, toolsets: Vec<String>) -> Self {
         self.toolsets = toolsets;
-        self
-    }
-
-    /// Sets the Memory rights of the agent.
-    #[must_use]
-    pub const fn with_memory(mut self, memory: MemoryRights) -> Self {
-        self.memory = memory;
         self
     }
 
@@ -272,12 +186,6 @@ impl AgentDefinition {
     #[must_use]
     pub fn toolsets(&self) -> &[String] {
         &self.toolsets
-    }
-
-    /// Returns the Memory rights of the agent.
-    #[must_use]
-    pub const fn memory(&self) -> MemoryRights {
-        self.memory
     }
 
     /// Returns the sandbox limits, if any.
@@ -399,7 +307,7 @@ fn fnv1a_64(bytes: &[u8]) -> u64 {
 mod tests {
     use std::time::Duration;
 
-    use super::{AgentDefinition, AgentKind, MemoryRights, SandboxLimits, fnv1a_64};
+    use super::{AgentDefinition, AgentKind, SandboxLimits, fnv1a_64};
     use crate::agents::{AgentsError, SamplingParams};
 
     const PROMPT: &str = "You are the assistant of {{project}}.";
@@ -435,12 +343,6 @@ mod tests {
             .with_sampling(sampling)
             .with_modules(vec!["files".to_owned(), "git".to_owned()])
             .with_toolsets(vec!["k8s".to_owned(), "logs".to_owned()])
-            .with_memory(
-                MemoryRights::default()
-                    .with_read(true)
-                    .with_write_user(true)
-                    .with_write_session(true),
-            )
             .with_sandbox(SandboxLimits::new(Duration::from_secs(30), 10_000))
             .with_context_strategy("summarize".to_owned())
             .with_delegable(vec!["reviewer".to_owned()])
@@ -506,10 +408,27 @@ mod tests {
             definition.toolsets().is_empty(),
             "no toolset is granted by default"
         );
-        let memory = definition.memory();
+    }
+
+    #[test]
+    fn no_memory_rights_in_the_definition() {
+        let definition = main_agent();
+        let value = serde_json::to_value(&definition).expect("a definition serializes");
         assert!(
-            !memory.read() && !memory.write_user() && !memory.write_project() && !memory.write_session(),
-            "the Memory rights absent from the JSON grant nothing"
+            value.get("memory").is_none(),
+            "the definition carries no Memory right: its JSON must have no `memory` field, got {value}"
+        );
+        let old = r#"{"id":"main","kind":"main","prompt":"You are the assistant of {{project}}.","profile":"strix-qwen","memory":{"read":true,"write_user":true}}"#;
+        let read: AgentDefinition =
+            serde_json::from_str(old).expect("an old JSON with a memory field still reads");
+        assert_eq!(
+            read, definition,
+            "the `memory` field of an old JSON is ignored: the definition reads as without it"
+        );
+        assert_eq!(
+            read.fingerprint(),
+            definition.fingerprint(),
+            "the ignored `memory` field must not change the fingerprint"
         );
     }
 
@@ -564,7 +483,6 @@ mod tests {
     fn fingerprint_changes_for_each_field() {
         let base = full_main_agent().fingerprint();
         let sampling = SamplingParams::default().with_temperature(0.1);
-        let memory = MemoryRights::default().with_read(true).with_write_user(true);
         let cases = [
             (
                 "identifier",
@@ -587,29 +505,6 @@ mod tests {
             (
                 "toolsets",
                 full_main_agent().with_toolsets(vec!["k8s".to_owned()]),
-            ),
-            (
-                "memory read",
-                full_main_agent().with_memory(memory.with_read(false).with_write_session(true)),
-            ),
-            (
-                "memory write user",
-                full_main_agent()
-                    .with_memory(MemoryRights::default().with_read(true).with_write_session(true)),
-            ),
-            (
-                "memory write project",
-                full_main_agent().with_memory(
-                    MemoryRights::default()
-                        .with_read(true)
-                        .with_write_user(true)
-                        .with_write_project(true)
-                        .with_write_session(true),
-                ),
-            ),
-            (
-                "memory write session",
-                full_main_agent().with_memory(MemoryRights::default().with_read(true).with_write_user(true)),
             ),
             (
                 "sandbox script timeout",

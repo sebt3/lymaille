@@ -247,7 +247,7 @@ impl ModelProfile {
         let max_response = self
             .max_response
             .or_else(|| detected.and_then(|model| model.max_output))
-            .unwrap_or_else(|| context_size.saturating_div(4));
+            .unwrap_or_else(|| context_size.saturating_div(8));
         let tools = self
             .tools
             .or_else(|| detected.and_then(|model| model.tools))
@@ -421,8 +421,8 @@ mod tests {
             .expect("the detection gives the context size");
         assert_eq!(
             resolved.max_response(),
-            10_000,
-            "the default response is a quarter of the context"
+            5_000,
+            "the default response is an eighth of the context"
         );
         assert!(resolved.tools(), "tools are supported by default");
         assert_eq!(resolved.replay(), ReplayMode::None, "replay is none by default");
@@ -448,7 +448,7 @@ mod tests {
         let budget = resolved.budget(500, 10_000);
         assert!(
             !budget.needs_compaction(100_000),
-            "with MAX 262144, PROMPT 500, R 65536 and T 4000, a session of 100000 tokens needs no compaction"
+            "with MAX 262144, PROMPT 500, R 32768 and T 4000, a session of 100000 tokens needs no compaction"
         );
     }
 
@@ -512,7 +512,7 @@ mod tests {
         assert_eq!(
             detected_only.max_response(),
             5_000,
-            "without override the detected maximum output is used, not the quarter default"
+            "without override the detected maximum output is used, not the eighth default"
         );
     }
 

@@ -73,8 +73,13 @@ Scenario: round trip
   When serialized then deserialized
   Then it is identical
 
+Scenario: no memory right in the definition
+  Given a main agent, and a JSON of an older definition carrying a `memory` field
+  When the definition is serialized, and the old JSON is read
+  Then the serialized JSON has no `memory` field, and the old JSON reads as the definition without it, with the same fingerprint
+
 Tasks:
-  [x] #6 Tests manquants : l'empreinte change pour chaque champ de la liste du Must (prompt, profil, toolsets, modules, chacun des quatre droits de Memory, délai et plafond de sandbox, sous-agents délégables, schéma de sortie, aussi id, nature, paramètres, stratégie de contexte) ;
+  [x] #6 Tests manquants : l'empreinte change pour chaque champ de la liste du Must (prompt, profil, toolsets, modules, délai et plafond de sandbox, sous-agents délégables, schéma de sortie, aussi id, nature, paramètres, stratégie de contexte) ;
       vecteurs connus du FNV-1a 64 bits sur des chaînes (`""` → `cbf29ce484222325`, `"a"` → `af63dc4c8601ec8c`, `"foobar"` → `85944171f73967e8`) pour la fonction de hachage, afin que « indépendante de la plate-forme » soit vérifié ; `validate()` Ok sur une définition valide et sur un sous-agent avec schéma ;
       identifiant, prompt et profil vides refusés ; doublon de modules refusé.
   [x] #1 Tests puis implémentation.
@@ -82,4 +87,5 @@ Tasks:
   [?] #3 La stratégie de contexte est un nom ; le choix de la stratégie par nom (fabrique) se branche avec la boucle de tour.
   [?] #5 Posé à l'implémentation : `sandbox` absent = aucune limite ; les doublons de sous-agents délégables ne sont pas refusés ; un identifiant, un prompt ou un nom de profil blanc est refusé.
   [x] #4 Décidé le 2026-10-27 : pas de droits de Memory dans la définition ; trois modules Memory (un par niveau) et l'accès se décide par les toolsets (`agent-sessions/modules#FR-4`).
-  [ ] #7 Supprimer @MemoryRights (type, constructeur `with_memory`, accesseur, réexports de ../lib.rs et ./mod.rs), l'empreinte et les tests correspondants, puis retirer des tâches #5 et #6 les droits de Memory.
+  [?] #8 Champ inconnu : un JSON ancien portant `memory` (ou tout autre champ inconnu) se lit comme avant, le champ est ignoré (comportement serde par défaut, sans `deny_unknown_fields`) ; la définition ne le réécrit pas. Maintenu tel quel, à confirmer par le développeur principal.
+  [x] #7 Supprimer @MemoryRights (type, constructeur `with_memory`, accesseur, réexports de ../lib.rs et ./mod.rs), l'empreinte et les tests correspondants, puis retirer des tâches #5 et #6 les droits de Memory.

@@ -19,11 +19,14 @@ Exposes:
 
 Accepts:
   @InferenceProvider::complete: une @InferenceRequest (profil résolu, prompt système, messages, définitions de tools, raisonnement à rejouer, paramètres).
+  @InferenceProvider::stream: la même @InferenceRequest et un récepteur de fragments, une fermeture `FnMut(&str) + Send` appelée pour chaque fragment de texte, dans l'ordre d'émission.
   @classify_status: un code HTTP et un indicateur « corps signale un dépassement de contexte ».
   @ScriptedProvider::new: une liste ordonnée de résultats préparés (réponse ou erreur) ; chaque appel consomme le suivant.
+  @ScriptedProvider::with_fragments: pour chaque résultat du script, dans le même ordre, la liste des fragments de texte qu'un appel en flux émet pour ce résultat ; une liste absente ou vide pour un résultat donne la réponse entière en un seul fragment.
 
 Returns:
   @InferenceProvider::complete: une @InferenceResponse (message de l'assistant, @ReportedUsage optionnel : prompt et complétion) ou une @InferenceError.
+  @InferenceProvider::stream: la @InferenceResponse complète finale, identique à celle que rend `complete` pour la même requête, ou une @InferenceError ; les fragments ne remplacent jamais la réponse (`agent-sessions/session` : la réponse complète figure dans l'événement de fin de tour).
   @classify_status: une @ErrorClass.
   @ScriptedProvider::requests: les requêtes reçues, dans l'ordre.
 
@@ -33,6 +36,9 @@ Raises:
 Must:
   @classify_status : 429 et 5xx → `Transient` ; 400, 401, 403, 404 → `Permanent` ; 400 dont le corps signale un dépassement de contexte → `ContextOverflow` ; tout autre 4xx → `Permanent` ; 2xx n'est pas une erreur (@classify_status rend `None`) ; les erreurs de réseau et de délai sont rapportées par l'adaptateur comme `Transient` (pas de code).
   @InferenceProvider est `Send + Sync`, à futur `Send`, sans macro ni objet dynamique.
+  @InferenceProvider::stream a une implémentation par défaut : elle appelle `complete`, puis, si le message de l'assistant a un texte non vide, émet ce texte comme un seul fragment. Un texte vide n'émet aucun fragment. Si `complete` échoue, aucun fragment n'est émis et l'erreur est rendue telle quelle.
+  Le texte des fragments émis par un appel réussi est, par construction, le texte de la réponse finale pour le fournisseur par défaut ; pour le fournisseur scripté, la concaténation des fragments scriptés est la responsabilité du script et n'est pas vérifiée.
+  @ScriptedProvider::stream émet les fragments scriptés du résultat consommé, dans l'ordre, puis rend ce résultat ; il enregistre la requête comme `complete`. Un résultat d'erreur n'émet aucun fragment.
   Un message d'erreur n'embarque jamais le contenu de la requête ni un secret.
   @ScriptedProvider enregistre chaque requête reçue avant de répondre, rend `Permanent` avec le message « script exhausted » quand la liste est épuisée, et est partageable entre tâches (verrou interne, `Send + Sync`).
   @InferenceRequest et @InferenceResponse se clonent et se comparent (tests).
@@ -73,11 +79,29 @@ Scenario: shared between tasks
   When each completes one request
   Then four requests are recorded and no result is used twice
 
+Scenario: default stream emits the whole answer as one fragment
+  Given a provider that only implements complete and answers `Bonjour`
+  When stream is called with a receiver that collects the fragments
+  Then the receiver got the single fragment `Bonjour` and the response is the one complete returns
+
+Scenario: scripted fragments arrive in order
+  Given a scripted provider whose reply is scripted with the fragments `Bon`, `jour` and `!`
+  When stream is called
+  Then the receiver got `Bon`, `jour` and `!` in that order, the response text is `Bonjour!`, and the request is recorded
+
+Scenario: a failed stream emits no fragment
+  Given a scripted provider whose next reply is a transient error
+  When stream is called
+  Then it fails Transient and the receiver got nothing
+
 Tasks:
+  [ ] #11 Tests manquants relevés à la validation de H2 : l'implémentation par défaut de `stream` quand `complete` échoue (aucun fragment) et sur une réponse vide (aucun fragment).
   [ ] #6 Tests manquants : bornes de @classify_status (199, 300, 428, 430, 499, 599, 600 ; l'indicateur de dépassement ne change que le 400) ; la requête est enregistrée même quand le script est épuisé.
   [x] #1 Tests (tokio de test) puis implémentation.
   [?] #5 Décidé : tout statut hors 2xx, 429 et 5xx (donc aussi 1xx et 3xx) est `Permanent`. @InferenceResponse ne garantit pas par le type que son message est de l'assistant : la boucle de tour le vérifie.
-  [?] #2 Streaming : « fragments comme événements » est décidé le 2026-10-27 (`agent-sessions/session`) ; non couvert ici, la réponse est complète.
-  [ ] #7 Ajouter à @InferenceProvider une méthode de flux de fragments (spec, tests, implémentation).
+  [?] #2 Streaming : « fragments comme événements » est décidé le 2026-10-27 (`agent-sessions/session`) ; la forme de la méthode de flux est fixée par #7 ci-dessus, le canal d'événements (@Event::TextDelta) reste celui de `session/event.sdd`.
+  [?] #10 Forme choisie pour la tâche #7 (à confirmer) : `stream<F: FnMut(&str) + Send>(&self, request, fragments: F)` en méthode par défaut sur le trait, `async fn`-style en `impl Future + Send` comme `complete`, sans `Box<dyn>` ni nouveau trait de récepteur. Alternative non retenue : un trait `FragmentSink` avec une méthode `fragment(&mut self, &str)` ; plus de cérémonie, sans bénéfice tant qu'aucun adaptateur n'a besoin d'un état propre au récepteur. Le récepteur est synchrone : un adaptateur qui pousse vers un canal `tokio` le fera par une fermeture qui envoie sans attendre (`try_send` ou canal non borné), ce choix reste à revoir avec l'adaptateur `rig`.
+  [x] #7 Ajouter à @InferenceProvider une méthode de flux de fragments (spec, tests, implémentation).
+  [?] #9 `ScriptedProvider::with_fragments` (fragments par résultat du script) est une API de test ajoutée ici pour que le fournisseur scripté scripte des fragments ; alternative : un type de résultat de script qui porte les fragments, plus lourd, non retenue.
   [?] #3 Rejeu du raisonnement : la requête porte le raisonnement déjà choisi par @replayed_reasoning ; la transmission de `chat_template_kwargs` au serveur (mode explicite) est faite par l'adaptateur (voir ./agents.sdd #2).
   [?] #4 Sortie structurée du sous-agent (schéma JSON, `delegation`) : la requête peut devoir porter un schéma de sortie ; non spécifié avant `delegation`.
