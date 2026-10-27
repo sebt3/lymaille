@@ -64,5 +64,5 @@ Tasks:
       contrôle dans `scripts/check` qui fait échouer la batterie sur tout avertissement de configuration clippy (aujourd'hui silencieux).
       Modification du harnais : décision du développeur principal.
   [?] #5 `scripts/mutants` et `cargo deny` ne tournent pas encore : aucune validation de lot ne les couvre.
-  [?] #3 Le premier jalon publiera-t-il `lymaille` en 0.1 avec les domaines `session` seul, ou attend-on `scratchpad` ?
-      Lever `publish = false` à ce moment.
+  [x] #3 Décidé le 2026-10-27 par le développeur principal : `lymaille` est publié en 0.1 à la fin du DSD `agent-sessions`, une fois tous ses domaines
+      livrés ; aucun cas d'usage n'est publié partiellement. Lever `publish = false` à ce moment.

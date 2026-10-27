@@ -1,7 +1,7 @@
 Spec: definition
 
 Purpose:
-  Définition d'un agent, principal ou sous-agent : identifiant, nature, prompt système templaté, nom du profil de modèle et paramètres, modules et toolsets accessibles, droits de Memory par niveau,
+  Définition d'un agent, principal ou sous-agent : identifiant, nature, prompt système templaté, nom du profil de modèle et paramètres, modules et toolsets accessibles,
     limites de sandbox, stratégie de fenêtre de contexte, sous-agents délégables (principal) ou schéma de sortie (sous-agent), et son empreinte
     (`agent-sessions/agents#FR-1`, `FR-2`, `FR-8`, `agent-sessions/session#FR-2`).
 
@@ -11,12 +11,11 @@ Owns:
 Exposes:
   @AgentDefinition
   @AgentKind
-  @MemoryRights
   @SandboxLimits
   @AgentDefinition::fingerprint
 
 Accepts:
-  @AgentDefinition::new: l'identifiant, la nature (@AgentKind : `Main` ou `Sub`), le prompt système (gabarit texte) et le nom du profil de modèle, puis des constructeurs chaînés : paramètres d'échantillonnage, modules, toolsets, @MemoryRights par niveau (lecture, écriture pour utilisateur, projet, session), @SandboxLimits (délai de script, plafond de rendu en caractères), nom de la stratégie de contexte, sous-agents délégables (principal), schéma JSON de sortie (sous-agent).
+  @AgentDefinition::new: l'identifiant, la nature (@AgentKind : `Main` ou `Sub`), le prompt système (gabarit texte) et le nom du profil de modèle, puis des constructeurs chaînés : paramètres d'échantillonnage, modules, toolsets, @SandboxLimits (délai de script, plafond de rendu en caractères), nom de la stratégie de contexte, sous-agents délégables (principal), schéma JSON de sortie (sous-agent).
   @AgentDefinition::validate: aucun argument.
 
 Returns:
@@ -28,9 +27,9 @@ Raises:
 
 Must:
   Le modèle se désigne par un nom de profil : la définition n'a aucun champ de fournisseur.
-  L'empreinte est déterministe et indépendante de la plate-forme : même définition, même empreinte, y compris après un aller-retour de sérialisation ; elle change dès qu'un champ de la définition change (prompt, profil, toolsets, modules, droits, limites, sous-agents, schéma). Calculée par FNV-1a 64 bits sur la sérialisation JSON canonique (clés triées), sans dépendance externe.
+  L'empreinte est déterministe et indépendante de la plate-forme : même définition, même empreinte, y compris après un aller-retour de sérialisation ; elle change dès qu'un champ de la définition change (prompt, profil, toolsets, modules, limites, sous-agents, schéma). Calculée par FNV-1a 64 bits sur la sérialisation JSON canonique (clés triées), sans dépendance externe.
   Un sous-agent ne délègue pas (`agent-sessions#BR-6`) ; seul un principal a des sous-agents délégables.
-  Les capacités sont exactement celles de la définition (`agent-sessions#BR-2`) : aucune valeur par défaut n'accorde un module ou un toolset ; les listes absentes sont vides, les droits de Memory absents sont « aucun ».
+  Les capacités sont exactement celles de la définition (`agent-sessions#BR-2`) : aucune valeur par défaut n'accorde un module ou un toolset ; les listes absentes sont vides. La définition ne porte aucun droit de Memory : l'accès à un niveau se décide par les toolsets (`agent-sessions/modules#FR-4`).
   Se sérialise et se désérialise à l'identique ; aucun champ ne porte de secret.
 
 Depends on:
@@ -52,7 +51,7 @@ Scenario: fingerprint is stable and sensitive
 Scenario: no capability by default
   Given a definition with only the required fields
   When read
-  Then modules and toolsets are empty and memory rights grant nothing
+  Then modules and toolsets are empty
 
 Scenario: sub-agent cannot delegate
   Given a sub-agent definition declaring delegable sub-agents
@@ -81,5 +80,6 @@ Tasks:
   [x] #1 Tests puis implémentation.
   [?] #2 Rendu du prompt templaté (variables du ToolsetContext) : relève de `toolsets` (templating) ; ici le prompt est du texte brut.
   [?] #3 La stratégie de contexte est un nom ; le choix de la stratégie par nom (fabrique) se branche avec la boucle de tour.
-  [?] #5 Posé à l'implémentation : @MemoryRights = quatre droits indépendants (lecture, écriture utilisateur, projet, session) ; `sandbox` absent = aucune limite ; les doublons de sous-agents délégables ne sont pas refusés ; un identifiant, un prompt ou un nom de profil blanc est refusé.
-  [?] #4 Granularité des droits de Memory (lecture/écriture par niveau) : proposée, à confirmer avec `modules`.
+  [?] #5 Posé à l'implémentation : `sandbox` absent = aucune limite ; les doublons de sous-agents délégables ne sont pas refusés ; un identifiant, un prompt ou un nom de profil blanc est refusé.
+  [x] #4 Décidé le 2026-10-27 : pas de droits de Memory dans la définition ; trois modules Memory (un par niveau) et l'accès se décide par les toolsets (`agent-sessions/modules#FR-4`).
+  [ ] #7 Supprimer @MemoryRights (type, constructeur `with_memory`, accesseur, réexports de ../lib.rs et ./mod.rs), l'empreinte et les tests correspondants, puis retirer des tâches #5 et #6 les droits de Memory.

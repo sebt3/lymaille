@@ -19,7 +19,7 @@ Accepts:
   @ModelProfile::resolve: un @DetectedModel optionnel (rien si le modèle n'est pas détecté).
 
 Returns:
-  @ModelProfile::resolve: un @ResolvedProfile où chaque valeur vient de la surcharge si elle existe, sinon de la détection, sinon d'une valeur par défaut documentée (réponse maximale : un quart du contexte ; outils : oui ; rejeu : @ReplayMode::None ; simultanéité : 1 ; indice : 2500).
+  @ModelProfile::resolve: un @ResolvedProfile où chaque valeur vient de la surcharge si elle existe, sinon de la détection, sinon d'une valeur par défaut documentée (réponse maximale : un huitième du contexte ; outils : oui ; rejeu : @ReplayMode::None ; simultanéité : 1 ; indice : 2500).
   @ResolvedProfile::budget: un @Budget (../context/budget.sdd) construit avec la taille de contexte résolue, la réponse maximale résolue, la taille du prompt de résumé et le plafond de rendu en caractères reçus en arguments, et l'indice de tokenisation résolu.
 
 Raises:
@@ -75,7 +75,8 @@ Tasks:
   [x] #6 Tests manquants : surcharge face à une détection plus grande ET plus petite ; `max_response` et `tools` surchargés puis détectés ; @ResolvedProfile::budget qui dépend de l'indice de tokenisation (le plafond de rendu converti change avec l'indice) ;
       aller-retour sans `tokenization_hint` ni `concurrency` quand ils sont absents.
   [x] #1 Tests puis implémentation.
-  [?] #2 Comportement quand un modèle référencé n'est pas détecté (TBD du DSD) : posé ici « il se résout si le profil porte une taille de contexte, sinon erreur explicite » ; confirmer.
-  [?] #3 Valeurs par défaut (réponse maximale = un quart du contexte) : proposées, non issues du DSD ; à confirmer.
-  [?] #5 Les constructeurs refusent le zéro par le type (`NonZeroU64` pour l'indice de tokenisation et la simultanéité) ; réponse maximale par défaut = contexte divisé par 4 (division saturante entière).
+  [x] #2 Décidé le 2026-10-27 (`agent-sessions/agents`) : un modèle non détecté se résout si le profil porte une taille de contexte, sinon erreur explicite.
+  [x] #3 Décidé le 2026-10-27 : la réponse maximale par défaut est le contexte divisé par 8.
+  [?] #5 Les constructeurs refusent le zéro par le type (`NonZeroU64` pour l'indice de tokenisation et la simultanéité) ; réponse maximale par défaut = contexte divisé par 8 (division saturante entière).
+  [ ] #6 Passer la réponse maximale par défaut du quart au huitième du contexte (code et tests : division par 8).
   [?] #4 La détection réelle (`list_models` de `rig`, `max_model_len` de vLLM) vit dans l'adaptateur (voir ./agents.sdd #2) ; ici seulement le type @DetectedModel.

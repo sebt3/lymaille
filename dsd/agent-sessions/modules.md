@@ -28,9 +28,10 @@ d'extension pour les modules fournis par l'hôte.
 - **FR-3 - MUST:** La liste des Memory ne rend que l'identifiant et le titre ; le corps se lit à la demande.
     - **Source:** user instruction, 2026-10-24
 
-- **FR-4 - MUST:** La définition d'agent détermine par niveau si le module Memory est en lecture seule ou en lecture et
-  écriture.
-    - **Source:** agent-sessions#BR-2
+- **FR-4 - MUST:** La Memory est exposée par trois modules, un par niveau (utilisateur, projet, session). L'accès d'un
+  agent à un niveau, y compris la lecture seule, se décide par les toolsets de sa définition (`agent-sessions#BR-2`) : la
+  définition d'agent ne porte aucun droit de Memory, et toute vérification passe par un toolset.
+    - **Source:** agent-sessions#BR-2 ; user instruction, 2026-10-27
 
 - **FR-5 - MUST:** Les changements de Memory émettent un événement.
     - **Source:** agent-sessions#BR-5
@@ -79,7 +80,7 @@ Source: user instruction, 2026-10-24
 
 - **AC-1:** Un changement d'état de tâche fait émettre un événement à l'hôte et survit à une restauration.
 - **AC-2:** Une Memory de même identifiant créée aux niveaux utilisateur et projet est lue indépendamment ; un agent en
-  lecture seule sur le niveau utilisateur ne peut pas la modifier.
+  lecture seule sur le niveau utilisateur (toolset qui n'expose que les fonctions de lecture) ne peut pas la modifier.
 - **AC-3:** Avec un serveur MCP simulé exposant deux tools, la session voit un module à deux fonctions documentées par les
   descriptions MCP.
 - **AC-4:** Avec un serveur MCP simulé qui coupe la connexion, l'appel rend une erreur Rhai explicite après les tentatives

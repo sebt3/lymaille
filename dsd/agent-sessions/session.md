@@ -70,8 +70,7 @@ non-interruption sur le temps.
   persiste le contexte tel que le modèle l'a reçu : le prompt système rendu, les définitions des tools natifs (`rhai_pad` et `skill`) et le profil
   de modèle résolu (identifiant et mode de rejeu du raisonnement). Une restauration qui re-rend le prompt avec des
   définitions plus récentes (FR-10) ne remplace pas ce qui a été envoyé auparavant.
-    - **Source:** user instruction, 2026-10-24 ; agent-sessions#DEC-12 ; ASSUMPTION: contenu déduit de ce qu'exigerait un export
-      fidèle, à confirmer
+    - **Source:** user instruction, 2026-10-24 ; agent-sessions#DEC-12 ; contenu confirmé, user instruction, 2026-10-27
     - **Verified by:** `AC-7`
 
 - **FR-12 - MUST:** L'historique persisté garde chaque message tel que le modèle l'a reçu ou produit : sorties de `rhai_pad`
@@ -85,7 +84,7 @@ non-interruption sur le temps.
   workflow concernés, versions de toolsets et profil de modèle.
     - **Source:** user instruction, 2026-10-24 ; agent-sessions#DEC-12 ; référence de l'agent pour exclure les sessions de
       l'agent de configuration du filtrage des candidatures (`agent-sessions#DEC-13`), user instruction, 2026-10-26 ;
-      ASSUMPTION: liste des signaux déduite d'une analyse de la sélection de données, à confirmer
+      liste des signaux confirmée, user instruction, 2026-10-27
     - **Verified by:** `AC-8`
 
 - **FR-14 - MUST:** Un message utilisateur reçu pendant un tour actif n'ouvre pas de nouveau tour : il est injecté dans
@@ -99,7 +98,7 @@ non-interruption sur le temps.
   jamais une modification : libellé tiré d'un vocabulaire que l'hôte définit, émetteur (humain ou automatique) et date
   posés par la librairie, persistée avec la session. La librairie n'impose ni le moment ni la forme de la question, qui
   relèvent de l'hôte ; elle émet déjà les fins de tour et de run qui servent de points d'accroche.
-    - **Source:** user instruction, 2026-10-26 ; agent-sessions#DEC-13 ; ASSUMPTION: granularité et vocabulaire à confirmer
+    - **Source:** user instruction, 2026-10-26 ; agent-sessions#DEC-13 ; granularité et vocabulaire d'étiquettes libres (définis par l'hôte) confirmés, user instruction, 2026-10-27
     - **Verified by:** `AC-10`
 
 ## Décisions
@@ -134,10 +133,13 @@ Source: user instruction, 2026-10-24
 
 ## Questions ouvertes
 
-- **TBD:** forme du retour de texte vers l'hôte pendant un tour : fragments de streaming comme événements du canal de
-  `agent-sessions#FR-3`, ou flux dédié rendu par le lancement du tour, la réponse complète figurant dans tous les cas dans
-  l'événement de fin de tour.
-- **TBD:** inventaire des types `Dynamic` à étiqueter au-delà de `char` et `blob` (horodatages, décimaux selon les features).
+- **Décidé:** forme du retour de texte vers l'hôte pendant un tour : les fragments de streaming sont des événements du canal
+  de `agent-sessions#FR-3` ; la réponse complète figure dans l'événement de fin de tour. Pas de flux dédié.
+    - **Source:** user instruction, 2026-10-27
+- **Décidé:** les types `Dynamic` étiquetés restent `char` et `blob` en plus des types que JSON distingue. Les horodatages et
+  décimaux sont hors périmètre tant qu'aucun besoin n'est établi ; une valeur non prise en charge à la sérialisation rend une
+  erreur explicite, jamais une perte silencieuse. Le `blob` s'encode en base64.
+    - **Source:** user instruction, 2026-10-27
 
 ## Acceptation
 

@@ -70,4 +70,5 @@ Tasks:
   [x] #1 Tests (tokio de test) puis implémentation.
   [?] #3 Posé à l'implémentation : @resolve_profile est une méthode fournie de @ProfileStore ; `get_*` rend `AgentsResult<Option<T>>` ; l'échec de sérialisation devient @AgentsError::Store ; un verrou empoisonné est récupéré.
   [?] #4 Décidé : la validation d'une définition à l'écriture est faite par @InMemoryCatalog ; un hôte qui implémente @AgentStore doit appeler @AgentDefinition::validate (à documenter dans le trait). Une méthode fournie qui impose la validation est écartée : @AgentStore::put_agent resterait contournable de toute façon.
-  [?] #2 Les noms de niveau (utilisateur, projet) d'un profil ou d'un fournisseur ne sont pas dans la clé de stockage : un nom est unique par catalogue. À confirmer face à `agent-sessions/agents#FR-6` et `FR-7` (niveaux utilisateur et projet).
+  [x] #2 Décidé le 2026-10-27 : le niveau (utilisateur, projet) n'est pas dans la clé de stockage ; un nom est unique par catalogue, un catalogue par niveau, que l'hôte empile.
+  [ ] #6 Spécifier et livrer la résolution en cascade au-dessus de plusieurs catalogues (le niveau projet l'emporte, `agent-sessions/agents#FR-6` et `FR-7`) si elle n'existe pas encore.

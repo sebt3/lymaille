@@ -26,7 +26,8 @@ fournit l'abstraction des fournisseurs.
 
 - **FR-3 - SHOULD:** Une définition d'agent est sérialisable en un format simple et éditable à la main (frontmatter
   structuré et corps de prompt).
-    - **Source:** user instruction, 2026-10-24
+    - **Source:** user instruction, 2026-10-24 ; maintenu en SHOULD par le développeur principal, 2026-10-27 (analyse YAML
+      par `yaml_serde`)
 
 - **FR-4 - MUST:** Un projet regroupe des Memory et un manifeste d'agents principaux, de sous-agents, de toolsets, de
   ContextType et de définitions de ToolsetContext prédéterminés, stockés par trait.
@@ -60,11 +61,13 @@ et ce que l'agent consomme.
 
 ## Questions ouvertes
 
-- **TBD:** détection des modèles. `list_models` existe dans `rig` 0.43 sur les clients OpenAI, Anthropic, Ollama, Copilot et
+- **TBD:** détection des modèles (à vérifier : report de `max_model_len` par `rig`). `list_models` existe dans `rig` 0.43 sur les clients OpenAI, Anthropic, Ollama, Copilot et
   Gemini (Observed in: rig-core 0.43.0, `src/client`), et `ModelInfo` porte `context_length` et `max_output_tokens`
   optionnels. vLLM annonce `max_model_len` dans `/v1/models` (262 144 pour `qwen3.8-flash-next`, Observed in:
   spikes/inference-probe) ; que `rig` le reporte dans `context_length` reste à vérifier, sinon le profil de modèle le
-  surcharge (FR-7). Comportement quand un modèle référencé n'est pas détecté : à décider.
+  surcharge (FR-7). Décidé (user instruction, 2026-10-27) : un modèle référencé mais non détecté se résout si son profil porte
+  une taille de contexte, sinon la résolution échoue avec une erreur explicite. La réponse maximale par défaut d'un profil
+  est le contexte divisé par 8.
   Une passerelle de l'écosystème annonce `context_length: 8192` pour presque tous ses modèles, dont `qwen3.8-flash-next` que
   vLLM déclare à 262 144 (signalé : `kydah/kydah-ai-proxy#113`) : la détection ne suffit pas, la surcharge du profil
   (FR-7) est nécessaire, pas seulement prévue.

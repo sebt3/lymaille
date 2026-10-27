@@ -59,6 +59,6 @@ Scenario: store holds serialized form
 
 Tasks:
   [x] #1 Tests (exécuteur tokio de test) puis implémentation.
-  [?] #2 Le trait ne prévoit ni liste, ni suppression, ni recherche de sessions : relève de l'hôte (`agent-sessions#CON-1`). Confirmer
-      qu'aucune opération de liste n'est attendue de la librairie (reprise d'une session par identifiant seulement).
+  [x] #2 Décidé le 2026-10-27 : le trait ne prévoit ni liste, ni suppression, ni recherche de sessions : relève de l'hôte (`agent-sessions#CON-1`) ;
+      reprise d'une session par identifiant seulement.
   [?] #3 Choix du `async fn` natif et de la généricité sur le stockage contre `Box<dyn ...>` : posé générique, sans objet dynamique.

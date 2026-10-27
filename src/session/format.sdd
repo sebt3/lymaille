@@ -45,4 +45,4 @@ Scenario: different major refused
 
 Tasks:
   [x] #1 Tests puis implémentation.
-  [?] #2 Faut-il une migration entre majeures plutôt qu'un refus sec ? Le DSD dit « refuse » : posé tel quel, à rouvrir à la première majeure.
+  [x] #2 Décidé le 2026-10-27 : refus sec entre majeures, sans point d'extension de migration ; à rouvrir à la première majeure.

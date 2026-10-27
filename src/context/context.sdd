@@ -34,4 +34,4 @@ Must:
 Tasks:
   [x] #1 Déclarer les sous-modules dans ./mod.rs au fil des specs enfants livrées.
   [?] #2 Intégration à la boucle de tour (décision de compacter avant chaque requête, refus d'un message trop gros) : dépend de la boucle de tour de `session` (#2 de ../session/session.sdd).
-  [?] #3 TBD du DSD : contenu du prompt de résumé (consigne de citer textuellement les demandes de l'utilisateur) ; l'essai de bout en bout du rejeu du raisonnement.
+  [?] #3 Prompt de résumé par défaut surchargeable, citant textuellement les demandes de l'utilisateur (décidé le 2026-10-27, contenu à rédiger avec le code) ; TBD du DSD : l'essai de bout en bout du rejeu du raisonnement.

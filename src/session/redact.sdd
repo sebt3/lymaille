@@ -65,4 +65,5 @@ Tasks:
   [x] #1 Tests puis implémentation.
   [?] #3 Rejeter à l'ajout les secrets qui commencent ou finissent par `*` pour rendre l'idempotence inconditionnelle ? Non fait : les secrets réels
       sont des jetons opaques ; à rouvrir si le cas se présente.
-  [?] #2 Les secrets de petite taille (un caractère) masquent trop : seuil minimal à décider avec le développeur principal.
+  [x] #2 Décidé le 2026-10-27 : un secret de moins de 6 caractères est refusé à l'ajout avec une erreur explicite (il masquerait trop).
+  [ ] #4 Refuser à l'ajout un secret de moins de 6 caractères (nouvelle erreur, tests puis implémentation, Scenario ci-dessus à ajouter).

@@ -77,6 +77,7 @@ Tasks:
   [ ] #6 Tests manquants : bornes de @classify_status (199, 300, 428, 430, 499, 599, 600 ; l'indicateur de dépassement ne change que le 400) ; la requête est enregistrée même quand le script est épuisé.
   [x] #1 Tests (tokio de test) puis implémentation.
   [?] #5 Décidé : tout statut hors 2xx, 429 et 5xx (donc aussi 1xx et 3xx) est `Permanent`. @InferenceResponse ne garantit pas par le type que son message est de l'assistant : la boucle de tour le vérifie.
-  [?] #2 Streaming (TBD de `agent-sessions/session`) : non couvert, la réponse est complète ; ajouter une variante ou une méthode de flux si le choix « fragments comme événements » est retenu.
+  [?] #2 Streaming : « fragments comme événements » est décidé le 2026-10-27 (`agent-sessions/session`) ; non couvert ici, la réponse est complète.
+  [ ] #7 Ajouter à @InferenceProvider une méthode de flux de fragments (spec, tests, implémentation).
   [?] #3 Rejeu du raisonnement : la requête porte le raisonnement déjà choisi par @replayed_reasoning ; la transmission de `chat_template_kwargs` au serveur (mode explicite) est faite par l'adaptateur (voir ./agents.sdd #2).
   [?] #4 Sortie structurée du sous-agent (schéma JSON, `delegation`) : la requête peut devoir porter un schéma de sortie ; non spécifié avant `delegation`.

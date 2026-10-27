@@ -47,4 +47,4 @@ Tasks:
   [x] #5 Renommer @ModelProfile en @ModelSnapshot (code et tests) : le type est un instantané du profil résolu tel qu'il a été envoyé, et le nom @ModelProfile appartient à `agents` (../agents/profile.sdd).
   [?] #2 Le « mode de rejeu du raisonnement » est du texte libre ici : le domaine `agents` (mapping fournisseur et modèle,
       `agent-sessions/context-window#FR-5`) en fixera l'énumération.
-  [?] #3 `agent-sessions/session#FR-11` est une ASSUMPTION du DSD (contenu déduit de ce qu'exigerait un export fidèle).
+  [?] #3 `agent-sessions/session#FR-11` : contenu confirmé le 2026-10-27 par le développeur principal, ASSUMPTION levée dans le DSD.

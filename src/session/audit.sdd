@@ -60,5 +60,5 @@ Scenario: MCP arguments are masked
 
 Tasks:
   [x] #1 Tests puis implémentation.
-  [?] #2 @ScriptRecord::new (7 paramètres) et @McpRecord::new (6) portent un `#[expect(clippy::too_many_arguments)]` ; regrouper en structure d'entrée nommée
-      si le développeur principal préfère (nouveau type public).
+  [?] #2 @ScriptRecord::new (7 paramètres) et @McpRecord::new (6) portent un `#[expect(clippy::too_many_arguments)]` ; décidé le 2026-10-27 : regrouper en structure d'entrée nommée (nouveau type public), sans exception de lint.
+  [ ] #3 Regrouper les paramètres de @ScriptRecord::new et @McpRecord::new en structures d'entrée nommées et retirer les `#[expect]`.

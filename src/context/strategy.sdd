@@ -84,5 +84,5 @@ Tasks:
   [x] #4 Rendre les appels d'outil et le nom de l'outil de chaque résultat dans la transcription, et le Scenario « tool calls and tool names are in the transcript » (défaut relevé au rapport du lot F2).
   [ ] #6 Tests mineurs relevés : contenu multiligne, forme exacte de la ligne `reasoning: `, historique inchangé aussi sur le chemin de succès.
   [?] #5 Posé à l'implémentation : préambule `The earlier part of this conversation was compacted. Summary of that part:`, digest `Session digest: N open tasks, M memories.`, ligne `reasoning: ` avant le message de l'assistant, erreur du résumeur propagée telle quelle.
-  [?] #2 Le rôle du message de résumé (utilisateur) et son gabarit (préambule) sont posés ici ; le contenu du prompt de résumé relève du TBD de ./context.sdd.
-  [?] #3 Le résumeur reçoit du texte et non des messages structurés : l'hôte peut préférer des messages. À confirmer avec `agents`.
+  [?] #2 Le rôle du message de résumé (utilisateur) et son gabarit (préambule) sont posés ici ; le prompt de résumé par défaut (citation verbatim des demandes de l'utilisateur, surchargeable) est décidé le 2026-10-27, voir ./context.sdd.
+  [x] #3 Décidé le 2026-10-27 : le résumeur reçoit du texte et non des messages structurés.

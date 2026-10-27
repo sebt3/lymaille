@@ -65,7 +65,7 @@ Tasks:
       Ne s'écrit qu'après leurs specs.
   [?] #3 Restauration complète (`FR-3`, `AC-2`) : recompiler les fonctions exige le moteur Rhai (`scratchpad`). Cette spec
       ne livre que le diff de provenance (./notice.sdd) et le format.
-  [?] #4 TBD du DSD : forme du retour de texte vers l'hôte pendant un tour (fragments de streaming comme événements, ou flux
-      dédié). Le type @Event laisse la place d'une variante ; rien n'est décidé.
-  [?] #5 TBD du DSD : inventaire des types `Dynamic` à étiqueter au-delà de `char` et `blob` ; ./tagged_value.sdd couvre
+  [x] #4 Décidé le 2026-10-27 : le texte de streaming est émis en fragments comme événements ; la réponse complète figure dans l'événement de fin de tour.
+  [ ] #6 Ajouter à @Event la variante des fragments de streaming (spec, tests, implémentation).
+  [x] #5 Décidé le 2026-10-27 : pas d'autre type `Dynamic` étiqueté que `char` et `blob` ; ./tagged_value.sdd couvre
       booléen, entiers, flottants, chaîne, `char`, `blob`, tableau, table.

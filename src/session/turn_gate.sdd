@@ -53,4 +53,4 @@ Scenario: concurrent attempts
 
 Tasks:
   [x] #1 Tests puis implémentation.
-  [?] #2 `is_active` et la libération au `drop` récupèrent un verrou empoisonné au lieu d'échouer (seul `try_begin` rend `Poisoned`) : confirmer.
+  [?] #2 `is_active` et la libération au `drop` récupèrent un verrou empoisonné au lieu d'échouer (seul `try_begin` rend `Poisoned`) : confirmé le 2026-10-27.

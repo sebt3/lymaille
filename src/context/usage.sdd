@@ -93,4 +93,4 @@ Tasks:
       `fill_permille` avec `max` nul rend la valeur maximale ; `estimate_chars` conservé et déclaré dans `Accepts` (il consomme le paramètre `chars_per_token_milli` du tracker).
       Un tracker sert une fenêtre de contexte, donc une session : un sous-agent qui a sa propre session a son propre tracker ; le cumul par agent d'un même tracker sert l'audit.
   [x] #1 Tests puis implémentation.
-  [?] #2 Le DSD ne dit pas si le cumul est persisté : @TokenCounters de ../session/state.sdd en porte le total ; l'agrégation par agent (sous-agents) est à brancher quand `delegation` existe.
+  [x] #2 Décidé le 2026-10-27 : le total du cumul est persisté (@TokenCounters de ../session/state.sdd) ; l'agrégation par agent (sous-agents) est à brancher quand `delegation` existe.

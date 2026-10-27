@@ -79,8 +79,10 @@ raison d'être de `agent-sessions#BO-4`.
 
 ## Questions ouvertes
 
-- **TBD:** consigne au résumeur de citer textuellement les demandes de l'utilisateur, seule donnée non régénérable ; le
-  contenu du prompt de résumé reste à rédiger.
+- **Décidé:** la librairie fournit un prompt de résumé par défaut, surchargeable par l'agent ou l'hôte, qui impose au résumeur de
+  citer textuellement les demandes de l'utilisateur, seule donnée non régénérable ; le résumeur reçoit du texte et non des
+  messages structurés. Le contenu exact du prompt reste à rédiger avec le code.
+    - **Source:** user instruction, 2026-10-27
 - **TBD:** essai de bout en bout du rejeu du raisonnement, à écrire avec le code comme test d'intégration (AC-5). Mesuré côté
   serveur (`spikes/inference-probe`) : sur vLLM le champ renvoyé est `reasoning`, les deux orthographes sont acceptées en
   entrée, et `preserve_thinking` s'obtient par `chat_template_kwargs` ; sur la passerelle `smart`, Qwen3.6 renvoie
