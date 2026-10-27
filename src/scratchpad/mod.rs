@@ -8,7 +8,9 @@ mod grant;
 mod limits;
 mod render;
 
-pub use error::{ErrorClass, LimitKind, NotFoundKind, ScratchpadError, ScratchpadResult, ScriptPosition};
+pub use error::{
+    LimitKind, NotFoundKind, ScratchpadError, ScratchpadResult, ScriptErrorClass, ScriptPosition,
+};
 pub use format::register_format_functions;
 pub use grant::{CoreGroup, GrantedModule, GrantedSkill, GrantedToolset, Grants};
 pub use limits::ScratchpadLimits;

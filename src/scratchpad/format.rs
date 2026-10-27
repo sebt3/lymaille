@@ -8,115 +8,115 @@ use super::render::{full_text, json_value};
 /// Registers the formatting functions on an engine.
 ///
 /// Each function has its documentation comment and the names of its parameters, so that introspection can tell the LLM
-/// what it does: `to_text`, `to_json`, `to_json_pretty`, `to_table`, `pluck`, `get_path`, `grep_lines`, `head_lines`,
-/// `tail_lines`, `truncate` and `truncate_ends`.
+/// what it does: `fmt_text`, `fmt_json`, `fmt_json_pretty`, `fmt_table`, `fmt_pluck`, `fmt_path`, `fmt_grep`, `fmt_head`,
+/// `fmt_tail`, `fmt_truncate` and `fmt_truncate_ends`.
 pub fn register_format_functions(engine: &mut Engine) {
     register_text_functions(engine);
     register_table_functions(engine);
     register_line_functions(engine);
 }
 
-/// Registers the text and JSON functions: `to_text`, `to_json`, `to_json_pretty`.
+/// Registers the text and JSON functions: `fmt_text`, `fmt_json`, `fmt_json_pretty`.
 fn register_text_functions(engine: &mut Engine) {
     register(
         engine,
-        "to_text",
+        "fmt_text",
         &["value: Dynamic", "string"],
         "/// Text of a value: a string as it is, compact JSON for an array or a map, the Rhai text of any other value.",
         |value: Dynamic| full_text(&value),
     );
     register(
         engine,
-        "to_json",
+        "fmt_json",
         &["value: Dynamic", "string"],
         "/// Compact JSON of a value. Fails when JSON refuses the value (function, non-finite float, custom type).",
         |value: Dynamic| json_text(&value, false),
     );
     register(
         engine,
-        "to_json_pretty",
+        "fmt_json_pretty",
         &["value: Dynamic", "string"],
         "/// JSON of a value indented with two spaces. Fails when JSON refuses the value.",
         |value: Dynamic| json_text(&value, true),
     );
 }
 
-/// Registers the table and extraction functions: `to_table`, `pluck`, `get_path`.
+/// Registers the table and extraction functions: `fmt_table`, `fmt_pluck`, `fmt_path`.
 fn register_table_functions(engine: &mut Engine) {
     register(
         engine,
-        "to_table",
+        "fmt_table",
         &["rows: array", "string"],
         "/// Aligned text table of an array of maps: a header line, a separator line, one line per map, columns separated by ` | `. Columns are the union of the keys. Fails when a row is not a map.",
         |rows: Array| table(&rows, None),
     );
     register(
         engine,
-        "to_table",
+        "fmt_table",
         &["rows: array", "columns: array", "string"],
         "/// Aligned text table of an array of maps, with only the named columns, in the given order. Fails when a row is not a map or a column is not a string.",
         |rows: Array, columns: Array| table(&rows, Some(&columns)),
     );
     register(
         engine,
-        "pluck",
+        "fmt_pluck",
         &["rows: array", "key: string", "array"],
         "/// Array of the values of `key` in each map of `rows`, the unit where a row has no such key.",
         |rows: Array, key: ImmutableString| pluck(&rows, &key),
     );
     register(
         engine,
-        "get_path",
+        "fmt_path",
         &["value: Dynamic", "path: string", "Dynamic"],
         "/// Value at a dotted path such as `a.b.0.c` (numeric segments index arrays), or the unit when the path does not exist. Fails on an empty path.",
         |value: Dynamic, path: ImmutableString| get_path(&value, &path),
     );
 }
 
-/// Registers the line and truncation functions: `grep_lines`, `head_lines`, `tail_lines`, `truncate`, `truncate_ends`.
+/// Registers the line and truncation functions: `fmt_grep`, `fmt_head`, `fmt_tail`, `fmt_truncate`, `fmt_truncate_ends`.
 fn register_line_functions(engine: &mut Engine) {
     register(
         engine,
-        "grep_lines",
+        "fmt_grep",
         &["text: string", "needle: string", "string"],
         "/// Lines of `text` that contain `needle` (literal, case sensitive), joined by newlines.",
         |text: ImmutableString, needle: ImmutableString| grep_lines(&text, &needle),
     );
     register(
         engine,
-        "head_lines",
+        "fmt_head",
         &["text: string", "count: i64", "string"],
         "/// First `count` lines of `text`, joined by newlines. Fails when `count` is negative.",
         |text: ImmutableString, count: i64| {
-            count_argument("head_lines", count).map(|count| head_lines(&text, count))
+            count_argument("fmt_head", count).map(|count| head_lines(&text, count))
         },
     );
     register(
         engine,
-        "tail_lines",
+        "fmt_tail",
         &["text: string", "count: i64", "string"],
         "/// Last `count` lines of `text`, joined by newlines. Fails when `count` is negative.",
         |text: ImmutableString, count: i64| {
-            count_argument("tail_lines", count).map(|count| tail_lines(&text, count))
+            count_argument("fmt_tail", count).map(|count| tail_lines(&text, count))
         },
     );
     register(
         engine,
-        "truncate",
+        "fmt_truncate",
         &["text: string", "max_chars: i64", "string"],
         "/// `text` cut to `max_chars` characters, followed by `... [N more characters]` when it was cut. Fails when `max_chars` is negative.",
         |text: ImmutableString, max_chars: i64| {
-            count_argument("truncate", max_chars).map(|max_chars| truncate(&text, max_chars))
+            count_argument("fmt_truncate", max_chars).map(|max_chars| truncate(&text, max_chars))
         },
     );
     register(
         engine,
-        "truncate_ends",
+        "fmt_truncate_ends",
         &["text: string", "head_chars: i64", "tail_chars: i64", "string"],
         "/// Start and end of `text` around a notice of the omitted characters, when `text` is longer than both counts together; the unchanged text otherwise. Fails when a count is negative.",
         |text: ImmutableString, head: i64, tail: i64| -> Result<String, Box<EvalAltResult>> {
-            let head = count_argument("truncate_ends", head)?;
-            let tail = count_argument("truncate_ends", tail)?;
+            let head = count_argument("fmt_truncate_ends", head)?;
+            let tail = count_argument("fmt_truncate_ends", tail)?;
             Ok(truncate_ends(&text, head, tail))
         },
     );
@@ -150,14 +150,16 @@ fn count_argument(function: &str, count: i64) -> Result<usize, Box<EvalAltResult
 
 /// JSON text of a value, compact or indented.
 fn json_text(value: &Dynamic, pretty: bool) -> Result<String, Box<EvalAltResult>> {
-    let json = json_value(value)
-        .ok_or_else(|| Box::<EvalAltResult>::from("to_json: the value cannot be encoded as JSON"))?;
+    let function = if pretty { "fmt_json_pretty" } else { "fmt_json" };
+    let json = json_value(value).ok_or_else(|| {
+        Box::<EvalAltResult>::from(format!("{function}: the value cannot be encoded as JSON"))
+    })?;
     let text = if pretty {
         serde_json::to_string_pretty(&json)
     } else {
         serde_json::to_string(&json)
     };
-    text.map_err(|error| Box::<EvalAltResult>::from(format!("to_json: {error}")))
+    text.map_err(|error| Box::<EvalAltResult>::from(format!("{function}: {error}")))
 }
 
 /// Aligned table of maps. Without columns, the columns are the union of the keys in order of first appearance.
@@ -168,7 +170,7 @@ fn table(rows: &Array, columns: Option<&Array>) -> Result<String, Box<EvalAltRes
         .map(|(index, row)| {
             row.read_lock::<Map>()
                 .map(|map| map.clone())
-                .ok_or_else(|| Box::<EvalAltResult>::from(format!("to_table: row {index} is not a map")))
+                .ok_or_else(|| Box::<EvalAltResult>::from(format!("fmt_table: row {index} is not a map")))
         })
         .collect::<Result<Vec<Map>, Box<EvalAltResult>>>()?;
     let names = match columns {
@@ -180,7 +182,7 @@ fn table(rows: &Array, columns: Option<&Array>) -> Result<String, Box<EvalAltRes
                     .read_lock::<ImmutableString>()
                     .map(|name| name.to_string())
                     .ok_or_else(|| {
-                        Box::<EvalAltResult>::from(format!("to_table: column {index} is not a string"))
+                        Box::<EvalAltResult>::from(format!("fmt_table: column {index} is not a string"))
                     })
             })
             .collect::<Result<Vec<String>, Box<EvalAltResult>>>()?,
@@ -272,7 +274,7 @@ fn pluck(rows: &Array, key: &str) -> Array {
 /// Value at a dotted path. The unit when the path does not exist.
 fn get_path(value: &Dynamic, path: &str) -> Result<Dynamic, Box<EvalAltResult>> {
     if path.is_empty() {
-        return Err(Box::<EvalAltResult>::from("get_path: the path is empty"));
+        return Err(Box::<EvalAltResult>::from("fmt_path: the path is empty"));
     }
     let mut current = value.clone();
     for segment in path.split('.') {
@@ -354,7 +356,7 @@ mod tests {
 
     #[test]
     fn structured_object_as_json() {
-        let result = engine().eval::<String>("let v = #{pods: [#{name: \"a\"}]}; to_json(v)");
+        let result = engine().eval::<String>("let v = #{pods: [#{name: \"a\"}]}; fmt_json(v)");
         assert_eq!(
             result.ok().as_deref(),
             Some(r#"{"pods":[{"name":"a"}]}"#),
@@ -364,7 +366,7 @@ mod tests {
 
     #[test]
     fn pretty_json() {
-        let result = engine().eval::<String>("to_json_pretty(#{a: 1})");
+        let result = engine().eval::<String>("fmt_json_pretty(#{a: 1})");
         assert_eq!(
             result.ok().as_deref(),
             Some("{\n  \"a\": 1\n}"),
@@ -374,7 +376,7 @@ mod tests {
 
     #[test]
     fn list_of_maps_as_aligned_table() {
-        let script = "to_table([#{name: \"api\", ready: 2}, #{name: \"db\", ready: 10}])";
+        let script = "fmt_table([#{name: \"api\", ready: 2}, #{name: \"db\", ready: 10}])";
         let result = engine().eval::<String>(script);
         assert_eq!(
             result.ok().as_deref(),
@@ -385,7 +387,7 @@ mod tests {
 
     #[test]
     fn table_with_chosen_columns() {
-        let script = "to_table([#{name: \"api\", ready: 2}, #{name: \"db\", ready: 10}], [\"ready\"])";
+        let script = "fmt_table([#{name: \"api\", ready: 2}, #{name: \"db\", ready: 10}], [\"ready\"])";
         let result = engine().eval::<String>(script);
         assert_eq!(
             result.ok().as_deref(),
@@ -396,7 +398,7 @@ mod tests {
 
     #[test]
     fn missing_keys_and_newlines_in_cells() {
-        let script = "to_table([#{a: \"x\\ny\"}, #{b: 1}])";
+        let script = "fmt_table([#{a: \"x\\ny\"}, #{b: 1}])";
         let result = engine().eval::<String>(script);
         assert_eq!(
             result.ok().as_deref(),
@@ -407,7 +409,7 @@ mod tests {
 
     #[test]
     fn table_of_non_maps_refused() {
-        let result = engine().eval::<String>("to_table([#{a: 1}, 5])");
+        let result = engine().eval::<String>("fmt_table([#{a: 1}, 5])");
         match result {
             Err(error) => assert!(
                 error.to_string().contains('1'),
@@ -419,8 +421,8 @@ mod tests {
 
     #[test]
     fn empty_table() {
-        let without = engine().eval::<String>("to_table([])");
-        let with = engine().eval::<String>("to_table([], [\"a\"])");
+        let without = engine().eval::<String>("fmt_table([])");
+        let with = engine().eval::<String>("fmt_table([], [\"a\"])");
         assert_eq!(without.ok().as_deref(), Some(""), "empty without columns");
         assert_eq!(
             with.ok().as_deref(),
@@ -431,7 +433,7 @@ mod tests {
 
     #[test]
     fn table_width_counts_characters() {
-        let script = "to_table([#{c: \"\u{e9}\u{e9}\", d: 1}, #{c: \"abcd\", d: 2}])";
+        let script = "fmt_table([#{c: \"\u{e9}\u{e9}\", d: 1}, #{c: \"abcd\", d: 2}])";
         let result = engine().eval::<String>(script);
         assert_eq!(
             result.ok().as_deref(),
@@ -443,7 +445,7 @@ mod tests {
     #[test]
     fn extraction() {
         let script = "let rows = [#{n: \"a\", v: #{x: 1}}, #{n: \"b\"}]; \
-                      [pluck(rows, \"n\"), get_path(rows[0], \"v.x\"), get_path(rows[1], \"v.x\")]";
+                      [fmt_pluck(rows, \"n\"), fmt_path(rows[0], \"v.x\"), fmt_path(rows[1], \"v.x\")]";
         let values = match engine().eval::<rhai::Array>(script) {
             Ok(values) => values,
             Err(error) => panic!("the extraction must succeed: {error}"),
@@ -457,7 +459,7 @@ mod tests {
         assert_eq!(
             names,
             vec!["a".to_owned(), "b".to_owned()],
-            "pluck returns the names"
+            "fmt_pluck returns the names"
         );
         assert_eq!(
             values.get(1).map(ToString::to_string),
@@ -472,16 +474,16 @@ mod tests {
 
     #[test]
     fn path_through_an_array_index() {
-        let result = engine().eval::<i64>("get_path(#{items: [#{id: 7}]}, \"items.0.id\")");
+        let result = engine().eval::<i64>("fmt_path(#{items: [#{id: 7}]}, \"items.0.id\")");
         assert_eq!(result.ok(), Some(7), "index 0 then key id");
     }
 
     #[test]
     fn line_helpers() {
         let text = "one\nerr two\nthree\nerr four\nfive";
-        let script_grep = engine().eval::<String>(&format!("grep_lines({text:?}, \"err\")"));
-        let script_head = engine().eval::<String>(&format!("head_lines({text:?}, 2)"));
-        let script_tail = engine().eval::<String>(&format!("tail_lines({text:?}, 2)"));
+        let script_grep = engine().eval::<String>(&format!("fmt_grep({text:?}, \"err\")"));
+        let script_head = engine().eval::<String>(&format!("fmt_head({text:?}, 2)"));
+        let script_tail = engine().eval::<String>(&format!("fmt_tail({text:?}, 2)"));
         assert_eq!(
             script_grep.ok().as_deref(),
             Some("err two\nerr four"),
@@ -502,13 +504,13 @@ mod tests {
     #[test]
     fn truncate_keeps_the_start() {
         let long = "a".repeat(100);
-        let truncated = engine().eval::<String>(&format!("truncate({long:?}, 10)"));
+        let truncated = engine().eval::<String>(&format!("fmt_truncate({long:?}, 10)"));
         assert_eq!(
             truncated.ok(),
             Some(format!("{}... [90 more characters]", "a".repeat(10))),
             "first 10 characters and the count"
         );
-        let short = engine().eval::<String>("truncate(\"0123456789\", 10)");
+        let short = engine().eval::<String>("fmt_truncate(\"0123456789\", 10)");
         assert_eq!(
             short.ok().as_deref(),
             Some("0123456789"),
@@ -520,7 +522,7 @@ mod tests {
     fn truncate_ends_keeps_both_ends() {
         let text = format!("{}{}", "h".repeat(20), "m".repeat(950));
         let text = format!("{text}{}", "t".repeat(30));
-        let result = engine().eval::<String>(&format!("truncate_ends({text:?}, 20, 30)"));
+        let result = engine().eval::<String>(&format!("fmt_truncate_ends({text:?}, 20, 30)"));
         match result {
             Ok(value) => {
                 assert!(
@@ -542,7 +544,7 @@ mod tests {
 
     #[test]
     fn negative_counts_refused() {
-        let result = engine().eval::<String>("head_lines(\"a\\nb\", -1)");
+        let result = engine().eval::<String>("fmt_head(\"a\\nb\", -1)");
         assert!(result.is_err(), "a negative count is a script error");
     }
 
@@ -560,17 +562,17 @@ mod tests {
             .cloned()
             .unwrap_or_default();
         for name in [
-            "to_text",
-            "to_json",
-            "to_json_pretty",
-            "to_table",
-            "pluck",
-            "get_path",
-            "grep_lines",
-            "head_lines",
-            "tail_lines",
-            "truncate",
-            "truncate_ends",
+            "fmt_text",
+            "fmt_json",
+            "fmt_json_pretty",
+            "fmt_table",
+            "fmt_pluck",
+            "fmt_path",
+            "fmt_grep",
+            "fmt_head",
+            "fmt_tail",
+            "fmt_truncate",
+            "fmt_truncate_ends",
         ] {
             let entries: Vec<&serde_json::Value> = functions
                 .iter()
@@ -596,20 +598,20 @@ mod tests {
     fn format_functions_do_not_panic() {
         let engine = engine();
         let scripts = [
-            "to_text(\"\")",
-            "to_table([])",
-            "to_table([], [])",
-            "pluck([], \"\")",
-            "get_path(#{}, \"a\")",
-            "grep_lines(\"\", \"\")",
-            "head_lines(\"\", 0)",
-            "tail_lines(\"\", 0)",
-            "head_lines(\"abc\", 9223372036854775807)",
-            "tail_lines(\"abc\", 9223372036854775807)",
-            "truncate(\"\", 0)",
-            "truncate(\"abc\", 9223372036854775807)",
-            "truncate_ends(\"\", 0, 0)",
-            "truncate_ends(\"abc\", 9223372036854775807, 9223372036854775807)",
+            "fmt_text(\"\")",
+            "fmt_table([])",
+            "fmt_table([], [])",
+            "fmt_pluck([], \"\")",
+            "fmt_path(#{}, \"a\")",
+            "fmt_grep(\"\", \"\")",
+            "fmt_head(\"\", 0)",
+            "fmt_tail(\"\", 0)",
+            "fmt_head(\"abc\", 9223372036854775807)",
+            "fmt_tail(\"abc\", 9223372036854775807)",
+            "fmt_truncate(\"\", 0)",
+            "fmt_truncate(\"abc\", 9223372036854775807)",
+            "fmt_truncate_ends(\"\", 0, 0)",
+            "fmt_truncate_ends(\"abc\", 9223372036854775807, 9223372036854775807)",
         ];
         for script in scripts {
             // Either a value or a script error: the call must return, never panic.

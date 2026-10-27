@@ -54,7 +54,7 @@ Accepts:
   @Scratchpad::snapshot: aucun argument.
 
 Returns:
-  @RunOutcome (`#[non_exhaustive]`, accesseurs en lecture seule) : `text` (le résultat du tool pour le LLM, déjà plafonné et masqué), `status` (@RunStatus : `Ok`, `Failed` avec une @ErrorClass, ou `Cancelled`), `truncated`, les avertissements de persistance (@PersistWarning) et l'enregistrement d'audit (@ScriptRecord, ../session/audit.sdd). La boucle de tour émet l'événement de script à partir de cet enregistrement ; ce fichier n'émet rien.
+  @RunOutcome (`#[non_exhaustive]`, accesseurs en lecture seule) : `text` (le résultat du tool pour le LLM, déjà plafonné et masqué), `status` (@RunStatus : `Ok`, `Failed` avec une @ScriptErrorClass, ou `Cancelled`), `truncated`, les avertissements de persistance (@PersistWarning) et l'enregistrement d'audit (@ScriptRecord, ../session/audit.sdd). La boucle de tour émet l'événement de script à partir de cet enregistrement ; ce fichier n'émet rien.
   @Scratchpad::snapshot: un @PadSnapshot : variables persistables (table ordonnée nom vers @TaggedValue), sources de fonctions (clé vers texte) et avertissements des variables exclues. C'est ce que la boucle de tour range dans @SessionState.
 
 Must:

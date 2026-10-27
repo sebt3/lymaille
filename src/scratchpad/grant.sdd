@@ -78,7 +78,7 @@ Scenario: debug hides the module content
   Then only the name appears
 
 Tasks:
-  [ ] #1 Tests puis implémentation.
+  [x] #1 Tests puis implémentation.
   [?] #2 Posé : les types d'entrée sont définis ici, dans le scratchpad, plutôt que de dépendre de `toolsets` et `modules` non encore spécifiés. Quand ces domaines seront écrits, ils produiront ces types (ou une conversion vers eux) ; si leur forme diverge, c'est cette spec qui change, pas l'inverse.
   [?] #3 La liste des mots réservés de Rhai est celle de la version épinglée : un test vérifie le refus par l'analyseur de Rhai (un module nommé d'un mot réservé ne compile pas dans `nom::f()`) plutôt qu'une liste figée dans le code.
   [?] #4 Posé : le rattachement d'un skill à un toolset (`toolset`) n'est pas validé contre @Grants::with_toolset ; l'introspection affiche ce que l'hôte fournit.

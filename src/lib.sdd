@@ -19,8 +19,8 @@ Must:
     dans son `Exposes`, rien d'autre.
   Porter un commentaire de crate en anglais (`missing_crate_level_docs`) renvoyant au domaine.
   Ne contenir ni fonction ni type : tout comportement vit dans un fichier à spec propre.
+  Décision du 2026-10-27 (développeur principal) : le type d'erreur du scratchpad se nomme `ScriptErrorClass` et est réexporté
+    sous ce nom, sans alias ; `ErrorClass` à la racine reste celui d'`agents`, inchangé.
 
 Tasks:
   [ ] #1 Ajouter les déclarations `mod` et les `pub use` au fil des specs enfants livrées.
-  [?] #2 `ErrorClass` du scratchpad est réexporté sous le nom `ScratchpadErrorClass` : `ErrorClass` est déjà celui de `agents`
-      à la racine (`pub use agents::{..., ErrorClass, ...}`). À trancher : renommer un des deux types, ou garder l'alias.

@@ -21,9 +21,9 @@ pub use context::{
     UsageTracker, estimate_tokens, replayed_reasoning,
 };
 pub use scratchpad::{
-    CoreGroup, ErrorClass as ScratchpadErrorClass, GrantedModule, GrantedSkill, GrantedToolset, Grants,
-    LimitKind, NotFoundKind, Rendered, ScratchpadError, ScratchpadLimits, ScratchpadResult, ScriptPosition,
-    full_text, register_format_functions, render_value, truncate_middle,
+    CoreGroup, GrantedModule, GrantedSkill, GrantedToolset, Grants, LimitKind, NotFoundKind, Rendered,
+    ScratchpadError, ScratchpadLimits, ScratchpadResult, ScriptErrorClass, ScriptPosition, full_text,
+    register_format_functions, render_value, truncate_middle,
 };
 pub use session::{
     AgentRef, Backoff, BoundaryKind, CancelHandle, Event, EventKind, EventSink, FormatVersion, History,

@@ -96,7 +96,7 @@ impl std::fmt::Display for LimitKind {
 /// Class of a scratchpad error, for the quality signals and the audit: no text is kept with it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum ErrorClass {
+pub enum ScriptErrorClass {
     /// The script does not compile.
     Syntax,
     /// The script fails while it runs.
@@ -202,15 +202,15 @@ impl ScratchpadError {
 
     /// Class of the error.
     #[must_use]
-    pub const fn class(&self) -> ErrorClass {
+    pub const fn class(&self) -> ScriptErrorClass {
         match self {
-            Self::Syntax { .. } => ErrorClass::Syntax,
-            Self::Runtime { .. } => ErrorClass::Runtime,
-            Self::NotFound { .. } => ErrorClass::NotFound,
-            Self::Limit { .. } => ErrorClass::Limit,
-            Self::Cancelled => ErrorClass::Cancelled,
-            Self::Engine { .. } => ErrorClass::Engine,
-            Self::Internal { .. } => ErrorClass::Internal,
+            Self::Syntax { .. } => ScriptErrorClass::Syntax,
+            Self::Runtime { .. } => ScriptErrorClass::Runtime,
+            Self::NotFound { .. } => ScriptErrorClass::NotFound,
+            Self::Limit { .. } => ScriptErrorClass::Limit,
+            Self::Cancelled => ScriptErrorClass::Cancelled,
+            Self::Engine { .. } => ScriptErrorClass::Engine,
+            Self::Internal { .. } => ScriptErrorClass::Internal,
         }
     }
 
@@ -394,7 +394,7 @@ fn leaf_message(error: &EvalAltResult) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ErrorClass, LimitKind, NotFoundKind, ScratchpadError, ScriptPosition};
+    use super::{LimitKind, NotFoundKind, ScratchpadError, ScriptErrorClass, ScriptPosition};
     use rhai::{Dynamic, Engine, EvalAltResult, FuncRegistration, Module, ParseErrorType, Position};
 
     fn position() -> Option<ScriptPosition> {
@@ -528,7 +528,7 @@ mod tests {
             panic!("expected a syntax error with a position on line 1, got {classified:?}");
         };
         assert_eq!(position.line(), 1, "the error is on line 1");
-        assert_eq!(classified.class(), ErrorClass::Syntax, "the class");
+        assert_eq!(classified.class(), ScriptErrorClass::Syntax, "the class");
     }
 
     #[test]
@@ -629,7 +629,7 @@ mod tests {
             ScratchpadError::Cancelled,
             "the termination is a cancellation"
         );
-        assert_eq!(classified.class(), ErrorClass::Cancelled, "the class");
+        assert_eq!(classified.class(), ScriptErrorClass::Cancelled, "the class");
     }
 
     #[test]
@@ -681,30 +681,30 @@ mod tests {
 
     #[test]
     fn each_listed_rhai_variant_is_classified() {
-        let cases: [(EvalAltResult, ErrorClass); 6] = [
+        let cases: [(EvalAltResult, ScriptErrorClass); 6] = [
             (
                 EvalAltResult::ErrorParsing(ParseErrorType::UnexpectedEOF, Position::new(1, 9)),
-                ErrorClass::Syntax,
+                ScriptErrorClass::Syntax,
             ),
             (
                 EvalAltResult::ErrorParsing(ParseErrorType::ExprTooDeep, Position::new(1, 2)),
-                ErrorClass::Limit,
+                ScriptErrorClass::Limit,
             ),
             (
                 EvalAltResult::ErrorDataTooLarge("Size of object map".to_owned(), Position::new(1, 2)),
-                ErrorClass::Limit,
+                ScriptErrorClass::Limit,
             ),
             (
                 EvalAltResult::ErrorTooManyOperations(Position::new(1, 2)),
-                ErrorClass::Limit,
+                ScriptErrorClass::Limit,
             ),
             (
                 EvalAltResult::ErrorStackOverflow(Position::new(1, 2)),
-                ErrorClass::Limit,
+                ScriptErrorClass::Limit,
             ),
             (
                 EvalAltResult::ErrorArithmetic("division by zero".to_owned(), Position::new(1, 2)),
-                ErrorClass::Runtime,
+                ScriptErrorClass::Runtime,
             ),
         ];
         for (error, expected) in cases {

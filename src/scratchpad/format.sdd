@@ -21,27 +21,27 @@ Exposes:
 
 Accepts:
   @register_format_functions: une référence mutable vers le @rhai::Engine à compléter. Enregistre, avec leur nom de paramètres et leur commentaire de documentation (visibles par l'introspection de ./introspect.sdd), les fonctions Rhai suivantes :
-    `to_text(value)` ; `to_json(value)` ; `to_json_pretty(value)` ;
-    `to_table(rows)` et `to_table(rows, columns)` où `rows` est un tableau de tables et `columns` un tableau de noms de colonnes ;
-    `pluck(rows, key)` : le tableau des valeurs de la clé `key` dans chaque table ;
-    `get_path(value, path)` : la valeur à un chemin pointé (`a.b.0.c`, segments numériques = indices de tableau) ;
-    `grep_lines(text, needle)`, `head_lines(text, count)`, `tail_lines(text, count)` ;
-    `truncate(text, max_chars)` et `truncate_ends(text, head_chars, tail_chars)`.
+    `fmt_text(value)` ; `fmt_json(value)` ; `fmt_json_pretty(value)` ;
+    `fmt_table(rows)` et `fmt_table(rows, columns)` où `rows` est un tableau de tables et `columns` un tableau de noms de colonnes ;
+    `fmt_pluck(rows, key)` : le tableau des valeurs de la clé `key` dans chaque table ;
+    `fmt_path(value, path)` : la valeur à un chemin pointé (`a.b.0.c`, segments numériques = indices de tableau) ;
+    `fmt_grep(text, needle)`, `fmt_head(text, count)`, `fmt_tail(text, count)` ;
+    `fmt_truncate(text, max_chars)` et `fmt_truncate_ends(text, head_chars, tail_chars)`.
 
 Returns:
-  `to_text` : la même représentation que @full_text de ./render.sdd (une chaîne telle quelle, JSON compact pour le reste). `to_json` : le JSON compact de la valeur. `to_json_pretty` : le JSON indenté de deux espaces.
-  `to_table` : une chaîne de lignes séparées par `\n` : la ligne d'en-tête (noms de colonnes), une ligne de séparation, puis une ligne par table, sans `\n` final.
-  `pluck` : un tableau, avec l'unité `()` pour chaque ligne qui n'a pas la clé. `get_path` : la valeur trouvée, ou l'unité `()` si le chemin n'existe pas.
-  `grep_lines` : les lignes du texte qui contiennent `needle` (recherche littérale, sensible à la casse), jointes par `\n`. `head_lines` et `tail_lines` : les `count` premières ou dernières lignes.
-  `truncate` : le texte coupé à `max_chars` caractères, suivi de `... [N more characters]` quand il a été coupé. `truncate_ends` : le début de `head_chars` caractères, l'avis `[... N characters omitted ...]` entouré de retours à la ligne, et la fin de `tail_chars` caractères quand le texte dépasse `head_chars + tail_chars` ; sinon le texte inchangé.
+  `fmt_text` : la même représentation que @full_text de ./render.sdd (une chaîne telle quelle, JSON compact pour le reste). `fmt_json` : le JSON compact de la valeur. `fmt_json_pretty` : le JSON indenté de deux espaces.
+  `fmt_table` : une chaîne de lignes séparées par `\n` : la ligne d'en-tête (noms de colonnes), une ligne de séparation, puis une ligne par table, sans `\n` final.
+  `fmt_pluck` : un tableau, avec l'unité `()` pour chaque ligne qui n'a pas la clé. `fmt_path` : la valeur trouvée, ou l'unité `()` si le chemin n'existe pas.
+  `fmt_grep` : les lignes du texte qui contiennent `needle` (recherche littérale, sensible à la casse), jointes par `\n`. `fmt_head` et `fmt_tail` : les `count` premières ou dernières lignes.
+  `fmt_truncate` : le texte coupé à `max_chars` caractères, suivi de `... [N more characters]` quand il a été coupé. `fmt_truncate_ends` : le début de `head_chars` caractères, l'avis `[... N characters omitted ...]` entouré de retours à la ligne, et la fin de `tail_chars` caractères quand le texte dépasse `head_chars + tail_chars` ; sinon le texte inchangé.
 
 Raises:
-  Une erreur de script (erreur d'exécution de Rhai, rendue au LLM avec la position de l'appel) : `to_table` dont `rows` n'est pas un tableau de tables (le message nomme l'indice de la première ligne fautive) ; `to_json`, `to_json_pretty` sur une valeur que la sérialisation JSON refuse (fonction, valeur non finie) ; `get_path` avec un chemin vide ; `head_lines`, `tail_lines`, `truncate`, `truncate_ends` avec un nombre négatif.
+  Une erreur de script (erreur d'exécution de Rhai, rendue au LLM avec la position de l'appel) : `fmt_table` dont `rows` n'est pas un tableau de tables (le message nomme l'indice de la première ligne fautive) ; `fmt_json`, `fmt_json_pretty` sur une valeur que la sérialisation JSON refuse (fonction, valeur non finie) ; `fmt_path` avec un chemin vide ; `fmt_head`, `fmt_tail`, `fmt_truncate`, `fmt_truncate_ends` avec un nombre négatif.
 
 Must:
   Les fonctions de format sont pures : aucune E/S, aucune horloge, aucun accès à la session, aucun état. Elles sont toujours accordées (`agent-sessions/scratchpad#FR-8`) et ne se retirent pas par la définition d'agent.
   Chaque fonction est enregistrée avec son commentaire de documentation (anglais, ce qu'elle fait, ses erreurs, sa valeur rendue) et le nom de chaque paramètre, avec les types dans le vocabulaire du script (`string`, `array`, `map`, `i64`, `Dynamic`), pour que l'introspection apprenne au LLM à quoi elles servent.
-  Le tableau de `to_table` : colonnes séparées par ` | ` ; chaque colonne est remplie à droite d'espaces jusqu'à la largeur de sa cellule la plus large (largeur comptée en caractères Unicode ; aucune largeur d'affichage d'écriture asiatique), sauf la dernière colonne, non remplie ; la ligne de séparation est faite de `-` sous chaque colonne, jointe par `-+-`. Une cellule chaîne est rendue telle quelle, toute autre valeur en JSON compact ; un retour à la ligne dans une cellule est remplacé par les deux caractères `\n`. Une clé absente d'une ligne donne une cellule vide.
+  Le tableau de `fmt_table` : colonnes séparées par ` | ` ; chaque colonne est remplie à droite d'espaces jusqu'à la largeur de sa cellule la plus large (largeur comptée en caractères Unicode ; aucune largeur d'affichage d'écriture asiatique), sauf la dernière colonne, non remplie ; la ligne de séparation est faite de `-` sous chaque colonne, jointe par `-+-`. Une cellule chaîne est rendue telle quelle, toute autre valeur en JSON compact ; un retour à la ligne dans une cellule est remplacé par les deux caractères `\n`. Une clé absente d'une ligne donne une cellule vide.
   Sans `columns`, les colonnes sont l'union des clés des lignes, dans l'ordre de première apparition ; avec `columns`, seules ces colonnes sont rendues, dans cet ordre. Un tableau vide rend la chaîne vide (sans `columns`) ou l'en-tête et la séparation seuls (avec `columns`).
   Les comptes de caractères et les coupes se font en valeurs scalaires Unicode ; une coupe ne sépare jamais un caractère multi-octets.
   Aucune fonction ne panique : arguments hors bornes, indices énormes ou textes vides sont des cas définis (résultat vide ou erreur de script).
@@ -49,72 +49,72 @@ Must:
 
 Scenario: structured object as JSON
   Given a script returning the map `#{pods: [#{name: "a"}]}`
-  When it calls `to_json` on it
+  When it calls `fmt_json` on it
   Then the result is the compact JSON `{"pods":[{"name":"a"}]}`
 
 Scenario: pretty JSON
   Given the map `#{a: 1}`
-  When `to_json_pretty` is called
+  When `fmt_json_pretty` is called
   Then the result is the JSON on three lines with a two-space indent
 
 Scenario: list of maps as aligned table
   Given `[#{name: "api", ready: 2}, #{name: "db", ready: 10}]`
-  When `to_table` is called
+  When `fmt_table` is called
   Then the result is the four lines `name | ready`, `-----+------`, `api  | 2`, `db   | 10`
 
 Scenario: table with chosen columns
   Given the same rows and the columns `["ready"]`
-  When `to_table` is called
+  When `fmt_table` is called
   Then only the `ready` column appears
 
 Scenario: missing keys and newlines in cells
   Given the rows `[#{a: "x\ny"}, #{b: 1}]`
-  When `to_table` is called
+  When `fmt_table` is called
   Then the first cell shows `x\ny` on one line, the missing cells are empty, and the columns are `a` and `b`
 
 Scenario: table of non maps refused
   Given the array `[#{a: 1}, 5]`
-  When `to_table` is called
+  When `fmt_table` is called
   Then it fails with an error that names index 1
 
 Scenario: empty table
   Given an empty array
-  When `to_table` is called without then with columns `["a"]`
+  When `fmt_table` is called without then with columns `["a"]`
   Then the results are the empty string and the two header lines
 
 Scenario: table width counts characters
   Given a cell `éé` and a cell `abcd` in the same column
-  When `to_table` is called
+  When `fmt_table` is called
   Then the short cell is padded to four characters, not to its byte length
 
 Scenario: extraction
   Given `[#{n: "a", v: #{x: 1}}, #{n: "b"}]`
-  When `pluck(rows, "n")` and `get_path(rows[0], "v.x")` and `get_path(rows[1], "v.x")` are called
+  When `fmt_pluck(rows, "n")` and `fmt_path(rows[0], "v.x")` and `fmt_path(rows[1], "v.x")` are called
   Then the results are `["a", "b"]`, `1` and `()`
 
 Scenario: path through an array index
   Given `#{items: [#{id: 7}]}`
-  When `get_path(value, "items.0.id")` is called
+  When `fmt_path(value, "items.0.id")` is called
   Then the result is `7`
 
 Scenario: line helpers
   Given a text of five lines, two of which contain `err`
-  When `grep_lines(text, "err")`, `head_lines(text, 2)` and `tail_lines(text, 2)` are called
+  When `fmt_grep(text, "err")`, `fmt_head(text, 2)` and `fmt_tail(text, 2)` are called
   Then they return the two matching lines, the first two lines and the last two lines
 
 Scenario: truncate keeps the start
   Given a text of 100 characters
-  When `truncate(text, 10)` is called
+  When `fmt_truncate(text, 10)` is called
   Then the result is the first 10 characters followed by `... [90 more characters]`
   And a text of 10 characters is returned unchanged
 
 Scenario: truncate_ends keeps both ends
   Given a text of 1000 characters
-  When `truncate_ends(text, 20, 30)` is called
+  When `fmt_truncate_ends(text, 20, 30)` is called
   Then the result starts with the first 20 characters, ends with the last 30 and mentions 950 omitted characters
 
 Scenario: negative counts refused
-  Given a call `head_lines(text, -1)`
+  Given a call `fmt_head(text, -1)`
   When evaluated
   Then it fails with an error rendered to the script
 
@@ -130,12 +130,12 @@ Scenario: format functions do not panic
 
 Tasks:
   [ ] #1 Tests puis implémentation.
-  [?] #2 Posé : liste des fonctions et noms (`to_text`, `to_json`, `to_json_pretty`, `to_table`, `pluck`, `get_path`, `grep_lines`, `head_lines`, `tail_lines`, `truncate`, `truncate_ends`). `agent-sessions/scratchpad#FR-8` en donne le genre (texte, JSON, tableau aligné, extraction, troncature début et fin) sans noms : ils sont à confirmer avec l'auteur du skill intégré (`toolsets`).
+  [?] #2 Posé : liste des fonctions et noms (`fmt_text`, `fmt_json`, `fmt_json_pretty`, `fmt_table`, `fmt_pluck`, `fmt_path`, `fmt_grep`, `fmt_head`, `fmt_tail`, `fmt_truncate`, `fmt_truncate_ends`), préfixe `fmt_` décidé le 2026-10-27. `agent-sessions/scratchpad#FR-8` en donne le genre (texte, JSON, tableau aligné, extraction, troncature début et fin) sans noms : la liste reste à confirmer avec l'auteur du skill intégré (`toolsets`).
   [?] #3 Posé : pas de format YAML ni Markdown : `vynil-core` offre `yaml_encode` dans ses modules toujours disponibles, mais ce module n'est pas accordé par le scratchpad (seuls le groupe pur et les groupes accordés le sont). À rouvrir si un besoin de YAML apparaît.
   [?] #4 Posé : la largeur d'une cellule se compte en caractères, pas en cellules d'affichage (écritures asiatiques, emoji) ; le tableau est destiné à un LLM, non à un terminal.
-  [?] #5 Collision de nom : Rhai définit déjà `to_json` (méthode du paquet standard sur les tables, présente dans `Engine::new()`).
-      L'enregistrement de `to_json(value)` s'ajoute à cette fonction : `to_json(map)` peut résoudre vers celle de Rhai. Le test
-      `structured_object_as_json` passe donc sans l'implémentation (non discriminant). À trancher : renommer, ou accepter la surcharge.
-  [?] #6 `to_table` : sans clé, ou avec `columns` vide, la chaîne est vide (et non l'en-tête seul) ; une colonne qui n'est pas une chaîne
+  [x] #5 Renommage `fmt_*` (décision du développeur principal, 2026-10-27) : collision avec `to_json`, méthode du paquet standard de
+      Rhai sur les tables (présente dans `Engine::new()`), levée en préfixant toutes les fonctions de ce module par `fmt_`. Le test
+      `structured_object_as_json` devient discriminant. Aucune fonction `fmt_*` n'existe dans Rhai 1.27.0 ni dans `vynil-core` 0.9.0.
+  [?] #6 `fmt_table` : sans clé, ou avec `columns` vide, la chaîne est vide (et non l'en-tête seul) ; une colonne qui n'est pas une chaîne
       est refusée (message nommant l'indice) ; une cellule non chaîne passe par le texte de `full_text` (le `()` et le blob ne sont pas
       du JSON strict).

@@ -424,6 +424,8 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
   livré partiellement, hors idées non finalisées.
     - **Source:** user instruction, 2026-10-27
 
+- **Décidé:** `syn` figure dans `allowed-duplicate-crates` de `clippy.toml` (doublon inhérent à `rhai_codegen`, syn 2, contre syn 3 pour `serde_derive`, `thiserror` et `tokio-macros`), décision du développeur principal du 2026-10-27 ; `rhai` est déclaré sans features par défaut (retire le doublon `getrandom`).
+
 - **TBD:** compléter le harnais : `cargo-deny` et `cargo-mutants` sont installés sur la machine de développement (2026-10-26) ;
   reste à écrire `deny.toml` (licences, avis de sécurité, sources) et `scripts/mutants`, déclarer les doublons de versions inévitables dans
   `allowed-duplicate-crates` avec une raison, et reporter dans le dépôt le mécanisme de canaris de

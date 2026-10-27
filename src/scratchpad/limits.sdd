@@ -98,7 +98,7 @@ Scenario: limits are per engine
   Then it fails on the first and succeeds on the second
 
 Tasks:
-  [ ] #1 Tests puis implémentation.
+  [x] #1 Tests puis implémentation.
   [ ] #2 Test de l'AC-3 (« un script de plus de deux minutes n'est pas interrompu ») : durée réelle trop longue pour la batterie. Il se vérifie par l'absence de limite d'opérations et par les deux Scenarios « no operation or time limit » ci-dessus ; un test marqué long (`#[ignore]`, lancé hors CI) peut jouer les deux minutes réelles avec une fonction native qui attend.
   [?] #3 Surcharge « par définition d'agent » (`agent-sessions/scratchpad#FR-4`) : @SandboxLimits (domaine `agents`, ../agents/definition.sdd) ne porte aujourd'hui que le délai de script et le plafond de rendu. Pour surcharger les trois plafonds de mémoire, @SandboxLimits doit gagner trois champs optionnels (chaîne, tableau, table), avec montée de l'empreinte de définition (`fingerprint`). À trancher par le développeur principal. Recommandation : étendre @SandboxLimits (champs `Option`, absents = défauts), sans quoi FR-4 n'est pas tenue.
   [?] #4 Posé : « 16 Mio » est lu comme 16 mébioctets (`16 * 1024 * 1024`) d'octets UTF-8, la taille de chaîne de Rhai étant comptée en octets ; un LLM qui construit une chaîne multi-octets atteint donc le plafond avant 16 millions de caractères. Écart sans conséquence pour le garde-fou.

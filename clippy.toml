@@ -20,6 +20,10 @@ allow-dbg-in-tests = true
 
 doc-valid-idents = ["Rhai", "MCP", "SpecDD", "Handlebars", "OpenAI", "..", "vLLM", "llama.cpp"]
 
+# `syn` appears twice in the graph, inherently: `rhai_codegen` (a dependency of `rhai` 1.27.0) uses `syn` 2, while
+# `serde_derive` and `thiserror` use `syn` 3. Not a mistake to fix in this crate. See `dsd/agent-sessions.md`, Open Issues.
+allowed-duplicate-crates = ["syn"]
+
 # Architecture constraints of the design, enforced by the compiler.
 # Each exception is a `#[expect(clippy::disallowed_methods, reason = "...")]` at the single permitted place.
 disallowed-methods = [
