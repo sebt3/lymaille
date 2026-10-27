@@ -28,16 +28,51 @@ pub enum AgentKind {
 pub struct SandboxLimits {
     script_timeout: Duration,
     render_cap_chars: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    max_string_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    max_array_len: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    max_map_len: Option<u64>,
 }
 
 impl SandboxLimits {
-    /// Builds the limits from the script delay and the render cap in characters.
+    /// Builds the limits from the script delay and the render cap in characters. The memory limits start absent.
     #[must_use]
     pub const fn new(script_timeout: Duration, render_cap_chars: u64) -> Self {
         Self {
             script_timeout,
             render_cap_chars,
+            max_string_bytes: None,
+            max_array_len: None,
+            max_map_len: None,
         }
+    }
+
+    /// Sets the string limit, in bytes. Zero is accepted here and refused by [`AgentDefinition::validate`].
+    #[must_use]
+    pub const fn with_max_string_bytes(mut self, bytes: u64) -> Self {
+        self.max_string_bytes = Some(bytes);
+        self
+    }
+
+    /// Sets the array limit, in elements. Zero is accepted here and refused by [`AgentDefinition::validate`].
+    #[must_use]
+    pub const fn with_max_array_len(mut self, len: u64) -> Self {
+        self.max_array_len = Some(len);
+        self
+    }
+
+    /// Sets the map limit, in entries. Zero is accepted here and refused by [`AgentDefinition::validate`].
+    #[must_use]
+    pub const fn with_max_map_len(mut self, len: u64) -> Self {
+        self.max_map_len = Some(len);
+        self
+    }
+
+    /// Tells whether one of the three memory limits is set to zero, which the definition refuses.
+    fn has_zero_memory_limit(&self) -> bool {
+        [self.max_string_bytes, self.max_array_len, self.max_map_len].contains(&Some(0))
     }
 
     /// Returns the delay granted to a script.
@@ -50,6 +85,24 @@ impl SandboxLimits {
     #[must_use]
     pub const fn render_cap_chars(&self) -> u64 {
         self.render_cap_chars
+    }
+
+    /// Returns the string limit in bytes, if set.
+    #[must_use]
+    pub const fn max_string_bytes(&self) -> Option<u64> {
+        self.max_string_bytes
+    }
+
+    /// Returns the array limit in elements, if set.
+    #[must_use]
+    pub const fn max_array_len(&self) -> Option<u64> {
+        self.max_array_len
+    }
+
+    /// Returns the map limit in entries, if set.
+    #[must_use]
+    pub const fn max_map_len(&self) -> Option<u64> {
+        self.max_map_len
     }
 }
 
@@ -218,7 +271,8 @@ impl AgentDefinition {
     ///
     /// Returns [`AgentsError::InvalidDefinition`] when the identifier, the prompt or the profile name is empty, when a
     /// sub-agent declares delegable sub-agents, when a main agent declares an output schema, when a delegable sub-agent
-    /// is the agent itself, or when the toolsets or the modules contain a duplicate.
+    /// is the agent itself, when the toolsets or the modules contain a duplicate, or when a memory limit of the sandbox
+    /// is zero.
     pub fn validate(&self) -> AgentsResult<()> {
         if self.id.trim().is_empty() {
             return self.refuse("identifier is empty");
@@ -243,6 +297,12 @@ impl AgentDefinition {
         }
         if has_duplicate(&self.modules) {
             return self.refuse("duplicate module");
+        }
+        if self
+            .sandbox
+            .is_some_and(|sandbox| sandbox.has_zero_memory_limit())
+        {
+            return self.refuse("a sandbox memory limit is zero");
         }
         Ok(())
     }
@@ -331,6 +391,27 @@ mod tests {
         )
     }
 
+    /// A sandbox with a script delay of `seconds`, a render cap of `render_cap` and the three optional memory limits.
+    fn sandbox(
+        seconds: u64,
+        render_cap: u64,
+        string: Option<u64>,
+        array: Option<u64>,
+        map: Option<u64>,
+    ) -> SandboxLimits {
+        let mut limits = SandboxLimits::new(Duration::from_secs(seconds), render_cap);
+        if let Some(bytes) = string {
+            limits = limits.with_max_string_bytes(bytes);
+        }
+        if let Some(len) = array {
+            limits = limits.with_max_array_len(len);
+        }
+        if let Some(len) = map {
+            limits = limits.with_max_map_len(len);
+        }
+        limits
+    }
+
     /// A definition with every field set, under the identifier `id`, the kind `kind`, the prompt `prompt` and the profile
     /// `profile`.
     fn full_definition(id: &str, kind: AgentKind, prompt: &str, profile: &str) -> AgentDefinition {
@@ -343,7 +424,7 @@ mod tests {
             .with_sampling(sampling)
             .with_modules(vec!["files".to_owned(), "git".to_owned()])
             .with_toolsets(vec!["k8s".to_owned(), "logs".to_owned()])
-            .with_sandbox(SandboxLimits::new(Duration::from_secs(30), 10_000))
+            .with_sandbox(sandbox(30, 10_000, Some(1_000), Some(500), Some(200)))
             .with_context_strategy("summarize".to_owned())
             .with_delegable(vec!["reviewer".to_owned()])
     }
@@ -508,11 +589,35 @@ mod tests {
             ),
             (
                 "sandbox script timeout",
-                full_main_agent().with_sandbox(SandboxLimits::new(Duration::from_secs(31), 10_000)),
+                full_main_agent().with_sandbox(sandbox(31, 10_000, Some(1_000), Some(500), Some(200))),
             ),
             (
                 "sandbox render cap",
-                full_main_agent().with_sandbox(SandboxLimits::new(Duration::from_secs(30), 10_001)),
+                full_main_agent().with_sandbox(sandbox(30, 10_001, Some(1_000), Some(500), Some(200))),
+            ),
+            (
+                "sandbox string limit value",
+                full_main_agent().with_sandbox(sandbox(30, 10_000, Some(1_001), Some(500), Some(200))),
+            ),
+            (
+                "sandbox array limit value",
+                full_main_agent().with_sandbox(sandbox(30, 10_000, Some(1_000), Some(501), Some(200))),
+            ),
+            (
+                "sandbox map limit value",
+                full_main_agent().with_sandbox(sandbox(30, 10_000, Some(1_000), Some(500), Some(201))),
+            ),
+            (
+                "sandbox string limit removed",
+                full_main_agent().with_sandbox(sandbox(30, 10_000, None, Some(500), Some(200))),
+            ),
+            (
+                "sandbox array limit removed",
+                full_main_agent().with_sandbox(sandbox(30, 10_000, Some(1_000), None, Some(200))),
+            ),
+            (
+                "sandbox map limit removed",
+                full_main_agent().with_sandbox(sandbox(30, 10_000, Some(1_000), Some(500), None)),
             ),
             (
                 "context strategy",
@@ -602,5 +707,105 @@ mod tests {
     fn duplicate_module_refused() {
         let duplicated = main_agent().with_modules(vec!["files".to_owned(), "files".to_owned()]);
         assert_invalid(&duplicated, "a definition with a duplicated module");
+    }
+
+    #[test]
+    fn memory_limits_absent_by_default() {
+        let limits = SandboxLimits::new(Duration::from_secs(30), 10_000);
+        assert_eq!(
+            limits.max_string_bytes(),
+            None,
+            "the string limit is absent by default"
+        );
+        assert_eq!(
+            limits.max_array_len(),
+            None,
+            "the array limit is absent by default"
+        );
+        assert_eq!(limits.max_map_len(), None, "the map limit is absent by default");
+        let value = serde_json::to_value(main_agent().with_sandbox(limits)).expect("a definition serializes");
+        let json = value.get("sandbox").expect("the sandbox is serialized");
+        for key in ["max_string_bytes", "max_array_len", "max_map_len"] {
+            assert!(
+                json.get(key).is_none(),
+                "the absent `{key}` must be omitted: {json}"
+            );
+        }
+    }
+
+    #[test]
+    fn memory_limits_set_and_read_back() {
+        let limits = SandboxLimits::new(Duration::from_secs(30), 10_000)
+            .with_max_string_bytes(1_000)
+            .with_max_array_len(500)
+            .with_max_map_len(200);
+        assert_eq!(
+            limits.max_string_bytes(),
+            Some(1_000),
+            "the string limit is read back"
+        );
+        assert_eq!(limits.max_array_len(), Some(500), "the array limit is read back");
+        assert_eq!(limits.max_map_len(), Some(200), "the map limit is read back");
+        assert_eq!(
+            limits.script_timeout(),
+            Duration::from_secs(30),
+            "the script delay is kept"
+        );
+        assert_eq!(limits.render_cap_chars(), 10_000, "the render cap is kept");
+        let definition = main_agent().with_sandbox(limits);
+        let text = serde_json::to_string(&definition).expect("a definition serializes");
+        let back: AgentDefinition = serde_json::from_str(&text).expect("a definition deserializes");
+        assert_eq!(back, definition, "the memory limits survive a round trip");
+    }
+
+    #[test]
+    fn old_sandbox_json_reads_without_memory_limits() {
+        let text = r#"{"id":"main","kind":"main","prompt":"hello","profile":"strix-qwen","sandbox":{"script_timeout":{"secs":30,"nanos":0},"render_cap_chars":10000}}"#;
+        let definition: AgentDefinition =
+            serde_json::from_str(text).expect("an old sandbox JSON still reads");
+        let limits = definition.sandbox().expect("the old sandbox is read");
+        assert_eq!(limits.render_cap_chars(), 10_000, "the render cap is read");
+        assert_eq!(
+            limits.max_string_bytes(),
+            None,
+            "an absent string limit reads as None"
+        );
+        assert_eq!(
+            limits.max_array_len(),
+            None,
+            "an absent array limit reads as None"
+        );
+        assert_eq!(limits.max_map_len(), None, "an absent map limit reads as None");
+    }
+
+    #[test]
+    fn zero_memory_limit_refused() {
+        let cases = [
+            (
+                "a zero string limit",
+                sandbox(30, 10_000, Some(0), Some(500), Some(200)),
+            ),
+            (
+                "a zero array limit",
+                sandbox(30, 10_000, Some(1_000), Some(0), Some(200)),
+            ),
+            (
+                "a zero map limit",
+                sandbox(30, 10_000, Some(1_000), Some(500), Some(0)),
+            ),
+        ];
+        for (case, limits) in cases {
+            assert_invalid(&main_agent().with_sandbox(limits), case);
+        }
+    }
+
+    #[test]
+    fn complete_definition_with_memory_limits_is_valid() {
+        let limits = sandbox(30, 10_000, Some(1_000), Some(500), Some(200));
+        let valid = main_agent().with_sandbox(limits).validate();
+        assert!(
+            matches!(valid, Ok(())),
+            "a sandbox with positive memory limits must be valid, got {valid:?}"
+        );
     }
 }

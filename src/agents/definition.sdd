@@ -12,22 +12,31 @@ Exposes:
   @AgentDefinition
   @AgentKind
   @SandboxLimits
+  @SandboxLimits::with_max_string_bytes
+  @SandboxLimits::with_max_array_len
+  @SandboxLimits::with_max_map_len
+  @SandboxLimits::max_string_bytes
+  @SandboxLimits::max_array_len
+  @SandboxLimits::max_map_len
   @AgentDefinition::fingerprint
 
 Accepts:
-  @AgentDefinition::new: l'identifiant, la nature (@AgentKind : `Main` ou `Sub`), le prompt système (gabarit texte) et le nom du profil de modèle, puis des constructeurs chaînés : paramètres d'échantillonnage, modules, toolsets, @SandboxLimits (délai de script, plafond de rendu en caractères), nom de la stratégie de contexte, sous-agents délégables (principal), schéma JSON de sortie (sous-agent).
+  @AgentDefinition::new: l'identifiant, la nature (@AgentKind : `Main` ou `Sub`), le prompt système (gabarit texte) et le nom du profil de modèle, puis des constructeurs chaînés : paramètres d'échantillonnage, modules, toolsets, @SandboxLimits (délai de script, plafond de rendu en caractères, et trois plafonds de mémoire optionnels), nom de la stratégie de contexte, sous-agents délégables (principal), schéma JSON de sortie (sous-agent).
   @AgentDefinition::validate: aucun argument.
+  @SandboxLimits::with_max_string_bytes, @SandboxLimits::with_max_array_len, @SandboxLimits::with_max_map_len: un entier non signé (`u64`) par plafond de mémoire (octets pour la chaîne, éléments pour le tableau, entrées pour la table) ; zéro est accepté par le constructeur et refusé par @AgentDefinition::validate.
 
 Returns:
   @AgentDefinition::fingerprint: une chaîne hexadécimale de 16 caractères, empreinte stable de la définition.
   @AgentDefinition::validate: succès ou @AgentsError::InvalidDefinition.
+  @SandboxLimits::max_string_bytes, @SandboxLimits::max_array_len, @SandboxLimits::max_map_len: `None` quand le plafond est absent (le défaut de `scratchpad/limits` s'applique alors), sinon la valeur posée.
 
 Raises:
-  @AgentsError::InvalidDefinition: un sous-agent qui déclare des sous-agents délégables ; un principal qui déclare un schéma de sortie ; un identifiant, un prompt ou un nom de profil vide ; un sous-agent délégable égal à l'agent lui-même ; une liste de toolsets ou de modules qui contient un doublon.
+  @AgentsError::InvalidDefinition: un sous-agent qui déclare des sous-agents délégables ; un principal qui déclare un schéma de sortie ; un identifiant, un prompt ou un nom de profil vide ; un sous-agent délégable égal à l'agent lui-même ; une liste de toolsets ou de modules qui contient un doublon ; un plafond de mémoire du sandbox posé à zéro.
 
 Must:
   Le modèle se désigne par un nom de profil : la définition n'a aucun champ de fournisseur.
-  L'empreinte est déterministe et indépendante de la plate-forme : même définition, même empreinte, y compris après un aller-retour de sérialisation ; elle change dès qu'un champ de la définition change (prompt, profil, toolsets, modules, limites, sous-agents, schéma). Calculée par FNV-1a 64 bits sur la sérialisation JSON canonique (clés triées), sans dépendance externe.
+  L'empreinte est déterministe et indépendante de la plate-forme : même définition, même empreinte, y compris après un aller-retour de sérialisation ; elle change dès qu'un champ de la définition change (prompt, profil, toolsets, modules, limites, plafonds de mémoire du sandbox, sous-agents, schéma). Calculée par FNV-1a 64 bits sur la sérialisation JSON canonique (clés triées), sans dépendance externe.
+  Les trois plafonds de mémoire du sandbox sont optionnels : absents, ils ne sont pas sérialisés (aucune clé dans le JSON) et le JSON ancien qui ne les porte pas se lit sans eux. Posés, chacun entre dans l'empreinte et sa valeur se relit à l'identique. Un zéro est refusé par @AgentDefinition::validate, jamais silencieusement ramené au défaut. Les plafonds ne sont branchés au moteur de `scratchpad` qu'avec `run` : ce module ne dépend pas du scratchpad.
   Un sous-agent ne délègue pas (`agent-sessions#BR-6`) ; seul un principal a des sous-agents délégables.
   Les capacités sont exactement celles de la définition (`agent-sessions#BR-2`) : aucune valeur par défaut n'accorde un module ou un toolset ; les listes absentes sont vides. La définition ne porte aucun droit de Memory : l'accès à un niveau se décide par les toolsets (`agent-sessions/modules#FR-4`).
   Se sérialise et se désérialise à l'identique ; aucun champ ne porte de secret.
@@ -78,6 +87,31 @@ Scenario: no memory right in the definition
   When the definition is serialized, and the old JSON is read
   Then the serialized JSON has no `memory` field, and the old JSON reads as the definition without it, with the same fingerprint
 
+Scenario: memory limits absent by default
+  Given a sandbox built with only the script delay and the render cap
+  When the three memory limits are read and the definition is serialized
+  Then the limits are `None` and the sandbox JSON has no memory limit key
+
+Scenario: memory limits set and read back
+  Given a sandbox with a string limit of 1000 bytes, an array limit of 500 and a map limit of 200
+  When the limits are read, and the definition is serialized then deserialized
+  Then they report 1000, 500 and 200, and the deserialized definition is identical
+
+Scenario: old sandbox JSON without memory limits
+  Given a JSON of an older definition whose sandbox carries only the script delay and the render cap
+  When the JSON is read
+  Then the three memory limits are `None`
+
+Scenario: zero memory limit refused
+  Given a main agent whose sandbox sets a string, an array or a map limit to zero
+  When validated
+  Then it fails with InvalidDefinition
+
+Scenario: fingerprint sensitive to memory limits
+  Given a definition with the three memory limits set
+  When one limit changes value, or is removed
+  Then the fingerprint differs for each change
+
 Tasks:
   [x] #6 Tests manquants : l'empreinte change pour chaque champ de la liste du Must (prompt, profil, toolsets, modules, délai et plafond de sandbox, sous-agents délégables, schéma de sortie, aussi id, nature, paramètres, stratégie de contexte) ;
       vecteurs connus du FNV-1a 64 bits sur des chaînes (`""` → `cbf29ce484222325`, `"a"` → `af63dc4c8601ec8c`, `"foobar"` → `85944171f73967e8`) pour la fonction de hachage, afin que « indépendante de la plate-forme » soit vérifié ; `validate()` Ok sur une définition valide et sur un sous-agent avec schéma ;
@@ -89,4 +123,6 @@ Tasks:
   [x] #4 Décidé le 2026-10-27 : pas de droits de Memory dans la définition ; trois modules Memory (un par niveau) et l'accès se décide par les toolsets (`agent-sessions/modules#FR-4`).
   [?] #8 Champ inconnu : un JSON ancien portant `memory` (ou tout autre champ inconnu) se lit comme avant, le champ est ignoré (comportement serde par défaut, sans `deny_unknown_fields`) ; la définition ne le réécrit pas. Maintenu tel quel, à confirmer par le développeur principal.
   [x] #7 Supprimer @MemoryRights (type, constructeur `with_memory`, accesseur, réexports de ../lib.rs et ./mod.rs), l'empreinte et les tests correspondants, puis retirer des tâches #5 et #6 les droits de Memory.
-  [ ] #9 Ajouter à @SandboxLimits trois plafonds de mémoire optionnels (chaîne, tableau, table ; absents = défauts de ../scratchpad/limits.sdd), décidé le 2026-10-27 (`agent-sessions/scratchpad#FR-4`) : constructeurs, accesseurs, sérialisation, empreinte (@AgentDefinition::fingerprint), Scenarios et tests ; zéro refusé comme dans ../scratchpad/limits.sdd.
+  [x] #9 Ajouter à @SandboxLimits trois plafonds de mémoire optionnels (chaîne, tableau, table ; absents = défauts de ../scratchpad/limits.sdd), décidé le 2026-10-27 (`agent-sessions/scratchpad#FR-4`) : constructeurs, accesseurs, sérialisation, empreinte (@AgentDefinition::fingerprint), Scenarios et tests ; zéro refusé comme dans ../scratchpad/limits.sdd.
+  [?] #10 Posé à l'implémentation de #9 : les champs absents sont omis de la sérialisation, donc une définition sans plafonds de mémoire garde la même empreinte qu'avant #9 (et le sandbox sans ces champs garde le même JSON). La spec ne le dit pas explicitement (elle ne garantit que « change dès qu'un champ change ») ; c'est la conséquence retenue, à confirmer par le développeur principal, car elle évite de changer l'empreinte des définitions existantes.
+  [?] #11 Posé à l'implémentation de #9 : les Scenarios de cette spec sont en anglais (style existant), les autres sections en français (convention du projet) ; la consigne de la tâche demandait l'anglais pour l'ensemble, à trancher.
