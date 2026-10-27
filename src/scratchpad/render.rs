@@ -255,13 +255,19 @@ mod tests {
         assert!(rendered.truncated(), "truncated");
         assert_eq!(rendered.original_chars(), 20_000, "original size");
         let omitted = omitted_in(rendered.text()).unwrap_or(0);
+        let notice = notice_for(omitted, 20_000);
+        let Some((head, tail)) = rendered.text().split_once(&notice) else {
+            panic!("the notice `{notice}` must sit between the kept start and end");
+        };
+        let kept = head.chars().count() + tail.chars().count();
+        assert_eq!(
+            20_000usize.checked_sub(kept),
+            Some(omitted),
+            "the notice states the original size minus the {kept} kept characters"
+        );
         assert!(
             omitted > 0,
             "the notice gives a positive omitted count: {omitted}"
-        );
-        assert!(
-            rendered.text().contains(&notice_for(omitted, 20_000)),
-            "the notice states the omitted count {omitted} out of 20000"
         );
     }
 

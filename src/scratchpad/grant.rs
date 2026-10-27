@@ -277,6 +277,63 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_toolsets_and_skills_refused() {
+        let toolset = |description: &str| GrantedToolset::new("grafana", description).expect("valid");
+        let grants = Grants::new()
+            .with_toolset(toolset("first"))
+            .expect("first toolset accepted");
+        let again = grants.clone().with_toolset(toolset("second"));
+        assert!(again.is_none(), "a second toolset with the same name is refused");
+        assert_eq!(grants.toolsets().len(), 1, "the first toolset is kept");
+        assert_eq!(
+            grants.toolsets().first().map(GrantedToolset::description),
+            Some("first"),
+            "the first toolset"
+        );
+        let skill = |description: &str| GrantedSkill::new("loki-debug", description, None).expect("valid");
+        let with_skill = Grants::new()
+            .with_skill(skill("first"))
+            .expect("first skill accepted");
+        let again_skill = with_skill.clone().with_skill(skill("second"));
+        assert!(
+            again_skill.is_none(),
+            "a second skill with the same name is refused"
+        );
+        assert_eq!(with_skill.skills().len(), 1, "the first skill is kept");
+        assert_eq!(
+            with_skill.skills().first().map(GrantedSkill::description),
+            Some("first"),
+            "the first skill"
+        );
+    }
+
+    #[test]
+    fn grant_types_are_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<CoreGroup>();
+        assert_send_sync::<GrantedModule>();
+        assert_send_sync::<GrantedToolset>();
+        assert_send_sync::<GrantedSkill>();
+        assert_send_sync::<Grants>();
+    }
+
+    #[test]
+    fn reserved_words_refused_as_module_names_as_the_parser_does() {
+        let engine = rhai::Engine::new();
+        for name in [
+            "global", "this", "const", "import", "export", "private", "loop", "while", "if", "switch",
+            "return", "throw", "try", "true", "false", "fn", "let", "grafana",
+        ] {
+            let accepted = GrantedModule::new(name, Shared::new(Module::new())).is_some();
+            let parses = engine.compile(format!("{name}::f()")).is_ok();
+            assert_eq!(
+                accepted, parses,
+                "`{name}`: the granted name check and the Rhai parser of `{name}::f()` must agree"
+            );
+        }
+    }
+
+    #[test]
     fn invalid_module_name_refused() {
         for name in ["1abc", "a-b", "", "fn", "let"] {
             assert!(

@@ -5,13 +5,19 @@
 mod error;
 mod format;
 mod grant;
+mod introspect;
 mod limits;
 mod render;
+mod suggest;
 
 pub use error::{
     LimitKind, NotFoundKind, ScratchpadError, ScratchpadResult, ScriptErrorClass, ScriptPosition,
 };
 pub use format::register_format_functions;
 pub use grant::{CoreGroup, GrantedModule, GrantedSkill, GrantedToolset, Grants};
+pub use introspect::{
+    Catalog, FunctionEntry, IntrospectionSource, Origin, ScriptFunction, VariableInfo, limits_notice,
+};
 pub use limits::ScratchpadLimits;
 pub use render::{Rendered, full_text, render_value, truncate_middle};
+pub use suggest::{CandidateSet, nearest, suggest_for};

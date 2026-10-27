@@ -134,7 +134,7 @@ pub enum ScratchpadError {
         position: Option<ScriptPosition>,
     },
     /// A function, a module or a variable is not found.
-    #[error("{kind} not found{}: {name}{}", location(.position.as_ref()), suggestions_text(.suggestions.as_slice()))]
+    #[error("{kind} not found{}: {name}{}{}", location(.position.as_ref()), suggestions_text(.suggestions.as_slice()), hint_text(.hint.as_deref()))]
     NotFound {
         /// Kind of the name that is missing.
         kind: NotFoundKind,
@@ -146,6 +146,9 @@ pub enum ScratchpadError {
         function: Option<String>,
         /// Closest candidates, in order. Empty by default.
         suggestions: Vec<String>,
+        /// Advice to the LLM on how to fix the call, when the cause is known (for example a scope variable read by a
+        /// function). Absent by default.
+        hint: Option<String>,
     },
     /// A limit of the sandbox is exceeded.
     #[error("limit exceeded ({kind}){}: {message}", location(.position.as_ref()))]
@@ -193,6 +196,11 @@ fn suggestions_text(suggestions: &[String]) -> String {
     }
 }
 
+/// Text of the hint: `. {hint}`, or nothing when there is none.
+fn hint_text(hint: Option<&str>) -> String {
+    hint.map_or_else(String::new, |hint| format!(". {hint}"))
+}
+
 impl ScratchpadError {
     /// Classifies an evaluation error of Rhai. Wrapper errors of function and module calls are unwrapped to their cause.
     #[must_use]
@@ -222,6 +230,15 @@ impl ScratchpadError {
         } = &mut self
         {
             *slot = suggestions;
+        }
+        self
+    }
+
+    /// Adds a hint to a not-found error. Has no effect on the other variants.
+    #[must_use]
+    pub fn with_hint(mut self, hint: String) -> Self {
+        if let Self::NotFound { hint: slot, .. } = &mut self {
+            *slot = Some(hint);
         }
         self
     }
@@ -345,6 +362,7 @@ fn not_found(kind: NotFoundKind, name: &str, position: Position) -> ScratchpadEr
         position: script_position(position),
         function: None,
         suggestions: Vec::new(),
+        hint: None,
     }
 }
 
@@ -447,6 +465,7 @@ mod tests {
                     position: position(),
                     function: None,
                     suggestions: Vec::new(),
+                    hint: None,
                 },
                 "function not found at line 3, column 5: grafana::loki_queryy",
             ),
@@ -457,6 +476,7 @@ mod tests {
                     position: position(),
                     function: None,
                     suggestions: vec!["grafana".to_owned(), "k8s".to_owned()],
+                    hint: None,
                 },
                 "module not found at line 3, column 5: nomod. Closest candidates: grafana, k8s",
             ),
@@ -467,6 +487,7 @@ mod tests {
                     position: position(),
                     function: None,
                     suggestions: Vec::new(),
+                    hint: None,
                 },
                 "variable not found at line 3, column 5: unknown_var",
             ),
@@ -495,6 +516,24 @@ mod tests {
         for (error, expected) in cases {
             assert_eq!(error.to_string(), expected, "the text of {error:?}");
         }
+    }
+
+    #[test]
+    fn hint_is_appended_after_the_suggestions() {
+        let error = ScratchpadError::NotFound {
+            kind: NotFoundKind::Variable,
+            name: "x".to_owned(),
+            position: position(),
+            function: Some("f".to_owned()),
+            suggestions: Vec::new(),
+            hint: None,
+        }
+        .with_hint("functions cannot see scope variables: pass `x` as an argument".to_owned());
+        assert_eq!(
+            error.to_string(),
+            "variable not found at line 3, column 5: x. functions cannot see scope variables: pass `x` as an argument",
+            "the hint text"
+        );
     }
 
     #[test]
@@ -662,6 +701,7 @@ mod tests {
             position: None,
             function: None,
             suggestions: Vec::new(),
+            hint: None,
         }
         .with_suggestions(vec!["grafana::loki_query".to_owned()]);
         assert!(
@@ -741,5 +781,51 @@ mod tests {
             "the message `{message}` is the one of the cause"
         );
         assert_eq!(position.line(), 4, "the position of the cause");
+    }
+
+    #[test]
+    fn too_many_variables_and_modules_are_other_limits() {
+        for error in [
+            EvalAltResult::ErrorTooManyVariables(Position::new(1, 2)),
+            EvalAltResult::ErrorTooManyModules(Position::new(1, 2)),
+        ] {
+            let classified = ScratchpadError::from_rhai(&error);
+            let ScratchpadError::Limit { kind, .. } = &classified else {
+                panic!("expected a limit for {error:?}, got {classified:?}");
+            };
+            assert_eq!(*kind, LimitKind::Other, "the kind of {error:?}");
+        }
+    }
+
+    #[test]
+    fn array_size_is_an_array_limit() {
+        let mut engine = Engine::new();
+        let _limits = engine.set_max_array_size(10);
+        let error = match engine.eval::<Dynamic>("let a = []; loop { a.push(1); }") {
+            Ok(value) => panic!("the array must exceed the limit, it returned {value}"),
+            Err(error) => *error,
+        };
+        let classified = ScratchpadError::from_rhai(&error);
+        let ScratchpadError::Limit { kind, .. } = &classified else {
+            panic!("expected an array size limit, got {classified:?}");
+        };
+        assert_eq!(*kind, LimitKind::ArraySize, "the kind");
+    }
+
+    #[test]
+    fn non_not_found_errors_in_a_function_name_the_function() {
+        let error = failure("fn f() { throw \"boom\" } f()");
+        let classified = ScratchpadError::from_rhai(&error);
+        let ScratchpadError::Runtime { message, .. } = &classified else {
+            panic!("expected a runtime error inside `f`, got {classified:?}");
+        };
+        assert!(
+            message.starts_with("in function f: "),
+            "the message `{message}` names the function `f` in front"
+        );
+        assert!(
+            message.contains("boom"),
+            "the message keeps the thrown text: {message}"
+        );
     }
 }

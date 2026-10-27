@@ -124,7 +124,7 @@ fn register_line_functions(engine: &mut Engine) {
 
 /// Registers one function with its parameter names, its return type (last) and its documentation comment, in the global
 /// namespace.
-fn register<A, const N: usize, const X: bool, R, const F: bool, FUNC>(
+pub(in crate::scratchpad) fn register<A, const N: usize, const X: bool, R, const F: bool, FUNC>(
     engine: &mut Engine,
     name: &str,
     params: &[&str],
@@ -412,10 +412,22 @@ mod tests {
         let result = engine().eval::<String>("fmt_table([#{a: 1}, 5])");
         match result {
             Err(error) => assert!(
-                error.to_string().contains('1'),
-                "the error names index 1: {error}"
+                error.to_string().contains("row 1"),
+                "the error names row 1: {error}"
             ),
             Ok(value) => panic!("a row that is not a map must be refused, got {value}"),
+        }
+    }
+
+    #[test]
+    fn table_with_a_non_string_column_refused() {
+        let result = engine().eval::<String>("fmt_table([#{a: 1}], [1])");
+        match result {
+            Err(error) => assert!(
+                error.to_string().contains("column 0"),
+                "the error names column 0: {error}"
+            ),
+            Ok(value) => panic!("a column that is not a string must be refused, got {value}"),
         }
     }
 
@@ -423,12 +435,34 @@ mod tests {
     fn empty_table() {
         let without = engine().eval::<String>("fmt_table([])");
         let with = engine().eval::<String>("fmt_table([], [\"a\"])");
+        let no_columns = engine().eval::<String>("fmt_table([], [])");
         assert_eq!(without.ok().as_deref(), Some(""), "empty without columns");
         assert_eq!(
             with.ok().as_deref(),
             Some("a\n-"),
             "header and separator with columns"
         );
+        assert_eq!(no_columns.ok().as_deref(), Some(""), "empty columns list");
+    }
+
+    #[test]
+    fn path_is_refused_when_empty() {
+        let result = engine().eval::<Dynamic>("fmt_path(#{a: 1}, \"\")");
+        assert!(result.is_err(), "an empty path is a script error");
+    }
+
+    #[test]
+    fn json_refuses_functions_and_non_finite_floats() {
+        let refused = [
+            "fmt_json(Fn(\"abs\"))",
+            "fmt_json_pretty(Fn(\"abs\"))",
+            "let zero = 0.0; fmt_json(1.0 / zero)",
+            "let zero = 0.0; fmt_json_pretty(1.0 / zero)",
+        ];
+        for script in refused {
+            let result = engine().eval::<String>(script);
+            assert!(result.is_err(), "`{script}` must be refused as JSON");
+        }
     }
 
     #[test]
@@ -544,8 +578,16 @@ mod tests {
 
     #[test]
     fn negative_counts_refused() {
-        let result = engine().eval::<String>("fmt_head(\"a\\nb\", -1)");
-        assert!(result.is_err(), "a negative count is a script error");
+        for script in [
+            "fmt_head(\"a\\nb\", -1)",
+            "fmt_tail(\"a\\nb\", -1)",
+            "fmt_truncate(\"abc\", -1)",
+            "fmt_truncate_ends(\"abc\", -1, 2)",
+            "fmt_truncate_ends(\"abc\", 2, -1)",
+        ] {
+            let result = engine().eval::<String>(script);
+            assert!(result.is_err(), "`{script}`: a negative count is a script error");
+        }
     }
 
     #[test]
@@ -587,8 +629,9 @@ mod tests {
                 );
                 let params = entry.get("params").and_then(serde_json::Value::as_array);
                 assert!(
-                    params.is_some_and(|p| p.iter().all(|param| param.get("name").is_some())),
-                    "`{name}` has named parameters"
+                    params
+                        .is_some_and(|p| !p.is_empty() && p.iter().all(|param| param.get("name").is_some())),
+                    "`{name}` has a non empty list of named parameters"
                 );
             }
         }

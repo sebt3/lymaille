@@ -122,6 +122,7 @@ impl ScratchpadLimits {
 #[cfg(test)]
 mod tests {
     use super::{MAX_CALL_LEVELS, MAX_EXPR_DEPTH, MAX_FUNCTION_EXPR_DEPTH, ScratchpadLimits};
+    use crate::scratchpad::{LimitKind, ScratchpadError, ScriptErrorClass};
     use rhai::{Dynamic, Engine};
 
     fn engine_with(limits: &ScratchpadLimits) -> Engine {
@@ -272,7 +273,25 @@ mod tests {
         let script = "let s = \"\"; for i in 0..100000 { s += \"x\"; } s.len()";
         let first = engine_with(&small).eval::<i64>(script);
         let second = engine_with(&large).eval::<i64>(script);
-        assert!(first.is_err(), "the small engine must refuse the string");
+        let refused = match first {
+            Ok(value) => panic!("the small engine must refuse the string, it returned {value}"),
+            Err(error) => ScratchpadError::from_rhai(&error),
+        };
+        assert_eq!(
+            refused.class(),
+            ScriptErrorClass::Limit,
+            "the small engine refuses with a limit, got {refused:?}"
+        );
+        assert!(
+            matches!(
+                refused,
+                ScratchpadError::Limit {
+                    kind: LimitKind::StringSize,
+                    ..
+                }
+            ),
+            "the refusal is the string size limit, got {refused:?}"
+        );
         assert_eq!(second.ok(), Some(100_000), "the large engine accepts the string");
     }
 }

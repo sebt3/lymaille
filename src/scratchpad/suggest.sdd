@@ -110,3 +110,8 @@ Tasks:
   [ ] #1 Tests puis implémentation.
   [?] #2 Posé : seuil, plafond de trois suggestions et distance de Levenshtein. Réglages à ajuster à la mesure sur le jeu de tâches de référence (`agent-sessions#Risques`) ; ils n'affectent aucune règle de sécurité (le périmètre des candidats ne change pas).
   [?] #3 Posé : les fonctions que le LLM a définies lui-même sont des candidats (elles sont dans le scope de session et n'élargissent rien, `agent-sessions#BR-2`).
+  [?] #4 Posé (lot E2) : @CandidateSet::new reçoit les fonctions visibles sous forme de paires (chemin, signature), pour que la
+      distance zéro rende la signature sans relire le catalogue. @suggest_for complète l'erreur de variable par `with_hint`
+      (./error.sdd #8).
+  [?] #5 Posé (lot E2) : la distance zéro vaut aussi pour un nom non qualifié égal au dernier segment d'un chemin visible. @nearest
+      ne rend que des noms distincts, triés par (distance, nom).

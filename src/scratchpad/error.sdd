@@ -121,3 +121,7 @@ Tasks:
       de la spec. `clippy::wildcard_enum_match_arm` est levé à la fonction `classify` par un `#[expect]` motivé. Décision de harnais à
       confirmer.
   [?] #7 Une `ErrorRuntime` sans message (`throw` sans valeur) rend « no message was given » : la spec ne dit rien de ce cas.
+  [?] #8 Posé (lot E2, suggestions) : @ScratchpadError::NotFound porte un champ `hint: Option<String>`, absent par défaut,
+      rendu après les suggestions sous la forme `. {hint}`, et la méthode `with_hint`. L'indication « functions cannot see
+      scope variables » de ./suggest.sdd passe par ce champ plutôt que par les suggestions, pour que « Closest candidates »
+      ne liste que des candidats. `with_hint` n'est pas dans `Exposes` : à ajouter si un appelant hors du module en a besoin.

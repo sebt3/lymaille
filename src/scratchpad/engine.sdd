@@ -154,3 +154,7 @@ Tasks:
   [?] #6 Posé : les standard packages de Rhai (dont `timestamp()` et ses `Instant`) restent chargés, comme dans `vynil-core`. Les valeurs d'instant ne sont pas persistables (avertissement de ./persist.sdd). Aucune horloge de la crate n'est lue.
   [?] #7 Le texte de `print` et de `debug` est capté, plafonné et rendu devant la valeur (voir ./run.sdd) : comportement qui n'est pas dans le DSD (`FR-5` ne parle que de la valeur finale). Sans cette décision, le texte est jeté silencieusement, ce qui déroute un LLM qui débogue par `print`. À confirmer par le développeur principal. Recommandation : capter et rendre.
   [?] #8 Un script qui attrape par `try/catch` l'erreur d'annulation d'un appel natif continue jusqu'à l'opération Rhai suivante, où `on_progress` l'arrête (l'arrêt demandé par ce crochet n'est pas rattrapable par `catch`) : à vérifier par un test sur la version de Rhai épinglée.
+  [?] #9 Lot E2 : ./engine.rs n'est pas écrit. Bloqué par ../../lymaille.sdd #9 : `vynil-core` 0.9.0 (features `rhai` et `rt`)
+      fait échouer `cargo::multiple_crate_versions`, et la dépendance a été annulée. Les recommandations #3 (features `fs` et
+      `shell` relayées par des features Cargo désactivées par défaut) et #7 (print et debug captés, plafonnés) restent la
+      cible, à coder avec la dépendance.

@@ -80,3 +80,11 @@ Tasks:
   [x] #8 Harnais, décision du développeur principal du 2026-10-27 : `clippy.toml` reçoit `allowed-duplicate-crates = ["syn"]`
       (commentaire de raison au-dessus), seule exception au harnais autorisée ce jour-là ; `[workspace.lints]`, `rustfmt.toml`,
       `scripts/check` et le reste de `clippy.toml` sont inchangés. À valider par le développeur principal (diff de `clippy.toml`).
+  [?] #9 Dépendance `vynil-core` (lot E2 de scratchpad, ./src/scratchpad/engine.sdd) : `vynil-core = { version = "0.9.0",
+      default-features = false, features = ["rhai", "rt"] }`, avec `fs = ["vynil-core/fs"]` et `shell = ["vynil-core/shell"]`
+      en `[features]`, désactivées par défaut. Ajoutée puis annulée : `cargo clippy` échoue sur `cargo::multiple_crate_versions`
+      (`cpufeatures` 0.2.17 et 0.3.1 ; `getrandom` 0.2.17, 0.3.4 et 0.4.3 ; `r-efi` 5.3.0 et 6.0.0 ; liste complète par
+      `cargo tree -d`). Ces doublons viennent des dépendances non optionnelles de `vynil-core` (`sha256`, `rand` 0.10, `tar`,
+      `serde_yaml`...), présentes même avec `default-features = false`. `clippy.toml` n'autorise que `syn`. Décision du
+      développeur principal requise : autoriser ces doublons par une exception de harnais, accepter une version de
+      `vynil-core` qui ne les tire pas, ou renoncer aux groupes de `vynil-core` pour le socle.
