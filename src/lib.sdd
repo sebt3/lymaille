@@ -22,3 +22,5 @@ Must:
 
 Tasks:
   [ ] #1 Ajouter les déclarations `mod` et les `pub use` au fil des specs enfants livrées.
+  [?] #2 `ErrorClass` du scratchpad est réexporté sous le nom `ScratchpadErrorClass` : `ErrorClass` est déjà celui de `agents`
+      à la racine (`pub use agents::{..., ErrorClass, ...}`). À trancher : renommer un des deux types, ou garder l'alias.

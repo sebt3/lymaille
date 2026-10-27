@@ -70,3 +70,11 @@ Tasks:
       épinglages (#2).
   [x] #3 Décidé le 2026-10-27 par le développeur principal : `lymaille` est publié en 0.1 à la fin du DSD `agent-sessions`, une fois tous ses domaines
       livrés ; aucun cas d'usage n'est publié partiellement. Lever `publish = false` à ce moment.
+  [?] #7 Dépendance ajoutée par le lot S1 du scratchpad (`cargo add`, à confirmer par le développeur principal) : `rhai` résolu
+      en 1.27.0 (manifeste `"1.25.1"`, requête caret ; les spikes sont en `=1.25.1`), features `sync`, `serde`, `internals`, `metadata`
+      et features par défaut de rhai (`std`, `ahash/runtime-rng`). `vynil-core` n'est pas ajouté par ce lot. Conséquences mesurées
+      avec `scripts/check` : `clippy::multiple_crate_versions` (groupe `cargo`, refusé par le harnais) échoue sur `syn` (2.x via
+      `rhai_codegen`, 3.x via `serde_derive` et `thiserror`) et sur `getrandom` (0.2 via `ahash/runtime-rng`, 0.3). Avec
+      `default-features = false` (et `std` gardé), `getrandom` disparaît ; `syn` reste, inhérent à `rhai_codegen`. Décisions
+      requises : version épinglée (`=1.25.1` ou 1.27.0), features par défaut, et traitement de `syn` dupliqué. Aucune exception
+      de harnais n'a été posée.
