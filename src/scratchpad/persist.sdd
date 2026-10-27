@@ -30,6 +30,7 @@ Exposes:
   @ScopeSnapshot
   @FunctionSource
   @Recompiled
+  @RestoreWarning
   @snapshot_scope
   @to_tagged
   @to_dynamic
@@ -41,7 +42,7 @@ Accepts:
   @snapshot_scope: une référence vers un @rhai::Scope.
   @to_tagged: une référence vers un @rhai::Dynamic.
   @to_dynamic: une référence vers un @TaggedValue.
-  @extract_function_sources: le @ScratchpadEngine et le texte d'un script qui a compilé.
+  @extract_function_sources: le @ScratchpadEngine et le texte du script. La fonction compile elle-même le script : un script qui ne compile pas rend une erreur de syntaxe (@ScratchpadError::Syntax) et rien n'est extrait.
   @recompile_functions: le @ScratchpadEngine et la table des sources de fonctions de l'état (clé `nom/arité`, voir `Must`).
   @restore_scope: la table des variables de l'état (nom vers @TaggedValue).
 
@@ -50,12 +51,16 @@ Returns:
   @to_tagged: le @TaggedValue de la valeur, ou la @UnpersistableReason (`Closure`, `FunctionPointer`, `UnsupportedType` avec le nom du type, `NonFiniteFloat`).
   @to_dynamic: la valeur Rhai de même type réel que l'étiquette (`char` en `char`, `blob` en `blob`, entier en entier, flottant en flottant).
   @extract_function_sources: la liste de @FunctionSource (clé `nom/arité` et texte source), dans l'ordre de définition du script.
-  @recompile_functions: un @Recompiled : l'AST des fonctions seules, et la liste des clés cassées, triée.
+  @recompile_functions: un @Recompiled : l'AST des fonctions seules, la liste des clés cassées (triée par clé) et la liste des @RestoreWarning (appels de nom inconnu, triés par clé puis par ligne).
+  @RestoreWarning: accesseurs `function()` (la clé `nom/arité`), `call()` (le nom, qualifié par son module le cas échéant), `line()` (ligne dans le texte de la fonction, quand elle est connue) et `message()`.
   @restore_scope: un @rhai::Scope portant les variables, dans l'ordre des noms.
   @PersistWarning: accesseurs `variable()`, `reason()` et `message()`, ce dernier le texte rendu au LLM (voir `Must`).
 
 Raises:
-  @extract_function_sources rend @ScratchpadError::Internal si le texte source d'une fonction du script ne peut pas être délimité (défaut de la crate, jamais une erreur du LLM) : la fonction n'est alors pas persistée et l'appelant en est informé.
+  @extract_function_sources rend @ScratchpadError::Internal si le texte source d'une fonction ne peut pas être délimité ou si l'auto-vérification du Must échoue (défaut de la crate, jamais une erreur du LLM) : aucune fonction de ce script n'est alors persistée et l'appelant en est informé.
+  @extract_function_sources rend @ScratchpadError::Syntax, avec la position de `fn` quand elle est connue, pour une méthode typée (`fn int.double()`) : aucune fonction de ce script n'est persistée (Tasks #9).
+  @extract_function_sources rend @ScratchpadError::Limit (kind `Other`) quand une ligne ou une colonne d'un jeton vaut 65 535 ou plus, valeur saturée des positions de Rhai (`u16`) : aucune fonction de ce script n'est persistée (Tasks #9).
+  @snapshot_scope et @to_tagged ne lèvent rien : une valeur qui ne se persiste pas est exclue avec sa raison.
 
 Must:
   Détection par type, avant toute sérialisation, parce que Rhai sérialise un pointeur de fonction ou une closure sans erreur, en chaîne ou en tableau qui ne se restaure pas en valeur appelable (`agent-sessions#CON-4`).
@@ -65,12 +70,19 @@ Must:
   Le texte d'un avertissement, en anglais, exact : `warning: variable `{name}` holds a closure and was not persisted; define a `fn` instead.`, `warning: variable `{name}` holds a function pointer and was not persisted; define a `fn` and call it by name instead.`, `warning: variable `{name}` holds a value of type `{type}` that cannot be persisted and was not persisted.`, `warning: variable `{name}` holds a non-finite number and was not persisted.`. Les avertissements sont rendus dans l'ordre des noms de variables.
   Les variables exclues restent dans le scope vivant (le script n'est pas rejeté et peut les réutiliser jusqu'à la fin de la session) ; elles sont absentes de l'état persisté, donc absentes après restauration, le reste du scope étant restauré (`agent-sessions/scratchpad#AC-8`).
   Un aller-retour @to_tagged puis @to_dynamic conserve le type : `char` reste `char`, `blob` reste `blob`, entier et flottant ne se confondent pas, tableaux et tables imbriqués sont égaux (`agent-sessions/session#AC-5`).
-  Les fonctions se persistent par leur texte source (`agent-sessions/scratchpad#DEC-1`), une entrée par fonction, clé `nom/arité` (par exemple `scale/2`) : la surcharge par arité de Rhai ne s'écrase pas, et une redéfinition de même nom et même arité remplace l'entrée. Le texte d'une fonction commence au premier commentaire de documentation `///` qui la précède (ou à `private`/`fn`) et finit à l'accolade fermante de son corps ; il inclut donc la documentation.
-  Le texte source d'une fonction se délimite avec l'analyseur lexical de Rhai (feature `internals`, `Engine::lex`), par appariement des accolades sur les jetons à profondeur zéro : les accolades dans les chaînes ou les commentaires n'entrent pas en compte.
-  La restauration recompile chaque source séparément avec le moteur de la session, ne conserve que les fonctions (`clone_functions_only`) et n'exécute jamais une instruction de niveau supérieur : aucun effet de bord n'est rejoué (`agent-sessions/scratchpad#DEC-1`).
-  Une source est cassée, et listée dans @Recompiled, quand : elle ne compile pas ; elle ne définit pas exactement la fonction de sa clé ; ou elle appelle, avec un chemin qualifié `module::fonction`, un module ou une fonction (nom et arité) que le catalogue du moteur de la session ne connaît pas (API de toolset disparue, `agent-sessions/session#AC-2`). Seuls les appels qualifiés par un module sont vérifiés : un appel non qualifié absent échoue à l'exécution avec les suggestions de ./suggest.sdd. Le catalogue est celui des seuls modules accordés (./introspect.sdd).
-  Une source cassée n'empêche pas la restauration du reste : les autres fonctions et toutes les variables sont restaurées. La liste des clés cassées est rendue triée par clé, c'est ce que @restore_notices (../session/notice.sdd) reçoit.
-  Aucune fonction restaurée n'élargit les capacités de la session : elle est recompilée par le moteur de la session, qui ne connaît que les modules accordés (`agent-sessions#BR-2`).
+  Profondeur des données : le parcours d'une valeur par @to_tagged refuse au-delà de 60 niveaux de conteneurs (tableaux et tables) imbriqués, par `UnpersistableReason::TooDeep` : la variable est exclue avec un @PersistWarning, sans récursion au-delà de cette profondeur. La borne se dérive de ce que `SessionState::from_json` relit : `serde_json` refuse plus de 128 niveaux JSON, et un conteneur en occupe deux (mesuré : à travers @TaggedValue seul, 63 conteneurs se relisent et 64 non ; à travers un état de session, 62 se relisent et 63 non ; 60 laisse une marge de deux niveaux). Un état de session à 60 niveaux fait l'aller-retour complet `to_json` puis `from_json` ; une valeur à 61 niveaux est refusée. Décision du coordinateur, à valider (Tasks #8). Rhai ne borne ni la profondeur des données ni leur parcours (Observed in: spikes scratchpad C, `Données profondes`).
+    Observed in: spikes scratchpad C (`Données profondes`).
+  Les fonctions se persistent par leur texte source (`agent-sessions/scratchpad#DEC-1`), une entrée par fonction, clé `nom/arité` (par exemple `scale/2`) : la surcharge par arité de Rhai ne s'écrase pas, et une redéfinition de même nom et même arité remplace l'entrée (l'hôte insère dans la table, dans l'ordre des scripts). Le texte d'une fonction commence au premier commentaire de documentation (`///` ou `/**`) de la suite de commentaires qui la précède, ou à `private`/`fn` s'il n'y en a pas, et finit à l'accolade fermante de son corps ; il inclut donc la documentation et les autres commentaires placés entre elle et `fn`. La clé ne porte aucun type : une méthode typée (`fn int.double()`) est refusée à l'extraction (voir `Raises`).
+  Le texte source d'une fonction se délimite avec l'analyseur lexical de Rhai (feature `internals`, `Engine::lex`) : on arrête à `Token::EOF` (la séquence de jetons se répète indéfiniment) ; `Token::Unit` est une fonction d'arité zéro (`()` est un seul jeton) ; après la fermeture d'une interpolation `${` d'une chaîne backtick, le lexeur reçoit `is_within_text = true` pour reprendre le mode texte ; les accolades `{`, `#{` et `}` sont appariées sur une pile à profondeur zéro, de sorte que les accolades dans les chaînes ou les commentaires n'entrent pas en compte. Les positions de Rhai sont des `u16` saturés : une ligne ou une colonne qui atteint 65 535 est refusée (voir `Raises`) ; les colonnes se comptent en caractères, une tabulation vaut une colonne.
+    Observed in: spikes scratchpad A (`fn-source`, 26 cas conformes : chaînes, backticks imbriqués, `/** */`, `private`, closures, CRLF, caractères multi-octets, surcharges ; pièges : `Token::EOF` indéfini, `Unit`, `is_within_text`, saturation `u16`).
+  Les fonctions anonymes (closures, `anon$…` dans `iter_functions`) ne sont pas des fonctions du script : elles sont filtrées de toute comparaison et de la table, et elles se recréent à la recompilation de la fonction qui les contient.
+  Auto-vérification à chaque script qui compile : l'ensemble des clés extraites est celui des fonctions non anonymes de l'AST (`iter_functions`), et la fin de chaque texte (accolade fermante) est la fin de corps de la fonction de même clé (`iter_fn_def`, `body.end_position()`). Si l'une des deux égalités échoue, aucune fonction de ce script n'est persistée et une erreur interne est rendue (voir `Raises`).
+  Le texte source extrait n'est jamais rejoué : la restauration compile chaque source séparément avec le moteur de la session, ne conserve que les fonctions (`clone_functions_only`) et n'exécute jamais une instruction de niveau supérieur : aucun effet de bord n'est rejoué (`agent-sessions/scratchpad#DEC-1`). Les positions rendues sont donc relatives au texte de la fonction.
+  L'hôte (`run`) doit toujours fusionner l'AST des fonctions de la session (`clone_functions_only`, puis `merge`) avec l'AST de chaque script, sinon l'appel d'une fonction restaurée échoue avec `Function not found` (Observed in: spikes scratchpad A, (3)).
+  Une source est cassée, et listée dans @Recompiled par clé triée, quand : elle ne compile pas ; ou elle ne définit pas exactement une fonction non anonyme, sans type, de nom et d'arité égaux à sa clé. Une source cassée n'empêche pas la restauration du reste : les autres fonctions et toutes les variables sont restaurées. La liste est rendue triée par clé, c'est ce que @restore_notices (../session/notice.sdd) reçoit.
+  Les appels ne cassent jamais une source à la restauration. Rhai ne vérifie AUCUN nom d'appel à la compilation, qualifié ou non (Observed in: spikes scratchpad B, `fn a() { nomod::f() }` et `fn a() { ghost() }` compilent). La restauration émet donc des @RestoreWarning best-effort, par `AST::walk` (feature `internals`) sur chaque source compilée, en traitant `Stmt::FnCall`, `Expr::FnCall` et `Expr::MethodCall` (`ASTNode` est `#[non_exhaustive]`). Un appel est signalé quand son nom, comparé par nom seul sans arité, n'est ni un nom du moteur tel que restauré (toutes les natives du moteur, paquets standard compris : `gen_fn_signatures(true)`, dont les méthodes comme `len` ou `map` et les fonctions comme `to_string`), ni un nom du catalogue (fonctions des modules accordés, nom qualifié `module::fonction`), ni le nom d'une fonction d'une source de la table (restaurée ou non), ni un mot-clé que Rhai traite à part (`print`, `debug`, `type_of`, `is_def_fn`, `is_def_var`, `eval`, `call`, `curry`, `Fn`). Un opérateur (`+`, `*`, `==`, `in`…) n'est pas un appel par nom : il est reconnu par `FnCallExpr::op_token`, que Rhai pose lui-même sur ces appels, et n'est jamais signalé. Le moteur qui fait foi est celui de la session restaurée : c'est lui qui révèle une native retirée d'un groupe, et les natives des paquets standard ne sont jamais signalées. Le catalogue est celui de la session restaurée : c'est lui qui révèle une native retirée d'un groupe. Limites assumées : les noms dynamiques (`Fn("x")`, `call`), les opérateurs sans implémentation et les accesseurs absents ne sont pas vérifiés ; un appel gardé par `is_def_fn` donne un faux avertissement, de même qu'une variable de fonction locale appelée par son nom. L'erreur certaine arrive à l'appel, avec les suggestions de ./suggest.sdd.
+    Observed in: spikes scratchpad B (20 cas ; détection des appels de natives retirées, de fonctions de script non persistées, de modules et de fonctions de modules absents ; faux positif sous `is_def_fn`).
+  Aucune fonction restaurée n'élargit les capacités de la session : elle est recompilée par le moteur de la session, qui ne connaît que les modules accordés (`agent-sessions#BR-2`). Le moteur est lu par son accès `rhai()` (./engine.sdd), dont l'attribut `expect(dead_code)` est retiré par cette tâche (engine.sdd #14).
 
 Scenario: variable types survive a round trip
   Given a scope holding the char `x`, a blob of three bytes, the integer 7, the float 7.0, the string `x` and a map holding an array
@@ -151,27 +163,89 @@ Scenario: source that no longer compiles
 Scenario: vanished toolset API
   Given the source `fn list() { grafana::loki_query("x") }` and an engine whose module `grafana` no longer has `loki_query`
   When recompile_functions is called
-  Then `list/0` is reported broken and the other functions are kept
+  Then nothing is reported broken, one warning names `list/0` and the call `grafana::loki_query`, and the other functions are kept
 
 Scenario: still valid toolset API
   Given the same source and an engine whose module `grafana` exposes `loki_query` with one parameter
   When recompile_functions is called
-  Then nothing is reported broken
+  Then nothing is reported broken and no warning is given
 
-Scenario: unqualified call is not checked at restore
+Scenario: unqualified call is not checked as broken at restore
   Given a source calling an unknown global function `nothing_here()`
   When recompile_functions is called
-  Then the source is not reported broken
+  Then the source is not reported broken and one warning names `nothing_here`
 
 Scenario: source defining another function than its key
   Given the key `f/1` with a source that defines `g(a)`
   When recompile_functions is called
   Then `f/1` is reported broken
 
+Scenario: typed method refused at extraction
+  Given the script `fn int.double() { this * 2 }`
+  When extract_function_sources is called
+  Then it fails with a syntax error that names the plain `fn` as the way out, and no function is returned
+
+Scenario: position beyond the u16 limit refused
+  Given a script whose line holds 70 000 characters before a `fn`
+  When extract_function_sources is called
+  Then it fails with a limit error and no function is returned
+
+Scenario: closures inside a function are not functions of the script
+  Given the script `fn g(v) { v.map(|x| x + 1) }`
+  When extract_function_sources is called
+  Then the only key is `g/1`
+
+Scenario: data nested beyond 60 levels is excluded
+  Given a scope holding a variable made of 61 nested arrays
+  When snapshot_scope is called
+  Then the variable is excluded with a warning that says it nests too deeply; a variable of 60 nested arrays is persisted and makes the round trip through the session state, `to_json` then `from_json`, unchanged
+
+Scenario: standard surface is never reported at restore
+  Given the function `fn f(v) { let n = v.len() + 1 * 2 == 3; print(n); let m = v.map(|x| x + 1); to_string(n) }` on an engine with no granted group
+  When recompile_functions is called
+  Then nothing is broken and no warning is given
+
+Scenario: a real unknown call gives exactly one warning
+  Given the function `fn f(v) { let n = v.len() + 1; ghost(n); v.map(|x| x + 1) }` on an engine with no granted group
+  When recompile_functions is called
+  Then exactly one warning names the call `ghost`
+
+Scenario: depth limit is 60 levels, pinned by literals
+  Given a variable of 60 nested arrays, and a variable of 61 nested arrays
+  When snapshot_scope is called
+  Then the first is persisted and round-trips through the session state, the second is excluded with the warning `warning: variable `deep` nests deeper than 60 levels and was not persisted.`
+
+Scenario: unsupported type names the type
+  Given a variable holding the value of `timestamp()`
+  When snapshot_scope is called
+  Then the warning is `warning: variable `t` holds a value of type `timestamp` that cannot be persisted and was not persisted.` and the reason carries the type name `timestamp`
+
+Scenario: position bounds at 65 534 and 65 535
+  Given a function whose closing brace is at column 65 534, and another whose closing brace is at column 65 535
+  When extract_function_sources is called on each
+  Then the first is located and the second is refused with a limit error; the same holds for the line of the closing brace
+
+Scenario: a tab is one column
+  Given the script `\t\tfn g() { 1 }`
+  When extract_function_sources is called
+  Then the text is `fn g() { 1 }` and column 3 is the keyword
+
+Scenario: unknown call names are reported with their line
+  Given the source `fn f() {\n  1\n  ghost(2)\n}`
+  When recompile_functions is called
+  Then one warning names `f/0`, the call `ghost` and the line 3
+
 Tasks:
-  [ ] #1 Tests puis implémentation, dans l'ordre : conversion `Dynamic` et @TaggedValue, détection et avertissements, extraction des sources, recompilation.
-  [?] #2 Extraction du texte source par fonction : l'AST de Rhai ne garde pas le texte (non sérialisable, Observed in: spikes/rhai-1-25 `persistence`, S3) ni l'étendue d'une fonction ; `iter_functions` ne rend que nom, paramètres, accès et commentaires. L'approche posée (jetons de `Engine::lex`, feature `internals`) est plausible mais non mesurée dans le spike. Un spike préalable, avant toute implémentation de ce fichier, doit confirmer que `lex` rend les positions de début de `fn`/`private`/`///` et de la fin du corps. Repli si elle échoue : persister, par script qui définit au moins une fonction, le texte entier du script réduit à ses fonctions, en conservant l'ordre des définitions (la clé de l'état serait alors un numéro d'ordre et non `nom/arité`) ; cela change `../session/state.sdd` (« fonctions : nom vers texte »). À valider par le développeur principal avant l'implémentation.
-  [?] #3 Détection d'une fonction disparue limitée aux appels qualifiés `module::fonction` : Rhai ne résout pas les noms de fonctions à la compilation, une vérification complète des appels non qualifiés exigerait de connaître tous les noms de fonctions intégrés. Le parcours des appels qualifiés (`AST::walk`, feature `internals`) est à confirmer par un spike. Limite assumée : une fonction cassée par un appel non qualifié (une fonction native retirée d'un groupe) n'est signalée qu'à son premier appel, avec les suggestions. À confirmer par le développeur principal.
+  [x] #1 Tests puis implémentation, dans l'ordre : conversion `Dynamic` et @TaggedValue, détection et avertissements, extraction des sources, recompilation.  [?] #2 Spike A réalisé (RAPPORT.md, SPIKE A) : extraction par les jetons de `Engine::lex` (feature `internals`), 26 cas conformes ; garde-fous et auto-vérification repris dans `Must`. Repli par texte réduit aux fonctions : écarté, car réduire le script à ses fonctions exige déjà les étendues (sans quoi les effets de bord sont rejoués). À valider par le développeur principal ; la clé reste `nom/arité` (#4) ; les méthodes typées sont refusées (#9), la forme `type.nom/arité` restant possible sans autre changement.
+  [?] #3 Reformulé (spike B, RAPPORT.md, section SPIKE B) : Rhai ne vérifie aucun nom d'appel à la compilation, qualifié ou non ; la première hypothèse de cette spec (« les appels qualifiés sont vérifiés à la compilation ») est fausse et corrigée dans `Must`. La restauration émet des @RestoreWarning best-effort par `AST::walk`, jamais un refus ; l'erreur certaine reste celle de l'appel. À confirmer par le développeur principal : le périmètre (nom seul, sans arité) et la liste des mots-clés traités à part.
+  [?] #8 Décidé par le coordinateur, à valider : profondeur des données bornée à 60 niveaux de conteneurs (constante `MAX_DATA_DEPTH`), dérivée de la relecture réelle de `SessionState::from_json` (voir `Must`, profondeur). La limite de 1 000 est abandonnée : elle n'était pas relisible. Aucune modification de la sérialisation de session. Test : aller-retour d'un état à 60 niveaux, refus à 61.
+  [?] #9 Décisions par défaut : une méthode typée à l'extraction rend @ScratchpadError::Syntax (message explicite, position de `fn`) ; une position saturée rend @ScratchpadError::Limit (kind `Other`). Dans les deux cas toute la liste des fonctions du script est refusée, car une liste partielle serait un texte faux à moitié. Le script a déjà été exécuté quand l'extraction est faite : l'appelant doit le savoir.
+  [?] #10 Décision : `rhai()` d'./engine.rs est lu par ce module. Son attribut `expect(dead_code)` devient faux et doit être retiré (engine.sdd #14) : c'est une modification d'engine.rs hors `Owns` de cette spec, limitée à cet attribut.
+  [?] #11 Texte d'avertissement nouveau, non fixé par le DSD : `warning: variable `{name}` nests deeper than 60 levels and was not persisted.`. Même statut que les autres textes de `Must` : à confirmer.
+  [?] #14 Secrets : persist ne masque rien. La persistance des variables et des sources de fonctions copie les valeurs telles quelles ; le masquage des secrets déclarés est tenu par `run` (Redactor, `session.sdd` et `state.sdd`, CON-3), avant que l'état ne soit remis à la session (tâche `run`). Aucune implémentation dans persist.
+  [?] #15 Opérateurs : `op_token` est un filet. Avec Rhai 1.27, tous les opérateurs essayés (`+`, `==`, `in`, `!`, `&&`, `||`, `??`) figurent déjà dans `gen_fn_signatures(true)` ; retirer le filet ne change aucun test (mutation survivante, mesurée). Gardé pour le cas d'un opérateur sans signature dans une version future.
+  [?] #12 Avertissement de restauration rendu au LLM : `function `{key}` calls `{call}`, which is not known (line {line}); this is a best-effort check, the call may still work.` Texte nouveau, à confirmer.
+  [?] #13 Auto-vérification : l'appel de l'auto-vérification de `extract_function_sources` est testé par la fonction interne `extract_verified`, qui reçoit la vérification en paramètre (test « the self-check is run by the extraction » : appelée, et son échec fait échouer l'extraction). Les cas de script qui la déclencheraient n'existent pas : Rhai refuse une `fn` imbriquée à la compilation (syntaxe), et l'AST et l'extracteur concordent sur tout script accepté. La vérification elle-même (`check_against_ast`) est testée directement.
   [?] #4 Posé : la clé d'une fonction dans l'état est `nom/arité`. `../session/state.sdd` dit « nom vers texte source » sans fixer la forme du nom ; la table est ordonnée par clé, ce qui ne dépend pas de la forme.
   [?] #5 Posé : les fonctions définies par un script qui échoue à l'exécution (après une compilation réussie) sont conservées ; un script qui échoue à la compilation n'en définit aucune. Les variables posées avant l'erreur d'exécution restent aussi dans le scope, Rhai ne les annulant pas.
   [?] #6 Posé : @to_tagged est une fonction de la crate ; le passage `Dynamic` et @TaggedValue vit ici, pas dans ../session/tagged_value.sdd (qui ne dépend pas de Rhai, tâche #4 de cette spec).

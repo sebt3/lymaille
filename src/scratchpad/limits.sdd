@@ -107,4 +107,4 @@ Tasks:
       d'un thread (abandon du processus : « has overflowed its stack »). Décidé le 2026-10-27 : l'évaluation tourne dans un fil dédié à pile
       dimensionnée (amendement de DEC-3, voir ./run.sdd), la taille étant mesurée (profondeur d'appels et d'expressions maximales, build de
       débogage). Le test `call_depth_exceeded` doit tourner sur ce fil dédié avec la taille retenue, non sur une pile agrandie à part.
-      Un débordement de pile est un abandon de l'hôte, non une erreur rendue au LLM : la mesure fait partie de la tâche de `run`.
+      Un débordement de pile est un abandon de l'hôte, non une erreur rendue au LLM : Mesure faite le 2026-10-27 (spike hors dépôt, Rhai 1.27.0) : pire cas 125 Mio en release, 606 Mio en débogage ; décidé : pile de 256 Mio en release et 1 Gio en débogage, plafonds 512 / 256 / 128 inchangés (le produit niveaux d'appel × profondeur d'expression de fonction fixe la pile). Reste à `run` : un test de bout en bout avec les frames natives (pont `rt::block_on`).

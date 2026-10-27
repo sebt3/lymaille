@@ -8,6 +8,7 @@ mod format;
 mod grant;
 mod introspect;
 mod limits;
+mod persist;
 mod render;
 mod suggest;
 
@@ -21,5 +22,9 @@ pub use introspect::{
     Catalog, FunctionEntry, IntrospectionSource, Origin, ScriptFunction, VariableInfo, limits_notice,
 };
 pub use limits::ScratchpadLimits;
+pub use persist::{
+    FunctionSource, PersistWarning, Recompiled, RestoreWarning, ScopeSnapshot, UnpersistableReason,
+    extract_function_sources, recompile_functions, restore_scope, snapshot_scope, to_dynamic, to_tagged,
+};
 pub use render::{Rendered, full_text, render_value, truncate_middle};
 pub use suggest::{CandidateSet, nearest, suggest_for};

@@ -219,6 +219,11 @@ Scenario: runs on one pad are serialized
   When both complete
   Then their effects are applied one after the other and the scope holds both results
 
+Scenario: secrets are masked before the state keeps the variables and the function sources
+  Given a session whose agent declares the secret `API_TOKEN` with the value `s3cr3t-value`, and a script that stores `let k = "s3cr3t-value";` and defines `fn key() { "s3cr3t-value" }`
+  When the run ends and the state is saved
+  Then the saved state holds neither the value `s3cr3t-value` in its variables nor in its function sources, and the rendered result shows the masked form instead
+
 Tasks:
   [ ] #1 Tests puis implémentation, dans l'ordre : pad et persistance entre appels, erreurs et rendu, avertissements, annulation (jeton miroir), audit et masquage, restauration.
   [?] #2 Posé : le pad est un type de ce fichier et la boucle de tour (domaine `session`, tâche #2 de ../session/session.sdd) l'emploie ; elle range @PadSnapshot dans @SessionState (mutateurs `pub(crate)`) et émet l'événement de script depuis @ScriptRecord. Ce fichier ne dépend pas de @SessionState.
@@ -229,3 +234,4 @@ Tasks:
   [?] #7 @ScriptRecord::new prend 7 paramètres (limite de clippy : 5) ; la tâche #3 de ../session/audit.sdd le remplace par une structure d'entrée nommée. Ce fichier s'écrit contre cette structure, pas contre les 7 paramètres.
   [?] #8 Posé : une annulation à l'entrée n'ouvre aucun enregistrement d'audit de script exécuté mais rend tout de même un @ScriptRecord (statut annulé, durée zéro) pour que la boucle de tour garde la trace du script demandé ; à confirmer avec la boucle de tour.
   [?] #9 Posé : `run` ne borne pas le nombre de scripts simultanés au-delà du pool bloquant de tokio (`agent-sessions/scratchpad#DEC-3`) ; la pression sur ce pool relève de l'hôte.
+  [ ] #10 Masquage des secrets avant la remise de l'état : masquer les secrets déclarés dans les valeurs de variables et les sources de fonctions avant de les remettre à l'état de session (Redactor, CON-3 ; persist.sdd #14 ne masque rien). Scenario « secrets are masked before the state keeps the variables and the function sources ».

@@ -124,6 +124,10 @@ et closures. `agent-sessions#CON-2` place le moteur dans `vynil-core`.
       déborde à 512 niveaux d'appels en débogage et ferait avorter le processus hôte) mais dans un fil dédié
       (`std::thread::Builder::stack_size`, taille mesurée) joint depuis une tâche async ; la portée `cancel::scope` et le hook
       `on_progress` restent ceux décrits ci-dessus. Le nombre de scripts simultanés est borné par la librairie, plus par le pool bloquant.
+      Taille de pile (user instruction, 2026-10-27 ; mesurée par un spike sur Rhai 1.27.0, plafonds inchangés 512 / 256 / 128) : 256 Mio en
+      release et 1 Gio en débogage (`cfg!(debug_assertions)`), soit le pire cas construit (125 Mio / 606 Mio) avec une marge de 2 ; la pile
+      est réservée et non engagée. À documenter pour l'hôte : `overcommit_memory=2` ou une limite de mémoire virtuelle l'empêchent. Les
+      frames natives (pont `rt::block_on`, client MCP) n'ont pas été mesurées : test de bout en bout à écrire avec `run`.
 
 ## Faits vérifiés (Rhai 1.25.1)
 

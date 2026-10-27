@@ -74,14 +74,7 @@ impl ScratchpadEngine {
         &self.catalog
     }
 
-    /// The Rhai engine, for the runs of the session.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "used by the run of a script, which ./run.sdd writes later"
-        )
-    )]
+    /// The Rhai engine, for the runs of the session and the persistence of their scope.
     pub(in crate::scratchpad) const fn rhai(&self) -> &RhaiEngine {
         &self.engine
     }
