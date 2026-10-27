@@ -602,6 +602,72 @@ mod tests {
         );
     }
 
+    /// A provider whose `complete` fails, to test the default streaming method on a failure.
+    #[derive(Debug)]
+    struct CompleteFailing;
+
+    impl super::InferenceProvider for CompleteFailing {
+        fn complete(
+            &self,
+            _request: InferenceRequest,
+        ) -> impl Future<Output = Result<InferenceResponse, InferenceError>> + Send {
+            std::future::ready(Err(transient("down")))
+        }
+    }
+
+    /// A provider whose `complete` answers an empty text, to test the default streaming method on an empty answer.
+    #[derive(Debug)]
+    struct CompleteEmpty;
+
+    impl super::InferenceProvider for CompleteEmpty {
+        fn complete(
+            &self,
+            _request: InferenceRequest,
+        ) -> impl Future<Output = Result<InferenceResponse, InferenceError>> + Send {
+            std::future::ready(Ok(answer("")))
+        }
+    }
+
+    #[tokio::test]
+    async fn default_stream_failure_emits_no_fragment_and_returns_the_error() {
+        let provider = CompleteFailing;
+        let mut received: Vec<String> = Vec::new();
+        let result = provider
+            .stream(request("failing-default"), |fragment: &str| {
+                received.push(fragment.to_owned());
+            })
+            .await;
+        assert!(
+            matches!(&result, Err(error) if error.class() == ErrorClass::Transient),
+            "a failing complete must make the default stream fail with the same error, got {result:?}"
+        );
+        assert!(
+            received.is_empty(),
+            "a failing complete must make the default stream emit no fragment, got {received:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn default_stream_of_an_empty_answer_emits_no_fragment() {
+        let provider = CompleteEmpty;
+        let mut received: Vec<String> = Vec::new();
+        let response = provider
+            .stream(request("empty-default"), |fragment: &str| {
+                received.push(fragment.to_owned());
+            })
+            .await
+            .expect("an empty answer is a successful answer");
+        assert_eq!(
+            response,
+            answer(""),
+            "the response of an empty answer must be the one complete returns"
+        );
+        assert!(
+            received.is_empty(),
+            "an empty answer must emit no fragment, got {received:?}"
+        );
+    }
+
     #[tokio::test]
     async fn poisoned_lock_is_recovered() {
         let provider = Arc::new(ScriptedProvider::new(vec![Ok(answer("after the poison"))]));

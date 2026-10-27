@@ -1,7 +1,8 @@
 Spec: catalog
 
 Purpose:
-  Traits de stockage du catalogue (agents, fournisseurs, profils de modèle) que l'hôte implémente, et un stockage en mémoire pour les tests
+  Traits de stockage du catalogue (agents, fournisseurs, profils de modèle) que l'hôte implémente, un stockage en mémoire pour les tests,
+    et la cascade @Layered qui empile un catalogue par niveau (le niveau projet au-dessus du niveau utilisateur)
     (`agent-sessions#CON-1`, `agent-sessions/agents#FR-4`, `FR-6`, `FR-7`).
 
 Owns:
@@ -12,26 +13,39 @@ Exposes:
   @ProfileStore
   @ProviderStore
   @InMemoryCatalog
+  @Layered
 
 Accepts:
   @AgentStore::get_agent / put_agent: un identifiant d'agent / une @AgentDefinition.
   @ProfileStore::get_profile / put_profile: un nom / un @ModelProfile.
   @ProviderStore::get_provider / put_provider: un nom / un @Provider.
+  @Layered::new: une couche haute `top` et une couche basse `base`, chacune un stockage qui implémente le trait demandé
+    (un catalogue par niveau, que l'hôte empile : le niveau projet en haut, le niveau utilisateur en bas).
 
 Returns:
   Chaque `get_*` rend l'objet s'il existe, sinon rien. Chaque `put_*` remplace l'objet de même nom.
   @InMemoryCatalog implémente les trois traits.
   @resolve_profile: un @ProfileStore, un nom de profil et un @DetectedModel optionnel ; rend le @ResolvedProfile.
+  @Layered implémente @AgentStore, @ProfileStore et @ProviderStore dès que ses deux couches les implémentent. Chaque `get_*`
+    interroge la couche haute ; si elle ne rend rien, il interroge la couche basse et rend son résultat. Chaque `put_*`
+    écrit dans la couche haute seulement. @resolve_profile (méthode fournie de @ProfileStore) s'applique à la cascade. Les
+    couches s'imbriquent : `Layered<Layered<A, B>, C>` est une pile à trois niveaux.
 
 Raises:
   @AgentsError::UnknownProfile: @resolve_profile pour un nom absent du stockage.
   @AgentsError::Store: échec du stockage de l'hôte.
+  @Layered n'ajoute aucune erreur : il rend celle de la couche qui échoue, telle quelle.
 
 Must:
   Les trois traits sont `Send + Sync`, asynchrones, à futurs `Send`, sans macro ni objet dynamique, et sans opération de liste ni de suppression (relèvent de l'hôte).
   @InMemoryCatalog stocke les objets sous leur forme JSON sérialisée (comme @InMemoryStore de ../session/store.sdd), pour que ce qu'on relit passe par le format réel.
   @put_agent refuse une définition invalide (appel à @AgentDefinition::validate) ; @resolve_profile ne contacte pas de fournisseur.
   Le stockage ne vérifie pas l'existence du profil nommé par un agent : cette vérification se fait au démarrage de session.
+  @Layered est une composition de traits, sans E/S, sans objet dynamique ni macro : type générique `Top`, `Base`, champs privés,
+  `#[non_exhaustive]` comme @InMemoryCatalog. Il est `Send + Sync` dès que ses couches le sont, et ses futurs sont `Send`.
+  Une absence dans la couche haute n'est pas une erreur : le repli sur la base est silencieux.
+  Un objet de la couche haute remplace entièrement l'objet de même nom de la base ; aucune fusion de champs.
+  @Layered n'ajoute aucun cache : chaque `get_*` interroge les couches.
 
 Depends on:
   ./definition.sdd
@@ -65,10 +79,44 @@ Scenario: resolve through the store
   Then the override is used
   And an unknown profile name fails with UnknownProfile
 
+Scenario: top overrides base
+  Given a top layer holding the profile `strix-qwen` with context size 8192, and a base layer holding the same name with 262144
+  When the profile is fetched through the layered catalog
+  Then the top profile is returned, whole
+
+Scenario: base answers when top has no entry
+  Given an empty top layer, and a base layer holding the agent `main`, the provider `vllm-strix` and the profile `strix-qwen`
+  When each is fetched through the layered catalog
+  Then each equals the base object, and an unknown name gives nothing
+
+Scenario: put writes to the top layer only
+  Given a layered catalog whose top and base layers are empty
+  When a provider is put through the layered catalog
+  Then the top layer holds it, the base layer does not, and the layered catalog returns it
+
+Scenario: top error is returned without querying the base
+  Given a top layer whose storage fails, and a base layer holding the profile `strix-qwen`
+  When the profile is fetched through the layered catalog
+  Then it fails with Store and the base layer was not queried
+
+Scenario: resolve_profile works on the cascade
+  Given a base layer holding the profile `strix-qwen` with context size 262144, and an empty top layer
+  When resolve_profile is called with a detected context size of 8192
+  Then the base override is used, and an unknown name fails with UnknownProfile
+
+Scenario: layers nest for more than two levels
+  Given a stack `Layered<Layered<A, B>, C>` where only C holds the provider `vllm-strix`
+  When the provider is fetched through the stack, then put through the stack
+  Then it is found through the stack, and the put lands in A only
+
 Tasks:
   [ ] #5 Test manquant : le catalogue stocke bien la forme JSON (JSON invalide injecté dans le stockage rend @AgentsError::Store au `get`).
   [x] #1 Tests (tokio de test) puis implémentation.
   [?] #3 Posé à l'implémentation : @resolve_profile est une méthode fournie de @ProfileStore ; `get_*` rend `AgentsResult<Option<T>>` ; l'échec de sérialisation devient @AgentsError::Store ; un verrou empoisonné est récupéré.
   [?] #4 Décidé : la validation d'une définition à l'écriture est faite par @InMemoryCatalog ; un hôte qui implémente @AgentStore doit appeler @AgentDefinition::validate (à documenter dans le trait). Une méthode fournie qui impose la validation est écartée : @AgentStore::put_agent resterait contournable de toute façon.
   [x] #2 Décidé le 2026-10-27 : le niveau (utilisateur, projet) n'est pas dans la clé de stockage ; un nom est unique par catalogue, un catalogue par niveau, que l'hôte empile.
-  [ ] #6 Spécifier et livrer la résolution en cascade au-dessus de plusieurs catalogues (le niveau projet l'emporte, `agent-sessions/agents#FR-6` et `FR-7`) si elle n'existe pas encore.
+  [x] #6 Spécifier et livrer la résolution en cascade au-dessus de plusieurs catalogues (le niveau projet l'emporte, `agent-sessions/agents#FR-6` et `FR-7`) si elle n'existe pas encore.
+  [ ] #10 Compléments relevés à la validation de H3 : assertions de `put_agent` et `put_profile` écrivant dans le haut seulement dans le test du Scenario « put writes to the top layer only ».
+  [?] #7 Forme choisie : `Layered<Top, Base>` dans ./catalog.rs, même spec que les traits (la composition est du stockage, et le fichier reste court). Alternative non retenue : un couple layered.sdd / layered.rs séparé, à prendre si ce fichier grossit ou si la cascade gagne un comportement propre.
+  [?] #8 Fusion champ par champ écartée : un profil du niveau projet remplace entièrement celui du niveau utilisateur (`agent-sessions/agents#FR-7`, « la surcharge l'emporte »). Une fusion partielle serait une décision à part, à prendre si un profil partiel s'avère nécessaire.
+  [?] #9 La validation d'une définition à l'écriture reste celle de la couche qui stocke : `put_agent` de @Layered délègue à la couche haute, qui doit être une @InMemoryCatalog ou un hôte qui valide (voir #4).

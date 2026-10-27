@@ -11,7 +11,7 @@ mod inference;
 mod profile;
 mod provider;
 
-pub use catalog::{AgentStore, InMemoryCatalog, ProfileStore, ProviderStore};
+pub use catalog::{AgentStore, InMemoryCatalog, Layered, ProfileStore, ProviderStore};
 pub use definition::{AgentDefinition, AgentKind, SandboxLimits};
 pub use error::{AgentsError, AgentsResult};
 pub use inference::{

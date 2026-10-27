@@ -95,7 +95,8 @@ Scenario: a failed stream emits no fragment
   Then it fails Transient and the receiver got nothing
 
 Tasks:
-  [ ] #11 Tests manquants relevés à la validation de H2 : l'implémentation par défaut de `stream` quand `complete` échoue (aucun fragment) et sur une réponse vide (aucun fragment).
+  [x] #11 Tests manquants relevés à la validation de H2 : l'implémentation par défaut de `stream` quand `complete` échoue (aucun fragment) et sur une réponse vide (aucun fragment).
+  [ ] #12 Ajouter deux Scenario (défaut de `stream` quand `complete` échoue ; réponse vide) et renommer les deux tests d'après eux.
   [ ] #6 Tests manquants : bornes de @classify_status (199, 300, 428, 430, 499, 599, 600 ; l'indicateur de dépassement ne change que le 400) ; la requête est enregistrée même quand le script est épuisé.
   [x] #1 Tests (tokio de test) puis implémentation.
   [?] #5 Décidé : tout statut hors 2xx, 429 et 5xx (donc aussi 1xx et 3xx) est `Permanent`. @InferenceResponse ne garantit pas par le type que son message est de l'assistant : la boucle de tour le vérifie.

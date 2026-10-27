@@ -175,11 +175,73 @@ impl ProviderStore for InMemoryCatalog {
     }
 }
 
+/// Cascade of two storage layers.
+///
+/// `top` is the nearer level (the project) and overrides `base` (the user level). Every `get_*` asks `top` first and falls
+/// back to `base` when `top` gives nothing; every `put_*` writes to `top` only. Layers nest, so `Layered<Layered<A, B>, C>`
+/// is a stack of three levels. It performs no I/O and is used through generic parameters only, never as a trait object.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct Layered<Top, Base> {
+    top: Top,
+    base: Base,
+}
+
+impl<Top, Base> Layered<Top, Base> {
+    /// Stacks `top` above `base`.
+    #[must_use]
+    pub const fn new(top: Top, base: Base) -> Self {
+        Self { top, base }
+    }
+}
+
+impl<Top: AgentStore, Base: AgentStore> AgentStore for Layered<Top, Base> {
+    async fn get_agent(&self, id: &str) -> AgentsResult<Option<AgentDefinition>> {
+        match self.top.get_agent(id).await? {
+            Some(found) => Ok(Some(found)),
+            None => self.base.get_agent(id).await,
+        }
+    }
+
+    fn put_agent(&self, definition: &AgentDefinition) -> impl Future<Output = AgentsResult<()>> + Send {
+        self.top.put_agent(definition)
+    }
+}
+
+impl<Top: ProfileStore, Base: ProfileStore> ProfileStore for Layered<Top, Base> {
+    async fn get_profile(&self, name: &str) -> AgentsResult<Option<ModelProfile>> {
+        match self.top.get_profile(name).await? {
+            Some(found) => Ok(Some(found)),
+            None => self.base.get_profile(name).await,
+        }
+    }
+
+    fn put_profile(&self, profile: &ModelProfile) -> impl Future<Output = AgentsResult<()>> + Send {
+        self.top.put_profile(profile)
+    }
+}
+
+impl<Top: ProviderStore, Base: ProviderStore> ProviderStore for Layered<Top, Base> {
+    async fn get_provider(&self, name: &str) -> AgentsResult<Option<Provider>> {
+        match self.top.get_provider(name).await? {
+            Some(found) => Ok(Some(found)),
+            None => self.base.get_provider(name).await,
+        }
+    }
+
+    fn put_provider(&self, provider: &Provider) -> impl Future<Output = AgentsResult<()>> + Send {
+        self.top.put_provider(provider)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{AgentStore as _, InMemoryCatalog, ProfileStore as _, ProviderStore as _};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::{AgentStore as _, InMemoryCatalog, Layered, ProfileStore, ProviderStore as _};
     use crate::agents::{
-        AgentDefinition, AgentKind, AgentsError, DetectedModel, ModelProfile, Provider, ProviderLevel,
+        AgentDefinition, AgentKind, AgentsError, AgentsResult, DetectedModel, ModelProfile, Provider,
+        ProviderLevel,
     };
 
     fn agent() -> AgentDefinition {
@@ -344,6 +406,255 @@ mod tests {
         assert!(
             matches!(&unknown, Err(AgentsError::UnknownProfile { name }) if name == "missing"),
             "an unknown profile name must fail with UnknownProfile naming it, got {unknown:?}"
+        );
+    }
+
+    /// A project-level provider named `vllm-strix`, with other references than [`provider`].
+    fn project_provider() -> Provider {
+        Provider::new(
+            "vllm-strix".to_owned(),
+            "openai".to_owned(),
+            "project-addr".to_owned(),
+            None,
+            ProviderLevel::Project,
+        )
+        .expect("plain references make a provider")
+    }
+
+    /// A profile store whose storage always fails, to test that a failing top layer is not bypassed.
+    #[derive(Debug)]
+    struct FailingStore;
+
+    impl ProfileStore for FailingStore {
+        fn get_profile(
+            &self,
+            _name: &str,
+        ) -> impl Future<Output = AgentsResult<Option<ModelProfile>>> + Send {
+            std::future::ready(Err(AgentsError::Store("host down".to_owned())))
+        }
+
+        fn put_profile(&self, _profile: &ModelProfile) -> impl Future<Output = AgentsResult<()>> + Send {
+            std::future::ready(Err(AgentsError::Store("host down".to_owned())))
+        }
+    }
+
+    /// A profile store that counts its lookups, to test whether a layer was queried.
+    #[derive(Debug)]
+    struct CountingStore {
+        inner: InMemoryCatalog,
+        lookups: AtomicUsize,
+    }
+
+    impl ProfileStore for CountingStore {
+        fn get_profile(&self, name: &str) -> impl Future<Output = AgentsResult<Option<ModelProfile>>> + Send {
+            let _previous = self.lookups.fetch_add(1, Ordering::SeqCst);
+            self.inner.get_profile(name)
+        }
+
+        fn put_profile(&self, profile: &ModelProfile) -> impl Future<Output = AgentsResult<()>> + Send {
+            self.inner.put_profile(profile)
+        }
+    }
+
+    #[tokio::test]
+    async fn top_overrides_base() {
+        let top = InMemoryCatalog::new();
+        let base = InMemoryCatalog::new();
+        let overriding = profile("strix-qwen").with_context_size(8192);
+        top.put_profile(&overriding)
+            .await
+            .expect("the top profile must be stored");
+        base.put_profile(&profile("strix-qwen").with_context_size(262_144))
+            .await
+            .expect("the base profile must be stored");
+        let layered = Layered::new(top, base);
+        let found = layered
+            .get_profile("strix-qwen")
+            .await
+            .expect("the lookup must succeed");
+        assert_eq!(
+            found,
+            Some(overriding),
+            "the top profile must be returned whole, not the base one"
+        );
+    }
+
+    #[tokio::test]
+    async fn base_answers_when_top_has_no_entry() {
+        let base = InMemoryCatalog::new();
+        let definition = agent();
+        base.put_agent(&definition)
+            .await
+            .expect("the agent must be stored in the base");
+        base.put_provider(&provider())
+            .await
+            .expect("the provider must be stored in the base");
+        base.put_profile(&profile("strix-qwen"))
+            .await
+            .expect("the profile must be stored in the base");
+        let layered = Layered::new(InMemoryCatalog::new(), base);
+        assert_eq!(
+            layered.get_agent("main").await.expect("the lookup must succeed"),
+            Some(definition),
+            "the agent must be answered by the base"
+        );
+        assert_eq!(
+            layered
+                .get_provider("vllm-strix")
+                .await
+                .expect("the lookup must succeed"),
+            Some(provider()),
+            "the provider must be answered by the base"
+        );
+        assert_eq!(
+            layered
+                .get_profile("strix-qwen")
+                .await
+                .expect("the lookup must succeed"),
+            Some(profile("strix-qwen")),
+            "the profile must be answered by the base"
+        );
+        assert!(
+            matches!(layered.get_agent("nobody").await, Ok(None))
+                && matches!(layered.get_provider("nobody").await, Ok(None))
+                && matches!(layered.get_profile("nobody").await, Ok(None)),
+            "an unknown name must give nothing in either layer"
+        );
+    }
+
+    #[tokio::test]
+    async fn put_writes_to_top_layer_only() {
+        let layered = Layered::new(InMemoryCatalog::new(), InMemoryCatalog::new());
+        layered
+            .put_provider(&provider())
+            .await
+            .expect("the put must reach the top layer");
+        assert_eq!(
+            layered
+                .top
+                .get_provider("vllm-strix")
+                .await
+                .expect("the lookup must succeed"),
+            Some(provider()),
+            "the top layer must hold the put provider"
+        );
+        assert_eq!(
+            layered
+                .base
+                .get_provider("vllm-strix")
+                .await
+                .expect("the lookup must succeed"),
+            None,
+            "the base layer must not receive a put"
+        );
+        assert_eq!(
+            layered
+                .get_provider("vllm-strix")
+                .await
+                .expect("the lookup must succeed"),
+            Some(provider()),
+            "the layered catalog must return the put provider"
+        );
+    }
+
+    #[tokio::test]
+    async fn top_error_is_returned_without_querying_base() {
+        let base = CountingStore {
+            inner: InMemoryCatalog::new(),
+            lookups: AtomicUsize::new(0),
+        };
+        base.inner
+            .put_profile(&profile("strix-qwen"))
+            .await
+            .expect("the profile must be stored in the base");
+        let layered = Layered::new(FailingStore, base);
+        let result = layered.get_profile("strix-qwen").await;
+        assert!(
+            matches!(&result, Err(AgentsError::Store(message)) if message == "host down"),
+            "a failing top layer must fail the lookup with its own error, got {result:?}"
+        );
+        assert_eq!(
+            layered.base.lookups.load(Ordering::SeqCst),
+            0,
+            "a failing top layer must not be bypassed: the base must not be queried"
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_profile_works_on_the_cascade() {
+        let base = InMemoryCatalog::new();
+        base.put_profile(&profile("strix-qwen").with_context_size(262_144))
+            .await
+            .expect("the base profile must be stored");
+        let layered = Layered::new(InMemoryCatalog::new(), base);
+        let detected = DetectedModel::new(Some(8192), None, None);
+        let resolved = layered
+            .resolve_profile("strix-qwen", Some(detected))
+            .await
+            .expect("the profile of the base must resolve through the cascade");
+        assert_eq!(
+            resolved.context_size(),
+            262_144,
+            "the override of the base must win over the detected 8192"
+        );
+        let unknown = layered.resolve_profile("missing", Some(detected)).await;
+        assert!(
+            matches!(&unknown, Err(AgentsError::UnknownProfile { name }) if name == "missing"),
+            "an unknown name must fail with UnknownProfile naming it, got {unknown:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn layers_nest_for_more_than_two_levels() {
+        let deepest = InMemoryCatalog::new();
+        deepest
+            .put_provider(&provider())
+            .await
+            .expect("the provider must be stored in the deepest layer");
+        let stack = Layered::new(
+            Layered::new(InMemoryCatalog::new(), InMemoryCatalog::new()),
+            deepest,
+        );
+        assert_eq!(
+            stack
+                .get_provider("vllm-strix")
+                .await
+                .expect("the lookup must succeed"),
+            Some(provider()),
+            "the provider of the deepest layer must be found through the stack"
+        );
+        stack
+            .put_provider(&project_provider())
+            .await
+            .expect("the put must reach the outermost top layer");
+        assert_eq!(
+            stack
+                .top
+                .top
+                .get_provider("vllm-strix")
+                .await
+                .expect("the lookup must succeed"),
+            Some(project_provider()),
+            "the put must land in the outermost top layer"
+        );
+        assert_eq!(
+            stack
+                .top
+                .base
+                .get_provider("vllm-strix")
+                .await
+                .expect("the lookup must succeed"),
+            None,
+            "the middle layer must not receive the put"
+        );
+        assert_eq!(
+            stack
+                .base
+                .get_provider("vllm-strix")
+                .await
+                .expect("the lookup must succeed"),
+            Some(provider()),
+            "the deepest layer must keep its own provider"
         );
     }
 }
