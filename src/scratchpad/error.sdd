@@ -114,3 +114,10 @@ Tasks:
   [ ] #1 Tests des textes `Display`, des classements de `from_rhai` (un test par variante de Rhai listée) et du dépliage des erreurs enveloppées, puis l'énumération.
   [?] #2 Posé : @ScratchpadError::class et @ErrorClass existent pour que le signal de qualité « nombre d'erreurs Rhai » (`agent-sessions/session#FR-13`) et l'audit comptent par classe sans retenir de texte ; la boucle de tour (domaine `session`) les consomme.
   [?] #3 Posé : le genre « profondeur d'expression » vient d'une erreur d'analyse de Rhai (profondeur maximale d'expression) et non d'une erreur d'exécution : à vérifier par un test dès l'implémentation, le classement de `Syntax` ou de `Limit` découlant de la variante réellement produite.
+  [?] #4 `ErrorClass` existe déjà à la racine (`agents::ErrorClass`) : voir ../lib.sdd #2 (réexport sous `ScratchpadErrorClass`).
+  [?] #5 Dépliage des wrappers : la fonction retenue pour un `NotFound` est la plus interne ; un wrapper de module (`ErrorInModule`)
+      préfixe le message par `in module {name}: ` (la spec ne dit que `in function`). Un `NotFound` sous un module n'a pas de fonction.
+  [?] #6 `EvalAltResult` est `#[non_exhaustive]` dans Rhai : rustc exige un bras `_` dans `classify`, qui est aussi le repli `Runtime`
+      de la spec. `clippy::wildcard_enum_match_arm` est levé à la fonction `classify` par un `#[expect]` motivé. Décision de harnais à
+      confirmer.
+  [?] #7 Une `ErrorRuntime` sans message (`throw` sans valeur) rend « no message was given » : la spec ne dit rien de ce cas.

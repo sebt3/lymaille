@@ -6,6 +6,7 @@
 mod agents;
 mod clock;
 mod context;
+mod scratchpad;
 mod session;
 
 pub use agents::{
@@ -18,6 +19,11 @@ pub use clock::{Clock, ManualClock, SystemClock, Timestamp};
 pub use context::{
     Budget, CompactionStrategy, ContextError, ContextResult, DefaultStrategy, Digest, ReplayMode, Summarizer,
     UsageTracker, estimate_tokens, replayed_reasoning,
+};
+pub use scratchpad::{
+    CoreGroup, ErrorClass as ScratchpadErrorClass, GrantedModule, GrantedSkill, GrantedToolset, Grants,
+    LimitKind, NotFoundKind, Rendered, ScratchpadError, ScratchpadLimits, ScratchpadResult, ScriptPosition,
+    full_text, register_format_functions, render_value, truncate_middle,
 };
 pub use session::{
     AgentRef, Backoff, BoundaryKind, CancelHandle, Event, EventKind, EventSink, FormatVersion, History,

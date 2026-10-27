@@ -133,3 +133,9 @@ Tasks:
   [?] #2 Posé : liste des fonctions et noms (`to_text`, `to_json`, `to_json_pretty`, `to_table`, `pluck`, `get_path`, `grep_lines`, `head_lines`, `tail_lines`, `truncate`, `truncate_ends`). `agent-sessions/scratchpad#FR-8` en donne le genre (texte, JSON, tableau aligné, extraction, troncature début et fin) sans noms : ils sont à confirmer avec l'auteur du skill intégré (`toolsets`).
   [?] #3 Posé : pas de format YAML ni Markdown : `vynil-core` offre `yaml_encode` dans ses modules toujours disponibles, mais ce module n'est pas accordé par le scratchpad (seuls le groupe pur et les groupes accordés le sont). À rouvrir si un besoin de YAML apparaît.
   [?] #4 Posé : la largeur d'une cellule se compte en caractères, pas en cellules d'affichage (écritures asiatiques, emoji) ; le tableau est destiné à un LLM, non à un terminal.
+  [?] #5 Collision de nom : Rhai définit déjà `to_json` (méthode du paquet standard sur les tables, présente dans `Engine::new()`).
+      L'enregistrement de `to_json(value)` s'ajoute à cette fonction : `to_json(map)` peut résoudre vers celle de Rhai. Le test
+      `structured_object_as_json` passe donc sans l'implémentation (non discriminant). À trancher : renommer, ou accepter la surcharge.
+  [?] #6 `to_table` : sans clé, ou avec `columns` vide, la chaîne est vide (et non l'en-tête seul) ; une colonne qui n'est pas une chaîne
+      est refusée (message nommant l'indice) ; une cellule non chaîne passe par le texte de `full_text` (le `()` et le blob ne sont pas
+      du JSON strict).

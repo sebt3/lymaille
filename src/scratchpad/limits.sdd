@@ -103,3 +103,7 @@ Tasks:
   [?] #3 Surcharge « par définition d'agent » (`agent-sessions/scratchpad#FR-4`) : @SandboxLimits (domaine `agents`, ../agents/definition.sdd) ne porte aujourd'hui que le délai de script et le plafond de rendu. Pour surcharger les trois plafonds de mémoire, @SandboxLimits doit gagner trois champs optionnels (chaîne, tableau, table), avec montée de l'empreinte de définition (`fingerprint`). À trancher par le développeur principal. Recommandation : étendre @SandboxLimits (champs `Option`, absents = défauts), sans quoi FR-4 n'est pas tenue.
   [?] #4 Posé : « 16 Mio » est lu comme 16 mébioctets (`16 * 1024 * 1024`) d'octets UTF-8, la taille de chaîne de Rhai étant comptée en octets ; un LLM qui construit une chaîne multi-octets atteint donc le plafond avant 16 millions de caractères. Écart sans conséquence pour le garde-fou.
   [?] #5 Posé : le délai de script de @SandboxLimits n'est pas lu ici : un dépassement de délai n'est qu'un événement `Overrun` de la boucle de tour (`agent-sessions#FR-5`) ; aucune limite de durée n'est posée sur le moteur.
+  [?] #6 `set_max_call_levels(512)` : dans un build de débogage, 512 niveaux d'appels de fonctions Rhai débordent la pile de 2 Mio
+      d'un thread (abandon du processus : « has overflowed its stack »). Le test `call_depth_exceeded` s'exécute donc sur un thread
+      de 64 Mio. Question ouverte : faut-il dimensionner la pile du thread d'évaluation (`spawn_blocking` de ./run.sdd), ou revoir
+      la profondeur ? Un débordement de pile est un abandon de l'hôte, non une erreur rendue au LLM.
