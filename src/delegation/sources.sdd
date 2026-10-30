@@ -1,7 +1,7 @@
 Spec: sources
 
 Purpose:
-  Événements que les watchers observent : trait de source branché par l'hôte, concentrateur qui reçoit les notifications, quatre sources fournies (fin d'un sous-agent, notifications MCP, changements de todo et de Memory, minuteurs échéance et périodique) et règles de restauration des minuteurs
+  Événements que les watchers observent : trait de source branché par l'hôte, concentrateur qui reçoit les notifications et les événements du minuteur rattaché, quatre sources fournies (fin d'un sous-agent, notifications MCP, changements de todo et de Memory, minuteurs échéance et périodique) et règles de restauration des minuteurs
     (`agent-sessions/delegation#FR-9`, `FR-10`, `FR-12`, `AC-6`).
 
 Owns:
@@ -17,22 +17,24 @@ Exposes:
   @BUILTIN_SOURCES
 
 Accepts:
-  @WatchEvent::new: le nom de la source, un nom d'événement, une donnée JSON et un @Timestamp.
-  @EventSource::name: aucun argument ; le nom stable de la source. @EventSource::drain: aucun argument ; rend les @WatchEvent en attente, une fois. Trait synchrone de l'hôte (`Send + Sync`).
-  @EventHub::new: aucun argument. @EventHub::register: une source (@EventSource, partagée) ; refuse un nom déjà pris. @EventHub::notify: une source par son nom, un nom d'événement et une donnée (l'appel de notification de l'hôte) ; refuse une source inconnue. @EventHub::poll: aucun argument ; rend tous les événements en attente de toutes les sources, dans l'ordre d'arrivée.
-  @Timer::deadline: un identifiant et un @Timestamp d'échéance. @Timer::periodic: un identifiant, une période (durée non nulle) et le prochain déclenchement (@Timestamp).
-  @TimerSource::new: aucun argument. @TimerSource::add: un @Timer ; refuse un identifiant vide ou en double. @TimerSource::remove: un identifiant. @TimerSource::tick: le @Timestamp courant ; fait avancer les minuteurs et met en attente leurs événements. @TimerSource::restore: les minuteurs persistés et le @Timestamp courant. @TimerSource::timers: aucun argument ; les minuteurs à persister.
+  @WatchEvent::new: le nom de la source, un nom d'événement, une donnée JSON et un @Timestamp. @WatchEvent::source, @WatchEvent::name, @WatchEvent::data et @WatchEvent::at : aucun argument ; rendent respectivement la source, le nom, la donnée et l'instant de l'événement.
+  @EventSource::name: aucun argument ; le nom stable de la source. @EventSource::drain: aucun argument ; rend `DelegationResult<Vec<WatchEvent>>` : les @WatchEvent en attente, une fois ; erreur si un verrou interne est empoisonné. Trait synchrone de l'hôte (`Send + Sync`).
+  @EventHub::new: aucun argument. @EventHub::register: une source (@EventSource, partagée) ; refuse un nom vide, un nom réservé (les quatre @BUILTIN_SOURCES) ou déjà pris ; l'erreur est une `InvalidWatcher` dont la raison est fixe. @EventHub::notify: une source par son nom, un nom d'événement, une donnée et un @Timestamp (`at`, ajouté : @WatchEvent::new en exige un et la notification de l'hôte le fournit) ; refuse une source inconnue (l'erreur la nomme) et refuse le nom `timer` (les événements de minuteur viennent du minuteur rattaché) ; les noms `subagent`, `mcp` et `workspace` sont acceptés sans enregistrement. @EventHub::attach_timers: un @TimerSource partagé (`Arc`) ; un second rattachement est refusé (`InvalidWatcher`, raison fixe). @EventHub::poll: aucun argument ; rend `DelegationResult<Vec<WatchEvent>>` : tous les événements en attente, selon l'ordre décrit dans Must.
+  @Timer::deadline: un identifiant et un @Timestamp d'échéance. @Timer::periodic: un identifiant, une période (@Duration) et le prochain déclenchement (@Timestamp) ; rend `DelegationResult<Timer>` et refuse une période inférieure à une milliseconde (`InvalidTimer`). @Timer::id : aucun argument ; l'identifiant. @Timer::kind : aucun argument ; le @TimerKind (`const`). @Timer::trigger : aucun argument ; l'instant d'échéance ou le prochain déclenchement (`const`).
+  @TimerSource::new: aucun argument. @TimerSource::add: un @Timer ; rend `DelegationResult<()>` ; refuse un identifiant vide ou en double (`InvalidTimer`). @TimerSource::remove: un identifiant ; rend `DelegationResult<bool>` : vrai si un minuteur a été retiré, faux s'il était absent (pas d'erreur). @TimerSource::tick: le @Timestamp courant ; rend `DelegationResult<()>` ; fait avancer les minuteurs et met en attente leurs événements. @TimerSource::restore: les minuteurs persistés et le @Timestamp courant ; rend `DelegationResult<()>` ; remplace les minuteurs par ceux qui sont persistés ; un identifiant vide ou en double fait échouer la restauration et les minuteurs précédents sont conservés. @TimerSource::timers: aucun argument ; rend `DelegationResult<Vec<Timer>>`, les minuteurs à persister, dans l'ordre d'insertion.
 
 Returns:
   @BUILTIN_SOURCES: les noms des quatre sources fournies : `subagent`, `mcp`, `workspace` (todo et Memory) et `timer`.
-  Un événement de minuteur porte le nom `due`, l'identifiant du minuteur et son retard en millisecondes (`late_ms`) en donnée.
+  Un événement de minuteur porte la source `timer`, le nom `due`, l'identifiant du minuteur (`id`) et son retard en millisecondes (`late_ms`) en donnée. Le retard est l'instant où le minuteur est tiré moins son échéance ou son déclenchement prévu, saturé à zéro.
 
 Must:
-  Un minuteur échéance se déclenche une fois quand l'horloge atteint son échéance, puis disparaît ; un minuteur périodique se déclenche quand l'horloge atteint son prochain déclenchement et se réarme sur le prochain multiple de sa période strictement postérieur à l'horloge (un déclenchement par `tick`, jamais en rafale).
+  Un minuteur échéance se déclenche une fois quand l'horloge atteint son échéance, puis disparaît ; un minuteur périodique se déclenche quand l'horloge atteint son prochain déclenchement (inclus) et se réarme sur le prochain multiple de sa période strictement postérieur à l'horloge (un déclenchement par `tick`, jamais en rafale).
   À la restauration (@TimerSource::restore), une échéance manquée se déclenche une fois, immédiatement, avec son retard ; un minuteur périodique manqué plusieurs fois se déclenche au plus une fois puis saute les occurrences manquées et se réarme à la prochaine (`agent-sessions/delegation#FR-12`).
-  Les minuteurs se sérialisent (identifiant, nature, échéance ou période et prochain déclenchement) pour être persistés avec la session ; aucune tâche de fond : l'hôte appelle `tick` (`agent-sessions#NFR-1`).
-  Le concentrateur conserve l'ordre d'arrivée, est `Send + Sync` et ne bloque pas ; une source qui rend `drain` deux fois ne rend jamais deux fois le même événement.
-  Les noms de source sont des identifiants non vides ; les noms de source fournis (@BUILTIN_SOURCES) sont réservés : l'hôte ne peut pas les enregistrer sous un autre trait.
+  Les minuteurs se sérialisent (identifiant, nature, échéance ou période et prochain déclenchement) pour être persistés avec la session ; aucune tâche de fond : l'hôte appelle `tick` (`agent-sessions#NFR-1`). Le format sérialisé (champs `id` et `schedule`, avec `kind` valant `deadline` ou `periodic`) devient un format persisté : il ne change pas sans migration.
+  Ordre d'arrivée de @EventHub::poll (décision du lot D3) : d'abord les notifications déjà reçues, dans l'ordre de leur notification ; ensuite les événements drainés des sources enregistrées, par ordre d'enregistrement ; enfin ceux du minuteur rattaché. Un événement drainé n'a pas d'instant d'arrivée propre : il arrive au moment où `poll` le draine, et son @WatchEvent::at est l'instant qu'il porte à sa production.
+  Un seul minuteur est rattaché à un concentrateur. @EventHub::poll rend les événements du minuteur rattaché comme ceux d'une source enregistrée.
+  Le concentrateur est `Send + Sync` et ne bloque pas ; une source qui rend `drain` deux fois ne rend jamais deux fois le même événement.
+  Les noms de source sont des identifiants non vides ; les noms de source fournis (@BUILTIN_SOURCES) sont réservés à l'enregistrement : l'hôte ne peut pas les enregistrer sous un autre trait. Le nom `timer` ne se notifie pas.
 
 Depends on:
   ./error.sdd
@@ -60,10 +62,35 @@ Scenario: un déclenchement par tick
   When tick est appelé à t=3500 depuis un prochain déclenchement à t=1000
   Then un seul événement est produit et le prochain déclenchement est t=4000
 
+Scenario: périodique tiré exactement à son prochain déclenchement
+  Given un minuteur périodique de période 1000 dont le prochain déclenchement est t=1000
+  When tick est appelé à t=1000
+  Then un seul événement est produit avec un retard de 0 et le prochain déclenchement est t=2000
+
+Scenario: retard d'un minuteur périodique
+  Given un minuteur périodique de période 1000 dont le prochain déclenchement est t=1000
+  When tick est appelé à t=3500
+  Then l'événement porte un retard de 2500 ms, calculé depuis le déclenchement prévu
+
+Scenario: retrait d'un minuteur
+  Given un minuteur échéance enregistré
+  When remove est appelé pour cet identifiant, puis une seconde fois
+  Then la première fois rend vrai et le minuteur n'est plus listé ; la seconde rend faux
+
+Scenario: échec de restauration sans perte
+  Given un minuteur échéance `daily` enregistré
+  When restore est appelé avec un identifiant en double, puis avec un identifiant vide
+  Then chaque restauration échoue et `daily` reste le seul minuteur listé
+
 Scenario: notification de l'hôte
   Given une source branchée par l'hôte et le concentrateur
   When l'hôte notifie un événement puis poll est appelé
   Then l'événement est rendu une fois, avec son nom et sa donnée
+
+Scenario: poll draine une source enregistrée
+  Given une source branchée par l'hôte qui détient deux événements
+  When poll est appelé, puis une seconde fois
+  Then les deux événements sont rendus dans l'ordre de la source, et la seconde fois rien n'est rendu
 
 Scenario: source inconnue
   Given un concentrateur sans source `ghost`
@@ -75,11 +102,42 @@ Scenario: nom de source pris ou réservé
   When register est appelé pour un doublon puis pour la source `timer` de l'hôte
   Then les deux sont refusés
 
+Scenario: refus d'enregistrement, variante et raison
+  Given un concentrateur vide, puis une source déjà enregistrée sous `host-alerts`
+  When register est appelé pour un nom vide, puis pour le doublon `host-alerts`
+  Then chaque refus est une `InvalidWatcher` qui nomme le nom refusé et donne sa raison fixe
+
+Scenario: noms réservés refusés à l'enregistrement
+  Given un concentrateur vide
+  When register est appelé pour chacun des quatre noms de @BUILTIN_SOURCES
+  Then chaque refus est une `InvalidWatcher` qui nomme ce nom et donne la raison « réservé »
+
+Scenario: rattachement des minuteurs
+  Given un concentrateur, un minuteur échéance à t=1000 et un rattachement du minuteur
+  When tick est appelé à t=1000 puis poll est appelé
+  Then poll rend l'événement `due` du minuteur, une seule fois ; un second rattachement est refusé
+
+Scenario: ordre d'arrivée de poll
+  Given une notification `subagent` reçue, deux sources enregistrées `host-a` puis `host-b` qui détiennent chacune un événement, et un minuteur échéance rattaché déjà échu
+  When poll est appelé
+  Then les événements rendus sont, dans cet ordre : la notification, l'événement de `host-a`, celui de `host-b`, puis l'événement du minuteur
+
+Scenario: notification refusée pour timer
+  Given un concentrateur sans minuteur rattaché
+  When notify est appelé pour le nom `timer`
+  Then l'erreur est une `InvalidWatcher` qui nomme `timer` et indique d'où viennent les événements de minuteur
+
+Scenario: sources intégrées alimentées sans enregistrement
+  Given un concentrateur vide, sans enregistrement
+  When notify est appelé pour `subagent`, `mcp` puis `workspace`, puis poll est appelé
+  Then les trois événements sont rendus dans l'ordre de leur notification
+
 Scenario: aller-retour des minuteurs
   Given des minuteurs persistés par timers
   When ils sont sérialisés puis restaurés à la même heure
   Then aucun événement n'est produit et les minuteurs sont égaux
 
 Tasks:
-  [ ] #1 Tests puis implémentation (lot D3).
+  [x] #1 Tests puis implémentation (lot D3), validé le 2026-10-30.
   [?] #2 Posé : les sources `subagent`, `mcp` et `workspace` sont alimentées par `notify` (le registre des runs, le connecteur MCP et le module de Memory/todo l'appellent) ; ce fichier ne les branche pas lui-même aux modules de ../modules/. À confirmer.
+    Décision du lot D3 (2026-10-30, développeur principal) : `subagent`, `mcp` et `workspace` sont alimentées par `notify` sans enregistrement, ce qui répond à la question ci-dessus pour ces trois sources ; `timer` n'est pas alimenté par `notify` mais par le minuteur rattaché (@EventHub::attach_timers) ; `notify("timer", ...)` est refusé. Reste à confirmer côté modules : que le registre des runs, le connecteur MCP et le module de Memory/todo appellent bien `notify`. Marqueur `[?]` laissé à l'orchestrateur.

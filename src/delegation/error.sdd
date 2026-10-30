@@ -13,7 +13,7 @@ Exposes:
 Raises:
   @DelegationError::UnknownSubagent: sous-agent absent de la définition de l'agent principal ; le message le nomme.
   @DelegationError::UnknownRun: identifiant de run inconnu du registre.
-  @DelegationError::InvalidWatcher: identifiant vide, source inconnue, prédicat qui ne compile pas ou qui n'est pas une expression.
+  @DelegationError::InvalidWatcher: identifiant vide, source inconnue, nom de source vide, réservé ou déjà pris, `notify` sur la source `timer`, second rattachement des minuteurs, prédicat qui ne compile pas ou qui n'est pas une expression.
   @DelegationError::InvalidTimer: durée nulle, identifiant vide ou en double.
   @DelegationError::InvalidSchema: schéma de résultat d'un sous-agent qui n'est pas un schéma JSON utilisable.
   @DelegationError::Launch: échec du lancement d'un sous-agent par l'hôte ; texte fixe, sans contenu.

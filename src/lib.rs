@@ -26,8 +26,8 @@ pub use context::{
     UsageTracker, estimate_tokens, replayed_reasoning,
 };
 pub use delegation::{
-    DelegationError, DelegationResult, InferenceLimiter, LocalCounter, Permit, RequestCounter,
-    announced_capacity,
+    BUILTIN_SOURCES, DelegationError, DelegationResult, EventHub, EventSource, InferenceLimiter,
+    LocalCounter, Permit, RequestCounter, Timer, TimerKind, TimerSource, WatchEvent, announced_capacity,
 };
 pub use modules::{
     InMemoryMemoryStore, McpConnector, McpEnv, McpError, McpLister, McpRetryPolicy, McpTool, Memory,

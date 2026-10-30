@@ -1,10 +1,13 @@
 //! Delegation to autonomous sub-agents, watchers, structured results and the run registry.
 //!
-//! Declares the sub-modules of the domain as they are delivered (`agent-sessions/delegation`). The typed error and the
-//! inference limiter are here for now: the other files arrive with their own lots (`./delegation.sdd`, task #3).
+//! Declares the sub-modules of the domain as they are delivered (`agent-sessions/delegation`). The typed error, the
+//! inference limiter and the event sources are here for now: the other files arrive with their own lots
+//! (`./delegation.sdd`, task #3).
 
 mod capacity;
 mod error;
+mod sources;
 
 pub use capacity::{InferenceLimiter, LocalCounter, Permit, RequestCounter, announced_capacity};
 pub use error::{DelegationError, DelegationResult};
+pub use sources::{BUILTIN_SOURCES, EventHub, EventSource, Timer, TimerKind, TimerSource, WatchEvent};
