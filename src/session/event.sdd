@@ -81,4 +81,5 @@ Tasks:
       Règle validée le 2026-10-29 ; son application revient à la boucle de tour (session.sdd #2).
   [x] #8 Variante `McpReconnect { role, attempt, delay_ms }` ajoutée le 2026-10-30 pour `agent-sessions/modules#FR-9` (un événement par tentative de reconnexion) ; ne porte ni argument ni secret.
   [x] #9 Variante `TargetOpened { kind, name }` : un agent de configuration ouvre une cible (`agent-sessions#BR-5`, décidé le 2026-10-30) ; `kind` vaut `definition` ou `session`, `name` est le nom de l'agent avec son contexte, ou l'identifiant de la session ; aucun contenu de session, aucune valeur.
+  [ ] #10 Variante `RunInterrupted { run, session }` (run de sous-agent interrompu à la restauration de la session principale, avec la référence de la session du sous-agent : `agent-sessions/delegation#FR-14`) : spec, tests (aller-retour JSON et liste exhaustive des variantes) et implémentation, au lot D6 de ../delegation/run.sdd.
   [!] #3 Événements de délégation (démarrage, fin de sous-agent, watcher déclenché) : définis par le domaine `delegation`.
