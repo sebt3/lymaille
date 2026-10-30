@@ -104,4 +104,4 @@ Source: user instruction, 2026-10-24
 
 ## Réalisation SpecDD
 
-`TBD` : aucune spec `.sdd` n'existe encore.
+Specs : `src/modules/modules.sdd` et ses specs enfants (`todo`, `memory`, `memory_module`, `mcp_name`, `mcp`, `mcp_module`). Restent hors des specs : `FR-7` (notifications MCP vers les watchers, domaine `delegation`) et un connecteur MCP réel.

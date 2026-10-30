@@ -1,0 +1,60 @@
+Spec: mcp_name
+
+Purpose:
+  Nom de la fonction Rhai dérivé du nom d'un tool MCP, et contrôle des collisions d'un serveur (`agent-sessions/modules#FR-10`, `agent-sessions/modules#AC-6`).
+
+Owns:
+  ./mcp_name.rs
+
+Exposes:
+  @function_name
+  @name_tools
+
+Accepts:
+  @function_name: le nom d'un tool MCP.
+  @name_tools: le nom du rôle et les noms de tools du serveur ; rend `ModulesResult<Vec<(String, String)>>` (nom de fonction, nom MCP d'origine), dans l'ordre reçu.
+
+Returns:
+  @function_name: le nom de fonction Rhai : chaque caractère qui n'est pas ASCII alphanumérique ni `_` devient `_`.
+
+Raises:
+  @ModulesError::InvalidMcp: deux tools qui aboutissent au même nom de fonction (le message nomme le rôle et les deux noms d'origine), un nom de tool vide, ou un nom qui n'est pas un identifiant Rhai utilisable après transformation.
+
+Must:
+  `loki.query` donne `loki_query` et `get-pods` donne `get_pods` ; un nom déjà valide reste identique.
+  Un nom qui commence par un chiffre, ou qui est un mot réservé de Rhai (`fn`, `let`, `import`, `const`, `global`, `this`...), n'est pas un identifiant utilisable : @name_tools le refuse (@ModulesError::InvalidMcp) au lieu de le déformer en silence.
+  Le résultat de @function_name ne dépend que de son argument (pur) ; Unicode non ASCII devient `_` caractère par caractère.
+  Les règles d'identifiant sont celles de @GrantedModule::new (../scratchpad/grant.sdd) : une seule définition, pas de copie à maintenir.
+
+Depends on:
+  ./error.sdd
+  ../scratchpad/grant.sdd
+
+Scenario: point et tiret deviennent des soulignés
+  Given les noms `loki.query` et `get-pods`
+  When function_name est appelée
+  Then les résultats sont `loki_query` et `get_pods`
+
+Scenario: nom valide inchangé
+  Given le nom `list_pods`
+  When function_name est appelée
+  Then le résultat est `list_pods`
+
+Scenario: collision refusée
+  Given les noms `a.b` et `a_b` du rôle `grafana`
+  When name_tools est appelée
+  Then l'erreur nomme `grafana`, `a.b` et `a_b`
+
+Scenario: noms distincts conservés dans l'ordre
+  Given `loki.query` et `get-pods`
+  When name_tools est appelée
+  Then elle rend `(loki_query, loki.query)` puis `(get_pods, get-pods)`
+
+Scenario: nom inutilisable refusé
+  Given les noms `1abc`, `fn` et ``
+  When name_tools est appelée avec chacun
+  Then chaque appel rend @ModulesError::InvalidMcp
+
+Tasks:
+  [ ] #1 Tests puis implémentation. L'exposition des règles d'identifiant de @GrantedModule::new à ce fichier (fonction `pub(crate)` dans ../scratchpad/grant.rs) est la seule modification admise hors du module.
+  [?] #2 Posé : un nom de tool qui commence par un chiffre ou qui est un mot réservé de Rhai fait échouer le chargement du module (`agent-sessions/modules#FR-10` ne parle que des caractères invalides). Alternative : préfixer par `_`. À décider.

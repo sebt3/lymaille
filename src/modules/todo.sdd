@@ -1,0 +1,94 @@
+Spec: todo
+
+Purpose:
+  Liste de tâches de la session et module Rhai `todo` : création, changement d'état, lecture ; chaque changement émet un événement
+    et la liste se persiste avec l'état de session (`agent-sessions/modules#FR-1`, `agent-sessions/modules#AC-1`).
+
+Owns:
+  ./todo.rs
+
+References:
+  ../session/state.sdd
+  ../session/event.sdd
+
+Exposes:
+  @TodoStatus
+  @TodoItem
+  @TodoList
+  @todo_module
+
+Accepts:
+  @TodoList::new: aucun argument ; rend une liste vide. @TodoList::from_values: les valeurs JSON de @SessionState::todo ; rend `ModulesResult<Self>`.
+  @TodoList::add: le texte de la tâche ; rend son identifiant. @TodoList::set_status: un identifiant et un @TodoStatus. @TodoList::items: aucun argument.
+  @TodoList::to_values: aucun argument ; rend les valeurs JSON à confier à l'état de session.
+  @todo_module: un @TodoList partagé, l'identifiant de la session, un @EventSink partagé et une @Clock partagée ; rend le @rhai::Module `todo`.
+
+Returns:
+  @TodoItem: identifiant (entier, croissant, jamais réutilisé dans la liste), texte, @TodoStatus (`pending`, `in_progress`, `done`).
+  Module Rhai `todo` : `add(texte)` rend l'identifiant ; `set_status(id, état)` avec l'état en texte (`"pending"`, `"in_progress"`, `"done"`) ; `list()` rend un tableau de maps `#{id, text, status}` ; `get(id)` rend la map d'une tâche.
+
+Raises:
+  @ModulesError::InvalidTodo: texte vide ou blanc, état inconnu, identifiant inconnu. Les fonctions Rhai rendent la même erreur en erreur d'exécution Rhai.
+  @ModulesError::Poisoned: verrou interne empoisonné.
+
+Must:
+  @TodoList est un handle partagé (`Clone`, `Send + Sync`) : le module Rhai et la boucle de tour voient la même liste.
+  Chaque changement (`add`, `set_status`) émet un @EventKind::TodoChanged, daté par l'horloge injectée ; la lecture n'en émet aucun ; un changement refusé n'en émet aucun.
+  L'événement ne porte pas le texte de la tâche (@EventKind::TodoChanged n'a pas de champ).
+  @TodoList::to_values puis @TodoList::from_values rendent une liste égale, identifiants compris ; l'identifiant suivant reprend après le plus grand identifiant relu.
+  @TodoList::from_values refuse une valeur qui n'est pas une tâche reconnue (@ModulesError::InvalidTodo) ; une liste de valeurs vide donne une liste vide.
+  Aucune E/S ; le module ne lit pas l'horloge système (`agent-sessions#NFR-1`).
+
+Depends on:
+  ./error.sdd
+  ../session/event.sdd
+  ../session/id.sdd
+  ../clock.sdd
+  rhai
+  serde
+  serde_json
+
+Scenario: ajouter une tâche émet un événement
+  Given une liste vide, un @RecordingSink et le module `todo`
+  When un script appelle `todo::add("vérifier les pods")`
+  Then la liste porte une tâche en attente et un seul `TodoChanged` a été émis
+
+Scenario: changer l'état survit à une restauration
+  Given une liste dont une tâche passe à `done` par `todo::set_status`
+  When la liste est convertie par to_values puis relue par from_values
+  Then la tâche est `done` et un `TodoChanged` avait été émis pour le changement
+
+Scenario: la lecture n'émet rien
+  Given une liste de deux tâches et un @RecordingSink vide
+  When un script appelle `todo::list()` et `todo::get(1)`
+  Then aucun événement n'a été émis
+
+Scenario: état inconnu refusé
+  Given une liste d'une tâche
+  When un script appelle `todo::set_status(1, "fini")`
+  Then une erreur Rhai nomme l'état refusé, la tâche est inchangée et aucun événement n'est émis
+
+Scenario: identifiant inconnu refusé
+  Given une liste vide
+  When un script appelle `todo::set_status(7, "done")`
+  Then une erreur Rhai nomme l'identifiant 7 et aucun événement n'est émis
+
+Scenario: texte blanc refusé
+  Given une liste vide
+  When un script appelle `todo::add("   ")`
+  Then une erreur Rhai est rendue et la liste reste vide
+
+Scenario: les identifiants ne sont pas réutilisés
+  Given une liste de trois tâches relue depuis ses valeurs
+  When une quatrième tâche est ajoutée
+  Then son identifiant est supérieur à celui de la troisième
+
+Scenario: valeur illisible refusée
+  Given une valeur JSON qui n'est pas une tâche
+  When from_values la reçoit
+  Then l'erreur est @ModulesError::InvalidTodo
+
+Tasks:
+  [ ] #1 Tests puis implémentation.
+  [?] #2 Posé : les types de la todo vivent ici et @SessionState::todo reste une liste de valeurs JSON opaques (la session ne dépend pas de `modules`) ; la conversion se fait par to_values et from_values. Le DSD (`session#2` de ../session/state.sdd) prévoit des types nommés dans l'état ; les y mettre ferait dépendre `session` de `modules` ou obligerait à déplacer les types dans `session`. À décider.
+  [?] #3 Posé : trois états (`pending`, `in_progress`, `done`) ; le DSD (`agent-sessions/modules#FR-1`) parle de « changement d'état » sans fixer la liste. À confirmer (par exemple un état « annulée »).

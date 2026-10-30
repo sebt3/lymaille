@@ -1,0 +1,77 @@
+Spec: mcp
+
+Purpose:
+  Frontière avec les serveurs MCP distants : tool décrit par un serveur, erreurs de connexion, traits de connecteur (listage seul, puis listage et appel) et connecteur scripté pour les tests
+    (`agent-sessions/modules#FR-6`, `agent-sessions/modules#FR-11`, `agent-sessions#CON-5`).
+
+Owns:
+  ./mcp.rs
+
+References:
+  ../scratchpad/inspect.sdd
+
+Exposes:
+  @McpTool
+  @McpError
+  @McpLister
+  @McpConnector
+  @ScriptedConnector
+
+Accepts:
+  @McpTool::new: un nom, une description et un schéma d'entrée (@serde_json::Value).
+  @McpLister::list_tools: aucun argument.
+  @McpConnector::call_tool: le nom MCP d'origine du tool et ses arguments (@serde_json::Value). @McpConnector::reconnect: aucun argument ; rétablit la connexion après une perte.
+  @ScriptedConnector::new: les tools que le faux serveur expose. @ScriptedConnector::with_result: le nom d'un tool et la valeur qu'il rend. @ScriptedConnector::fail_unreachable: un nombre d'appels consécutifs qui échouent par @McpError::Unreachable. @ScriptedConnector::fail_tool: le nom d'un tool qui rend @McpError::Failed. @ScriptedConnector::listing_unreachable: le listage échoue par @McpError::Unreachable.
+
+Returns:
+  @McpLister::list_tools: les @McpTool du serveur. @McpConnector::call_tool: la valeur JSON rendue par le tool. @ScriptedConnector expose en lecture le nombre d'appels, le nombre de reconnexions et les arguments reçus par appel.
+
+Raises:
+  @McpError::Unreachable: le serveur ne répond plus ; l'appelant peut tenter de se reconnecter. @McpError::Failed: le serveur a répondu par une erreur (tool inconnu, erreur du tool, réponse illisible) ; l'appelant ne retente pas.
+
+Must:
+  @McpConnector étend @McpLister : un connecteur complet sait lister et appeler ; un code qui ne reçoit qu'un @McpLister ne peut pas appeler (mode coquille, `FR-11` : l'impossibilité d'appeler tient au type).
+  Les traits sont asynchrones, sans futur boxé ni macro, les futurs rendus sont `Send` ; ils sont `Send + Sync` et s'utilisent derrière un pointeur partagé.
+  Aucun transport réel ici : le connecteur d'un serveur distant est du ressort de l'hôte (ou d'un lot ultérieur), la librairie ne s'y connecte pas dans cette spec.
+  @McpError ne porte aucune valeur d'argument, aucune référence d'authentification ni aucun secret dans son texte ; le texte d'un @McpError::Failed est celui du serveur et est masqué par l'appelant avant d'atteindre le LLM (./mcp_module.sdd).
+  Les types sont `#[non_exhaustive]`, `Debug`, `Send + Sync` ; @McpTool se sérialise.
+  @ScriptedConnector n'effectue aucune E/S, est partageable entre threads, et consomme ses échecs programmés dans l'ordre.
+
+Depends on:
+  ./error.sdd
+  serde
+  serde_json
+  thiserror
+
+Scenario: le connecteur scripté liste ses tools
+  Given un @ScriptedConnector de deux tools
+  When list_tools est appelé
+  Then les deux tools sont rendus avec leur description et leur schéma
+
+Scenario: résultat programmé
+  Given un connecteur dont le tool `echo` rend `{"ok": true}`
+  When call_tool est appelé pour `echo`
+  Then la valeur rendue est `{"ok": true}` et les arguments reçus sont enregistrés
+
+Scenario: échecs programmés dans l'ordre
+  Given un connecteur dont les deux premiers appels sont injoignables
+  When trois appels sont faits
+  Then les deux premiers rendent Unreachable et le troisième réussit
+
+Scenario: erreur de tool
+  Given un connecteur dont le tool `boom` rend une erreur
+  When call_tool est appelé pour `boom`
+  Then l'erreur est Failed et non Unreachable
+
+Scenario: tool inconnu
+  Given un connecteur qui n'a pas de tool `absent`
+  When call_tool est appelé pour `absent`
+  Then l'erreur est Failed
+
+Scenario: listage seul n'appelle pas
+  Given une fonction qui ne reçoit qu'un @McpLister
+  When elle est écrite
+  Then elle ne peut pas appeler `call_tool` (le type ne l'offre pas)
+
+Tasks:
+  [ ] #1 Tests puis implémentation. Le Scenario « listage seul n'appelle pas » est vérifié par la signature (un test de compilation n'est pas requis : le validateur le constate à la lecture).

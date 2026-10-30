@@ -1,0 +1,45 @@
+Spec: modules
+
+Purpose:
+  Modules Rhai de travail d'une session : todo, Memory (un module par niveau), modules MCP (générés à partir des tools d'un serveur distant, en mode réel ou en mode coquille),
+    point d'extension pour les modules de l'hôte. Réalise `agent-sessions/modules` (./dsd/agent-sessions/modules.md).
+
+Structure:
+  ./mod.rs: déclarations et ré-exports
+  ./error.rs: erreur du module
+  ./todo.rs: liste de tâches de la session et module Rhai `todo`
+  ./memory.rs: Memory, niveaux, trait de stockage et stockage mémoire
+  ./memory_module.rs: modules Rhai `memory_user`, `memory_project` et `memory_session`
+  ./mcp_name.rs: nom d'une fonction Rhai dérivé du nom d'un tool MCP
+  ./mcp.rs: trait du connecteur MCP, tools, erreurs de connexion et connecteur scripté
+  ./mcp_module.rs: génération du module Rhai d'un rôle MCP (réel ou coquille), validation des arguments, reconnexion
+
+Owns:
+  ./mod.rs
+
+References:
+  ../../lymaille.sdd
+  ../../dsd/agent-sessions/modules.md
+  ../session/session.sdd
+  ../scratchpad/scratchpad.sdd
+  ../toolsets/toolsets.sdd
+  ./error.sdd
+  ./todo.sdd
+  ./memory.sdd
+  ./memory_module.sdd
+  ./mcp_name.sdd
+  ./mcp.sdd
+  ./mcp_module.sdd
+
+Must:
+  Ne réaliser aucune E/S propre : le stockage des Memory est un trait que l'hôte implémente (`agent-sessions#CON-1`), le transport MCP est un trait de connecteur que l'hôte (ou un connecteur ultérieur) implémente.
+  Les modules produits sont des @rhai::Module prêts à être accordés (@GrantedModule de ../scratchpad/grant.sdd) : cette librairie ne décide pas de ce qui est accordé, la définition d'agent seule le décide (`agent-sessions#BR-2`).
+  Les fonctions Rhai sont synchrones et appellent les traits asynchrones par `vynil_core::rt::block_on` ; sur un runtime `current_thread`, elles rendent l'erreur explicite de `vynil-core`.
+  Les modules fournis par l'hôte (`agent-sessions/modules#FR-8`) ne demandent aucun code ici : un @GrantedModule construit par l'hôte entre dans @Grants avec les mêmes règles d'unicité et d'accord par définition d'agent (../scratchpad/grant.sdd).
+  Aucun événement, aucune erreur ni aucun enregistrement ne porte un secret ni le corps d'une Memory (`agent-sessions#CON-3`).
+
+Tasks:
+  [ ] #1 Déclarer les sous-modules dans ./mod.rs au fil des specs enfants livrées.
+  [ ] #2 Déclarer le module dans ../lib.sdd et ../lib.rs (`mod modules` et ré-exports) au fil des specs enfants.
+  [?] #3 Noms des modules de Memory : posé `memory_user`, `memory_project`, `memory_session` (`agent-sessions/modules#FR-4` ne fixe que « trois modules, un par niveau »). À confirmer.
+  [?] #4 Le transport MCP réel (client `rmcp` ou autre) n'est pas livré par cette tâche : seul le trait de connecteur et un connecteur scripté le sont. Un connecteur réel est un lot à part, qui demande le choix de la crate et ses dépendances (`agent-sessions#CON-5`). À confirmer.

@@ -1,0 +1,93 @@
+Spec: memory_module
+
+Purpose:
+  Les trois modules Rhai de Memory, un par niveau (`memory_user`, `memory_project`, `memory_session`) : lecture, création, modification, suppression, liste ; les changements émettent un événement
+    (`agent-sessions/modules#FR-4`, `agent-sessions/modules#FR-5`, `agent-sessions/modules#AC-2`).
+
+Owns:
+  ./memory_module.rs
+
+References:
+  ./memory.sdd
+  ../toolsets/assemble.sdd
+
+Exposes:
+  @memory_module
+  @MemoryScopes
+  @memory_module_name
+
+Accepts:
+  @MemoryScopes::new: la référence de l'utilisateur, celle du projet et l'@SessionId ; les trois portées d'une session.
+  @memory_module: un @MemoryLevel, un @MemoryStore partagé, les @MemoryScopes, un @EventSink partagé, une @Clock partagée et l'@SessionId ; rend le @rhai::Module du niveau.
+  @memory_module_name: un @MemoryLevel ; rend le nom du module (`memory_user`, `memory_project`, `memory_session`).
+
+Returns:
+  Module Rhai d'un niveau : `list()` rend un tableau de maps `#{id, title}` ; `read(id)` rend la map `#{id, title, body}` ; `create(id, title, body)` ; `update(id, title, body)` ; `delete(id)`.
+
+Raises:
+  Les erreurs de @MemoryStore deviennent des erreurs Rhai d'exécution explicites (leur texte `Display`). `create` d'un identifiant pris, `read`, `update` et `delete` d'un identifiant inconnu rendent une erreur qui nomme le niveau et l'identifiant, jamais un corps.
+
+Must:
+  La Memory n'est pas dans l'état de session : chaque appel passe par le @MemoryStore, dans la portée du niveau du module.
+  `create`, `update` et `delete` émettent un @EventKind::MemoryChanged avec le niveau (`user`, `project`, `session`) et l'identifiant, jamais le corps ; `list` et `read` n'en émettent pas ; un appel refusé n'en émet pas.
+  Un module expose toutes les fonctions du niveau : l'accès en lecture seule se décide par le toolset (`agent-sessions/modules#FR-4`), dont le module appelle seulement `list` et `read` du module de Memory en dépendance privée (../toolsets/assemble.sdd). La définition d'agent ne porte aucun droit de Memory.
+  Les fonctions sont synchrones et appellent le trait asynchrone par `vynil_core::rt::block_on` ; sur un runtime `current_thread`, elles rendent l'erreur explicite de `vynil-core`.
+  Les noms de module sont des identifiants Rhai valides (../scratchpad/grant.sdd).
+
+Depends on:
+  ./memory.sdd
+  ./error.sdd
+  ../session/event.sdd
+  ../session/id.sdd
+  ../clock.sdd
+  rhai
+  vynil-core
+
+Scenario: création, lecture et événement
+  Given le module `memory_user` et un @RecordingSink
+  When un script appelle `memory_user::create("k", "Titre", "Corps")` puis `memory_user::read("k")`
+  Then la lecture rend le titre et le corps, et un seul `MemoryChanged` de niveau `user` et d'identifiant `k` a été émis, sans le corps
+
+Scenario: niveaux indépendants
+  Given les modules `memory_user` et `memory_project` et une Memory `note` créée dans chacun
+  When chaque module lit `note`
+  Then chacun rend sa propre Memory
+
+Scenario: la liste ne rend que l'identifiant et le titre
+  Given deux Memory créées au niveau projet
+  When un script appelle `memory_project::list()`
+  Then chaque élément porte `id` et `title` et aucun `body`
+
+Scenario: lecture sans événement
+  Given une Memory existante
+  When un script appelle `read` et `list`
+  Then aucun événement n'est émis
+
+Scenario: appel refusé sans événement
+  Given un module sans aucune Memory
+  When un script appelle `read("absente")`, `update("absente", "t", "c")` et `delete("absente")`
+  Then chaque appel rend une erreur Rhai qui nomme le niveau et l'identifiant, et aucun événement n'est émis
+
+Scenario: création d'un identifiant pris
+  Given une Memory `k` existante
+  When un script appelle `create("k", "t", "c")`
+  Then une erreur Rhai nomme le niveau et l'identifiant et la Memory d'origine est inchangée
+
+Scenario: suppression
+  Given une Memory existante
+  When un script appelle `delete` puis `read`
+  Then la lecture échoue et un `MemoryChanged` a été émis pour la suppression
+
+Scenario: la session qualifie le niveau session
+  Given deux sessions distinctes qui partagent le même stockage
+  When chacune crée la Memory `note` par `memory_session`
+  Then chacune ne lit que la sienne
+
+Scenario: runtime current_thread
+  Given un module de Memory appelé depuis un runtime `current_thread`
+  When une fonction est appelée
+  Then l'erreur explicite de `vynil-core` est rendue
+
+Tasks:
+  [ ] #1 Tests puis implémentation.
+  [!] #2 `agent-sessions/modules#AC-2` (second volet) : un agent en lecture seule sur le niveau utilisateur ne peut pas modifier. Le scénario de bout en bout (toolset qui n'expose que `read` et `list` sur une dépendance privée `memory_user`, assemblé, `create` introuvable) attend @assemble (../toolsets/assemble.sdd #1, non livré).

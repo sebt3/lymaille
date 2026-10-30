@@ -1,0 +1,38 @@
+Spec: error
+
+Purpose:
+  Type d'erreur du module `modules`.
+
+Owns:
+  ./error.rs
+
+Exposes:
+  @ModulesError
+  @ModulesResult
+
+Raises:
+  @ModulesError::InvalidTodo: texte de tâche vide ou blanc, état inconnu, identifiant de tâche inconnu.
+  @ModulesError::InvalidMemory: identifiant ou titre vide ou blanc, identifiant déjà pris (création), identifiant inconnu (lecture, modification, suppression) ; le message nomme le niveau et l'identifiant, jamais le corps.
+  @ModulesError::Store: échec du stockage des Memory de l'hôte.
+  @ModulesError::Poisoned: verrou interne empoisonné.
+  @ModulesError::InvalidMcp: nom de rôle invalide, deux tools d'un même serveur au même nom de fonction (le message nomme le rôle et les deux noms MCP), schéma d'entrée d'un tool qui n'est pas un schéma JSON utilisable.
+
+Must:
+  `#[non_exhaustive]`, `Debug`, `Display` en anglais court, `std::error::Error`, `Send + Sync`.
+  Aucun message ne contient le corps d'une Memory, un argument d'appel MCP ni une référence de secret.
+
+Depends on:
+  thiserror
+
+Scenario: les messages ne portent pas le corps
+  Given une erreur de Memory pour un identifiant inconnu au niveau projet
+  When elle est formatée
+  Then le message nomme le niveau et l'identifiant et jamais un corps
+
+Scenario: la collision de noms nomme les deux outils
+  Given une erreur de module MCP pour les tools `a.b` et `a_b` du rôle `grafana`
+  When elle est formatée
+  Then le message nomme le rôle et les deux noms d'origine
+
+Tasks:
+  [ ] #1 Tests puis implémentation.

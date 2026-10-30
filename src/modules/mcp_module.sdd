@@ -1,0 +1,142 @@
+Spec: mcp_module
+
+Purpose:
+  Génération du module Rhai d'un rôle MCP à partir de `tools/list`, en mode réel (les fonctions appellent le tool) et en mode coquille (mêmes noms, signatures et documentation, tout appel rend l'erreur d'inspection seule) ;
+    validation des arguments contre le JSON Schema du tool, reconnexion avec backoff court, enregistrements d'appel
+    (`agent-sessions/modules#FR-6`, `FR-9`, `FR-10`, `FR-11`, `AC-3`, `AC-4`, `AC-5`, `AC-6`, `AC-7`).
+
+Owns:
+  ./mcp_module.rs
+
+References:
+  ./mcp.sdd
+  ./mcp_name.sdd
+  ../scratchpad/inspect.sdd
+  ../session/audit.sdd
+
+Exposes:
+  @McpEnv
+  @McpRetryPolicy
+  @mcp_module
+  @mcp_shell_descriptor
+
+Accepts:
+  @McpRetryPolicy::new: un nombre de tentatives et un premier délai ; @McpRetryPolicy::default : 3 tentatives, 1 s puis doublement ; @McpRetryPolicy::delays : la suite des délais (1 s, 2 s, 4 s par défaut).
+  @McpEnv::new: un @Redactor partagé, un @EventSink partagé, une @Clock partagée, l'@SessionId, une @McpRetryPolicy.
+  @mcp_module: le nom du rôle (identifiant Rhai valide), un @McpConnector partagé et un @McpEnv ; fonction asynchrone ; rend `ModulesResult<rhai::Module>`.
+  @mcp_shell_descriptor: le nom du rôle et un @McpLister (jamais un connecteur complet) ; fonction asynchrone ; rend `ModulesResult<ModuleDescriptor>` (../scratchpad/inspect.sdd), à transformer en coquille par @shell_module.
+
+Returns:
+  Module réel : une fonction par tool, à un paramètre map (`grafana::loki_query(#{...})`) ; le retour est le JSON du tool converti en `Dynamic`.
+  La documentation introspectable de chaque fonction (commentaires de métadonnées Rhai) contient la description MCP, le nom MCP d'origine et le schéma d'entrée sérialisé.
+  Descripteur de coquille : mêmes noms de fonction, mêmes paramètres (un map) et même documentation que le module réel.
+
+Raises:
+  @ModulesError::InvalidMcp: nom de rôle invalide, collision ou nom inutilisable (voir ./mcp_name.sdd), schéma d'entrée qui n'est pas un schéma JSON compilable ; listage impossible (le message nomme le rôle).
+  Les fonctions Rhai rendent des erreurs d'exécution explicites : argument invalide pour le schéma (avant tout appel, le message nomme le rôle, la fonction et le chemin du champ fautif, jamais sa valeur), serveur injoignable après les tentatives (nomme le rôle et le nombre de tentatives), erreur du tool (texte du serveur masqué par le @Redactor).
+
+Must:
+  Un argument invalide pour le schéma échoue avant tout appel au connecteur ; le connecteur ne reçoit que des arguments valides.
+  Un serveur injoignable en cours d'appel : tentatives selon la @McpRetryPolicy, chacune précédée de son délai (attente annulable : le futur est abandonné par le pont `block_on` à l'annulation du run, sans rien laisser derrière), un @EventKind::McpReconnect (rôle, numéro de tentative, délai en ms) par tentative, puis une erreur explicite. La tentative appelle `reconnect()` puis refait l'appel. Une erreur @McpError::Failed n'est jamais retentée.
+  La connexion se rétablit paresseusement : après un appel qui a épuisé ses tentatives, l'appel suivant commence par `reconnect()` avant son premier appel au tool.
+  Chaque appel (réussi, en erreur du tool, refusé par le schéma ou injoignable) émet un @EventKind::McpCall avec un @McpRecord (rôle, nom de la fonction, arguments masqués, statut `ok`, `error`, `invalid` ou `unreachable`, durée par l'horloge injectée).
+  Les fonctions sont synchrones et appellent le connecteur par `vynil_core::rt::block_on` ; sur un runtime `current_thread`, elles rendent l'erreur explicite de `vynil-core`.
+  Le mode coquille ne reçoit qu'un @McpLister : aucun appel au serveur n'est possible. Un serveur injoignable au listage fait échouer l'ouverture de la cible avec une erreur qui nomme le rôle.
+  Aucun secret : les références d'authentification sont résolues par l'hôte avant d'arriver au connecteur ; ni événement, ni erreur, ni documentation n'en portent. Le texte d'erreur d'un tool passe par le @Redactor.
+
+Depends on:
+  ./mcp.sdd
+  ./mcp_name.sdd
+  ./error.sdd
+  ../scratchpad/inspect.sdd
+  ../session/audit.sdd
+  ../session/event.sdd
+  ../session/redact.sdd
+  ../session/id.sdd
+  ../clock.sdd
+  rhai
+  jsonschema
+  serde_json
+  tokio
+  vynil-core
+
+Can modify:
+  /Cargo.toml: ajout de `jsonschema` par `cargo add` (décision du 2026-10-30, validation complète du JSON Schema), à vérifier par `cargo deny` et par les doublons de crates de ../../clippy.toml.
+  ../session/event.sdd: nouvelle variante `McpReconnect` de @EventKind (rôle, tentative, délai en millisecondes) et son code dans ../session/event.rs.
+
+Scenario: un module de deux fonctions documentées
+  Given un serveur simulé de deux tools aux descriptions distinctes
+  When le module du rôle `grafana` est généré
+  Then il a deux fonctions et la documentation de chacune contient la description du tool
+
+Scenario: nommage des fonctions
+  Given un serveur simulé exposant `loki.query` et `get-pods` sous le rôle `grafana`
+  When le module est généré
+  Then les fonctions sont `grafana::loki_query` et `grafana::get_pods`, chacune documentée avec son nom d'origine
+
+Scenario: collision de noms au chargement
+  Given un serveur simulé exposant `a.b` et `a_b`
+  When le module est généré
+  Then la génération échoue avec une erreur qui nomme les deux tools
+
+Scenario: argument invalide refusé avant l'appel
+  Given un tool dont le schéma exige un champ `query` de type texte
+  When un script appelle la fonction avec `#{query: 42}`
+  Then une erreur Rhai nomme le champ `query`, ne contient pas la valeur 42 et le connecteur n'a reçu aucun appel
+
+Scenario: la documentation reprend le schéma
+  Given un tool dont le schéma décrit le champ `query`
+  When la documentation de sa fonction est lue
+  Then elle contient le schéma et le nom `query`
+
+Scenario: appel réussi
+  Given un tool qui rend `{"rows": [1, 2]}`
+  When un script appelle la fonction avec des arguments valides
+  Then le script reçoit une map dont `rows` est un tableau de deux éléments et un `McpCall` de statut `ok` est émis
+
+Scenario: reconnexion puis erreur explicite
+  Given un connecteur dont tous les appels sont injoignables et la politique par défaut
+  When un script appelle une fonction
+  Then trois `McpReconnect` sont émis (délais 1000, 2000 et 4000 ms), l'erreur Rhai nomme le rôle et les trois tentatives, et le connecteur a été reconnecté trois fois
+
+Scenario: reconnexion paresseuse à l'appel suivant
+  Given l'appel précédent a épuisé ses tentatives et le serveur répond de nouveau
+  When un script appelle la fonction une seconde fois
+  Then le connecteur est reconnecté avant l'appel et l'appel réussit
+
+Scenario: un échec transitoire est rattrapé
+  Given un connecteur dont le premier appel est injoignable
+  When un script appelle la fonction
+  Then l'appel réussit à la deuxième tentative et un seul `McpReconnect` a été émis
+
+Scenario: erreur de tool non retentée
+  Given un tool qui rend une erreur dont le texte contient un secret déclaré
+  When un script appelle la fonction
+  Then l'erreur Rhai ne contient pas le secret, aucun `McpReconnect` n'est émis et le connecteur a reçu un seul appel
+
+Scenario: arguments masqués dans l'enregistrement
+  Given un @Redactor qui connaît `tok-123` et un appel avec `#{auth: "tok-123"}`
+  When l'événement `McpCall` est lu
+  Then les arguments enregistrés ne contiennent pas `tok-123`
+
+Scenario: coquille sans appel possible
+  Given un serveur simulé de deux tools et un connecteur qui n'offre que le listage
+  When le descripteur de coquille est généré puis transformé en module de coquille
+  Then le module a deux fonctions documentées comme le module réel et l'appel de l'une rend l'erreur d'inspection seule
+
+Scenario: serveur injoignable à l'ouverture d'une cible
+  Given un connecteur dont le listage est injoignable
+  When le descripteur de coquille est généré
+  Then la génération échoue avec une erreur qui nomme le rôle
+
+Scenario: runtime current_thread
+  Given un module réel appelé depuis un runtime `current_thread`
+  When une fonction est appelée
+  Then l'erreur explicite de `vynil-core` est rendue et le connecteur n'a reçu aucun appel
+
+Tasks:
+  [ ] #1 Tests puis implémentation. Prérequis : ../session/event.sdd reçoit `McpReconnect`.
+  [!] #2 `agent-sessions/modules#FR-7` : les notifications d'un serveur MCP alimentent les sources d'événements des watchers ; le trait de source d'événements est défini par `delegation` (`agent-sessions/delegation#FR-10`, non spécifié). À reprendre avec ce domaine.
+  [?] #3 Posé : le modèle de validation est `jsonschema` et le message d'erreur du schéma n'est jamais rendu tel quel (il peut citer la valeur) : seuls le chemin du champ et la nature de la règle violée entrent dans l'erreur Rhai. À confirmer.
+  [?] #4 Posé : la reconnexion est un appel explicite `reconnect()` du connecteur (le trait n'a pas de notion de session de transport). Un connecteur réel qui se reconnecte de lui-même rend `reconnect()` sans effet. À confirmer.
+  [?] #5 Posé : le statut de l'enregistrement d'appel vaut `ok`, `error`, `invalid` ou `unreachable`. Le DSD (`agent-sessions/session#FR-6`) ne fixe pas la liste. À confirmer.

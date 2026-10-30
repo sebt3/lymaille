@@ -14,9 +14,10 @@ References:
   ./agents/agents.sdd
   ./scratchpad/scratchpad.sdd
   ./toolsets/toolsets.sdd
+  ./modules/modules.sdd
 
 Must:
-  Déclarer chaque module de ./, de ./session, de ./context, de ./agents, de ./scratchpad et de ./toolsets et ré-exporter à la racine les types publics qu'une spec enfant déclare
+  Déclarer chaque module de ./, de ./session, de ./context, de ./agents, de ./scratchpad, de ./toolsets et de ./modules et ré-exporter à la racine les types publics qu'une spec enfant déclare
     dans son `Exposes`, rien d'autre.
   Porter un commentaire de crate en anglais (`missing_crate_level_docs`) renvoyant au domaine.
   Ne contenir ni fonction ni type : tout comportement vit dans un fichier à spec propre.
