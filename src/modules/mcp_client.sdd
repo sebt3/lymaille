@@ -1,0 +1,110 @@
+Spec: mcp_client
+
+Purpose:
+  Connecteur MCP réel vers un serveur distant (HTTP streamable), adossé à `rmcp` : implémente @McpConnector de ./mcp.sdd pour une URL et des en-têtes d'authentification que l'hôte résout
+    (`agent-sessions/modules#FR-6`, `agent-sessions/modules#FR-9`, `agent-sessions#CON-5`, `agent-sessions#DEC-3`). Livré dans le jalon 0.1 (décision du développeur principal du 2026-10-30).
+
+Owns:
+  ./mcp_client.rs
+
+References:
+  ./mcp.sdd
+  ./mcp_module.sdd
+
+Exposes:
+  @McpHeaders
+  @McpAuth
+  @McpClientConfig
+  @RmcpConnector
+
+Accepts:
+  @McpHeaders::new: aucun argument ; @McpHeaders::with_bearer: un jeton (sans le préfixe `Bearer`) ; @McpHeaders::with_header: un nom et une valeur d'en-tête. Les valeurs sont opaques.
+  @McpAuth::headers: aucun argument ; trait asynchrone de l'hôte (futur `Send`, sans macro ni boxage) qui rend les @McpHeaders courants ou une @McpError. Il est rappelé à chaque connexion et à chaque reconnexion (un jeton renouvelé est pris en compte).
+  @McpClientConfig::new: l'URL du serveur ; @McpClientConfig::with_request_timeout: une durée (défaut 30 s) ; @McpClientConfig::with_connect_timeout: une durée (défaut 10 s).
+  @RmcpConnector::new: un @McpClientConfig et un @McpAuth partagé ; ne se connecte pas (la connexion est paresseuse, au premier listage ou appel).
+
+Returns:
+  @RmcpConnector implémente @McpConnector (donc @McpLister) :
+  `list_tools` rend tous les tools (pagination suivie) convertis en @McpTool ; `call_tool` rend le contenu structuré du résultat s'il existe, sinon la concaténation des contenus textuels en une chaîne JSON ; `reconnect` jette la session courante, rappelle @McpAuth::headers et prépare une nouvelle session (la connexion effective reste paresseuse).
+
+Raises:
+  @McpError::Unreachable: échec de connexion ou de transport (résolution, TLS, délai de connexion ou de requête dépassé, flux coupé, HTTP 5xx, session expirée non récupérable).
+  @McpError::Failed: le serveur répond mais refuse ou échoue (`isError` du résultat, tool inconnu, HTTP 401 ou 403, réponse illisible) ; le texte est celui du serveur sans en-tête ni jeton.
+  Un échec de @McpAuth::headers est rendu tel quel (@McpError::Failed ou Unreachable selon l'hôte).
+
+Must:
+  Tout le code de ce fichier compile seulement avec la feature Cargo `mcp-http` (activée par défaut, décision du 2026-10-30) ; la dépendance à `rmcp` reste confinée à ce fichier : le reste de la crate ne voit que @McpConnector.
+  Aucun fichier, aucun processus, aucun transport stdio : seules les features `client`, `transport-streamable-http-client-reqwest` et `reqwest` de `rmcp` sont activées, avec `default-features = false`. Le fournisseur TLS de rustls n'est pas choisi par la librairie : l'hôte installe le sien (`reqwest-tls-no-provider`, décision du 2026-10-30), ce qui est documenté.
+  Les @McpHeaders ne se montrent jamais : leur `Debug` ne contient que les noms d'en-têtes et la présence d'un jeton, jamais une valeur ; aucune erreur, aucun événement ni aucun journal ne porte un jeton ou une valeur d'en-tête (`agent-sessions#CON-3`). Les erreurs de transport rendues ne citent pas les en-têtes.
+  La connexion est paresseuse et partagée entre les appels concurrents du même connecteur (une seule session à la fois) ; `reconnect` ne se connecte pas lui-même.
+  Chaque requête est bornée par le délai de requête, la connexion par le délai de connexion (`tokio::time::timeout`) ; un dépassement est @McpError::Unreachable.
+  Les futurs sont `Send` ; le connecteur est `Send + Sync` et se partage derrière un `Arc`.
+  La version de `rmcp` est épinglée exactement dans `/Cargo.toml` (l'API change à chaque majeure) ; le connecteur reste le seul point d'adaptation.
+
+Depends on:
+  ./mcp.sdd
+  ./error.sdd
+  rmcp
+  tokio
+  serde_json
+
+Can modify:
+  /Cargo.toml: ajout de `rmcp` (version exacte, `default-features = false`, features ci-dessus) en dépendance optionnelle, et de la feature `mcp-http = ["dep:rmcp"]` activée par défaut, par `cargo add` ; `tokio` reçoit la feature `net` en dev-dependency pour le faux serveur des tests.
+  /deny.toml: ajout de la licence `ISC` à `allow` (décision du 2026-10-30).
+  /clippy.toml: seulement si `cargo clippy` signale un doublon de crate nouveau, un `allowed-duplicate-crates` avec raison ; sinon rapporter.
+
+Scenario: listage des tools
+  Given un faux serveur MCP HTTP qui expose deux tools
+  When list_tools est appelé sur un connecteur configuré avec son URL
+  Then les deux tools sont rendus avec leur nom, leur description et leur schéma d'entrée
+
+Scenario: appel réussi
+  Given un faux serveur dont le tool `echo` rend un contenu textuel
+  When call_tool est appelé pour `echo`
+  Then la valeur rendue porte ce texte
+
+Scenario: erreur du tool
+  Given un faux serveur dont le tool `boom` rend un résultat marqué en erreur
+  When call_tool est appelé pour `boom`
+  Then l'erreur est Failed et porte le texte du serveur
+
+Scenario: serveur injoignable
+  Given une URL sur laquelle personne n'écoute
+  When list_tools est appelé
+  Then l'erreur est Unreachable
+
+Scenario: délai de requête dépassé
+  Given un faux serveur qui ne répond jamais à tools/call et un délai de requête court
+  When call_tool est appelé
+  Then l'erreur est Unreachable avant la fin d'un délai raisonnable
+
+Scenario: authentification refusée
+  Given un faux serveur qui répond 401
+  When list_tools est appelé
+  Then l'erreur est Failed et ne contient pas le jeton
+
+Scenario: le jeton part en en-tête
+  Given un @McpAuth qui rend le jeton `tok-123` et un faux serveur qui enregistre les en-têtes reçus
+  When list_tools est appelé
+  Then le serveur a reçu `Authorization: Bearer tok-123`
+
+Scenario: reconnexion et nouveau jeton
+  Given un connecteur déjà utilisé et un @McpAuth dont le jeton change
+  When reconnect est appelé puis list_tools
+  Then le serveur reçoit le nouveau jeton
+
+Scenario: les en-têtes ne se montrent pas
+  Given des @McpHeaders portant un jeton et un en-tête personnalisé
+  When ils sont formatés avec Debug
+  Then le texte contient les noms d'en-têtes et jamais leur valeur
+
+Scenario: aucune connexion à la construction
+  Given une URL injoignable
+  When @RmcpConnector::new est appelé
+  Then il réussit sans connexion
+
+Tasks:
+  [ ] #1 Instruire et épingler `rmcp` (cargo add, version exacte à jour, vérification `cargo tree -e features -p rmcp` : ni `schemars`, ni `server`, ni processus ; `cargo tree -d` ; `cargo deny check` avec `ISC`), puis tests et implémentation. Le faux serveur des tests est un serveur HTTP minimal écrit sur `tokio::net::TcpListener` (JSON-RPC `initialize`, `notifications/initialized`, `tools/list`, `tools/call` ; réponses `application/json`), car aucune dépendance de serveur HTTP n'est admise.
+  [?] #2 Décidé le 2026-10-30 : `rmcp` derrière la feature `mcp-http` activée par défaut ; l'hôte choisit le fournisseur TLS ; `ISC` autorisée. Reste à confirmer : la valeur par défaut des délais (30 s de requête, 10 s de connexion).
+  [?] #3 Les lectures de certificats racine du système (`rustls-platform-verifier`) sont un accès fichier indirect par une dépendance, hors de portée des `disallowed-*` de ../../clippy.toml : à confirmer comme acceptable.
+  [?] #4 Posé : `call_tool` rend le contenu structuré (`structuredContent`) s'il existe, sinon les contenus textuels concaténés ; les contenus non textuels (image, ressource) sont ignorés. À confirmer.

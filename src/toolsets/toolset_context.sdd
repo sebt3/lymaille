@@ -29,13 +29,14 @@ Raises:
 Must:
   Priorité d'une valeur : surcharge du toolset, puis paramètre du contexte, puis valeur par défaut du toolset (`agent-sessions#BR-3` : les valeurs d'environnement ne viennent que du contexte).
   Un seul ToolsetContext par session, plat et partagé par l'agent principal et ses sous-agents (`agent-sessions#DEC-5`).
-  Une référence de rôle, une valeur de paramètre et une valeur par défaut reçue par @resolve dont la forme a l'allure d'un secret (la liste de ./../agents/provider.sdd, `://` suivi d'un `@`, préfixes `sk-` et `Bearer`) est refusée : le contexte ne contient que des références.
+  Une référence de rôle, une valeur de paramètre et une valeur par défaut reçue par @resolve dont la forme a l'allure d'un secret (la détection de ../secret.sdd : `://` suivi d'un `@`, préfixes `sk-` et `Bearer`) est refusée : le contexte ne contient que des références.
   Deux valeurs par défaut pour le même couple (toolset, paramètre) sont refusées par @resolve (@ToolsetsError::InvalidContext), jamais départagées en silence.
   @ResolvedContext est une copie indépendante : en modifier une valeur n'affecte pas le contexte.
   Se sérialise et se désérialise à l'identique ; les tables sont ordonnées.
 
 Depends on:
   ./error.sdd
+  ../secret.sdd
   serde
   serde_json
 
@@ -64,3 +65,4 @@ Tasks:
       Validé le 2026-10-29 (validator, mutations manuelles) sous `SKIP=deny scripts/check`.
   [?] #3 Décisions posées le 2026-10-29 (à confirmer) : les références de rôle et les valeurs par défaut passent par le même contrôle de secret que les valeurs de paramètres ; un doublon de valeur par défaut est une erreur.
   [?] #2 Posé : la détection de valeur ressemblant à un secret réutilise la liste de ../agents/provider.sdd (heuristique documentée, le contrôle réel reste à l'hôte, `agent-sessions#CON-3`) ; une fonction commune est à extraire quand les deux specs sont livrées.
+      Extraite (toolsets#6) : la détection vit dans `../secret.rs` (`looks_like_secret`, `pub(crate)`), appelée ici et par `../agents/provider.rs`.

@@ -5,6 +5,8 @@ use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
+use crate::secret::looks_like_secret;
+
 /// Message of the refusal of a provider read from its serialized form. It names no field value.
 const REFUSED: &str = "invalid provider: a name, a type or a reference is empty or refused";
 
@@ -118,29 +120,10 @@ impl<'de> Deserialize<'de> for Provider {
     }
 }
 
-/// Tells whether `text` is a reference that the host resolves: a non-empty text without blank characters, with no
-/// credentials in a URL (`://` followed by `@`), and not shaped like a token (prefix `sk-` or `Bearer`, any case).
+/// Tells whether `text` is a reference that the host resolves: a non-empty text without blank characters, that does not
+/// look like a secret (`crate::secret`).
 fn is_reference(text: &str) -> bool {
-    !text.is_empty()
-        && !text.chars().any(char::is_whitespace)
-        && !has_url_credentials(text)
-        && !looks_like_token(text)
-}
-
-/// Tells whether `text` holds credentials in a URL: `://` followed by `@`.
-fn has_url_credentials(text: &str) -> bool {
-    text.split_once("://").is_some_and(|(_, rest)| rest.contains('@'))
-}
-
-/// Tells whether `text` is shaped like a token: prefix `sk-` or `Bearer`, in any case for both.
-fn looks_like_token(text: &str) -> bool {
-    has_prefix(text, "sk-") || has_prefix(text, "bearer")
-}
-
-/// Tells whether `text` starts with `prefix`, ignoring the case of ASCII letters. Never panics on a multi-byte text.
-fn has_prefix(text: &str, prefix: &str) -> bool {
-    text.get(..prefix.len())
-        .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+    !text.is_empty() && !text.chars().any(char::is_whitespace) && !looks_like_secret(text)
 }
 
 #[cfg(test)]

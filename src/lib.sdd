@@ -9,6 +9,7 @@ Owns:
 References:
   ../lymaille.sdd
   ./clock.sdd
+  ./secret.sdd
   ./session/session.sdd
   ./context/context.sdd
   ./agents/agents.sdd

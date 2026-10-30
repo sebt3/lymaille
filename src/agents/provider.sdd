@@ -18,13 +18,14 @@ Returns:
   Accesseurs en lecture seule pour chaque champ.
 
 Must:
-  Une référence d'adresse ou d'authentification est un nom que l'hôte résout : jamais une URL en clair avec identifiants, ni un jeton. Le constructeur refuse une référence qui contient `://` suivi d'un `@` ou qui ressemble à un jeton (voir Scenario), et rend `None`.
+  Une référence d'adresse ou d'authentification est un nom que l'hôte résout : jamais une URL en clair avec identifiants, ni un jeton. Le constructeur refuse une référence qui contient `://` suivi d'un `@` ou qui ressemble à un jeton (voir Scenario), et rend `None`. La détection est celle de `../secret.sdd` (`looks_like_secret`), partagée avec le contexte de toolsets.
   Le nom, le type et les références sont non vides, sinon `None`.
   Se sérialise et se désérialise à l'identique ; la désérialisation applique les mêmes refus que le constructeur.
   Le `Debug` ne montre que le nom, le type et le niveau.
 
 Depends on:
   serde
+  ../secret.sdd
 
 Scenario: references are names
   Given a provider built with address reference `vllm-strix` and auth reference `vllm-key`

@@ -8,6 +8,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 use super::{ToolsetsError, ToolsetsResult};
+use crate::secret::looks_like_secret;
 
 /// Level at which a toolset context lives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -255,25 +256,6 @@ pub(in crate::toolsets) fn value_looks_like_secret(value: &Value) -> bool {
         Value::Object(entries) => entries.values().any(value_looks_like_secret),
         Value::Null | Value::Bool(_) | Value::Number(_) => false,
     }
-}
-
-/// Tells whether `text` looks like a secret: credentials in a URL (`://` followed by `@`), or the prefix `sk-` or
-/// `Bearer`, in any case. This is the heuristic of `agents/provider.rs`, duplicated here because that module keeps its
-/// helpers private; a shared function would need a visibility change in `agents/mod.rs`. The real control stays with the
-/// host (`agent-sessions#CON-3`).
-fn looks_like_secret(text: &str) -> bool {
-    has_url_credentials(text) || has_prefix(text, "sk-") || has_prefix(text, "bearer")
-}
-
-/// Tells whether `text` holds credentials in a URL: `://` followed by `@`.
-fn has_url_credentials(text: &str) -> bool {
-    text.split_once("://").is_some_and(|(_, rest)| rest.contains('@'))
-}
-
-/// Tells whether `text` starts with `prefix`, ignoring the case of ASCII letters. Never panics on a multi-byte text.
-fn has_prefix(text: &str, prefix: &str) -> bool {
-    text.get(..prefix.len())
-        .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
 }
 
 #[cfg(test)]

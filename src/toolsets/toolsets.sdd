@@ -57,5 +57,6 @@ Tasks:
       Décidé le 2026-10-29 par le développeur principal : `handlebars` oui (lymaille.sdd #12) ; `yaml_serde` non pour l'instant (`Skill::parse` bloqué) ; `jsonschema` non.
   [ ] #3 Compatibilité structurelle (`FR-4`) : Décidé le 2026-10-30 par le développeur principal : validation complète des valeurs du ToolsetContext contre le JSON Schema (et non la seule présence des noms `required`). Contredit la décision du 2026-10-29 sur `jsonschema` (#2) : ajouter la dépendance par `cargo add`, vérifier `cargo deny` et les doublons de crates (`clippy.toml`), puis réviser ./compat.sdd et ./context_type.sdd #2. Tâche à cadrer avant implémentation.
   [!] #4 Le champ `allowed-tools` d'un skill est ignoré (`FR-7`) ; les modules `todo`, `Memory` et MCP viennent du domaine `modules` (non spécifié) : @assemble n'en construit aucun.
-  [ ] #6 Factoriser la détection de valeur ressemblant à un secret (dupliquée dans ./toolset_context.rs et ../agents/provider.rs) en une fonction commune `pub(crate)`.
+  [x] #6 Factoriser la détection de valeur ressemblant à un secret (dupliquée dans ./toolset_context.rs et ../agents/provider.rs) en une fonction commune `pub(crate)`.
+      Fait le 2026-10-30 : `../secret.rs` (validator, mutations manuelles) ; le `#[expect(clippy::pub_with_shorthand)]` motivé est la seule dérogation (`pub(crate)` libre et rustfmt s'excluent).
   [ ] #5 Spécifier `mod.rs` de la crate (`lib.sdd`) : déclaration du module `toolsets` et ré-exports.

@@ -8,6 +8,7 @@ mod clock;
 mod context;
 mod modules;
 mod scratchpad;
+mod secret;
 mod session;
 mod toolsets;
 
