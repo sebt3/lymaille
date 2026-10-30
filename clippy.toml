@@ -33,6 +33,9 @@ allowed-duplicate-crates = [
   # `r-efi` 5 (getrandom 0.3, via rhai's ahash) and 6 (getrandom 0.4, via vynil-core's rand 0.10): uefi target only in the
   # graph, temporary, inherent to vynil-core 0.9.0, tracked by https://github.com/vynil-org/vynil-core/issues/36.
   "r-efi",
+  # `windows-sys` 0.52 (via `ring`, a rustls provider of `reqwest`, under `rmcp`) and 0.61 (via `mio` and `rustix`): Windows targets
+  # only, inherent to the transitive dependencies of `rmcp` (`mcp-http` feature). Decision of the lead developer, 2026-10-30.
+  "windows-sys",
 ]
 
 # Architecture constraints of the design, enforced by the compiler.

@@ -30,6 +30,10 @@ allow = [
   "Unicode-3.0",
   # File-level weak copyleft, used as is (no modification) by smartstring, a dependency of rhai.
   "MPL-2.0",
+  # Permissive, used by ring and rustls-webpki (rmcp > reqwest > rustls). Allowed by the lead developer, 2026-10-30.
+  "ISC",
+  # Permissive data licence of the root certificates in webpki-root-certs (rmcp > reqwest). Allowed by the lead developer, 2026-10-30.
+  "CDLA-Permissive-2.0",
 ]
 
 [bans]

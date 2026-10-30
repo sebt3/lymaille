@@ -29,6 +29,8 @@ pub use modules::{
     ScriptedConnector, TodoItem, TodoList, TodoStatus, function_name, mcp_module, mcp_shell_descriptor,
     memory_module, memory_module_name, name_tools, todo_module,
 };
+#[cfg(feature = "mcp-http")]
+pub use modules::{McpAuth, McpClientConfig, McpHeaders, RmcpConnector};
 pub use scratchpad::{
     CandidateSet, Catalog, CoreGroup, EngineBuilder, FunctionDescriptor, FunctionEntry, FunctionSource,
     GrantedModule, GrantedSkill, GrantedToolset, Grants, InspectionPad, InspectionTarget,
