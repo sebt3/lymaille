@@ -93,6 +93,14 @@ pub enum EventKind {
         /// Outcome of the run.
         outcome: Outcome,
     },
+    /// A run of a sub-agent was not finished when the main session was restored: it is interrupted, not resumed. Carries
+    /// the run and the session of the sub-agent, so that the host can start a new run on that session.
+    RunInterrupted {
+        /// Identifier of the interrupted run.
+        run: RunId,
+        /// Identifier of the session of the sub-agent, saved with the main session.
+        session: SessionId,
+    },
 }
 
 /// Event observed by the host: the session it belongs to, the instant it happened and what it reports.
@@ -179,8 +187,8 @@ mod tests {
     use crate::clock::Timestamp;
     use crate::session::{EventSink as _, Outcome, RunId, SessionId, TurnId};
 
-    /// Names of the thirteen variants of [`EventKind`], in the order of [`one_of_each_kind`].
-    const ALL_VARIANTS: [&str; 13] = [
+    /// Names of the fourteen variants of [`EventKind`], in the order of [`one_of_each_kind`].
+    const ALL_VARIANTS: [&str; 14] = [
         "TokenUsage",
         "TodoChanged",
         "MemoryChanged",
@@ -194,6 +202,7 @@ mod tests {
         "TextDelta",
         "TurnEnded",
         "RunEnded",
+        "RunInterrupted",
     ];
 
     fn session() -> SessionId {
@@ -295,7 +304,16 @@ mod tests {
                     outcome: Outcome::Cancelled,
                 },
             ),
+            ("RunInterrupted", run_interrupted_sample()),
         ]
+    }
+
+    /// A run of a sub-agent interrupted by the restore of the main session, with the session of the sub-agent.
+    fn run_interrupted_sample() -> EventKind {
+        EventKind::RunInterrupted {
+            run: RunId::new("run-7").expect("a non-empty text makes a run identifier"),
+            session: SessionId::new("sub-7").expect("a non-empty text makes a session identifier"),
+        }
     }
 
     /// Name of a variant, matched without a wildcard: adding a variant breaks the build until the test covers it.
@@ -314,6 +332,7 @@ mod tests {
             EventKind::TextDelta { .. } => "TextDelta",
             EventKind::TurnEnded { .. } => "TurnEnded",
             EventKind::RunEnded { .. } => "RunEnded",
+            EventKind::RunInterrupted { .. } => "RunInterrupted",
         }
     }
 
@@ -369,7 +388,7 @@ mod tests {
         let kinds = one_of_each_kind();
         assert!(
             kinds.iter().map(|(name, _)| *name).eq(ALL_VARIANTS),
-            "the samples must cover each of the eleven variants of EventKind, in order"
+            "the samples must cover each of the fourteen variants of EventKind, in order"
         );
         for (name, kind) in &kinds {
             assert_eq!(
@@ -395,6 +414,27 @@ mod tests {
             let at = Timestamp::from_millis(worker.saturating_mul(100).saturating_add(step));
             sink.emit(Event::new(session(), at, EventKind::TodoChanged));
         }
+    }
+
+    #[test]
+    fn run_interrupted_names_the_run_and_the_session_of_the_sub_agent() {
+        let event = Event::new(session(), Timestamp::from_millis(9), run_interrupted_sample());
+        let json = serde_json::to_value(&event).expect("an event serializes");
+        assert_eq!(
+            json["kind"]["RunInterrupted"]["run"],
+            serde_json::json!("run-7"),
+            "the run is carried by its bare identifier, json was {json}"
+        );
+        assert_eq!(
+            json["kind"]["RunInterrupted"]["session"],
+            serde_json::json!("sub-7"),
+            "the session of the sub-agent is carried by its bare identifier, json was {json}"
+        );
+        let back: Event = serde_json::from_value(json).expect("the serialized event deserializes");
+        assert_eq!(
+            back, event,
+            "the event must come back with the same run and session"
+        );
     }
 
     #[test]

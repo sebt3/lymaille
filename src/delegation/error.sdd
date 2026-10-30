@@ -13,6 +13,8 @@ Exposes:
 Raises:
   @DelegationError::UnknownSubagent: sous-agent absent de la définition de l'agent principal ; le message le nomme.
   @DelegationError::UnknownRun: identifiant de run inconnu du registre.
+  @DelegationError::UnknownSession: session donnée à `resume` qui n'est pas celle d'un run restauré du sous-agent (ajout du lot D6, décision du développeur principal, 2026-10-30) ; le texte ne porte que l'identifiant de session.
+  @DelegationError::DuplicateRun: identifiant de run déjà connu du registre, ou répété dans une restauration (ajout du lot D6, décision du développeur principal, 2026-10-30) ; le texte ne porte que l'identifiant.
   @DelegationError::InvalidWatcher: identifiant vide, source inconnue, nom de source vide, réservé ou déjà pris, `notify` sur la source `timer`, second rattachement des minuteurs, prédicat qui ne compile pas ou qui n'est pas une expression.
   @DelegationError::InvalidTimer: durée nulle, identifiant vide ou en double.
   @DelegationError::InvalidSchema: schéma de résultat d'un sous-agent qui n'est pas un schéma JSON utilisable.

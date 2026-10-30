@@ -19,33 +19,47 @@ Exposes:
   @LaunchRequest
   @RunRecord
   @RunHandle
+  @RunProgress
   @RunRegistry
   @run_batch
 
 Accepts:
-  @SubagentLauncher::launch: une @LaunchRequest (le nom du sous-agent, la tâche, l'@RunId, un @CancelHandle enfant de celui de l'appelant, le @ResultCollector du run et, pour une reprise, l'@SessionId à reprendre) ; asynchrone ; rend un @SubagentOutcome. Trait de l'hôte, qui assemble le sous-agent (définition, profil, fournisseur, @Grants sans module de délégation, @TurnRunner) ; la librairie ne sait pas le construire seule.
-  @RunRegistry::new: un @SubagentLauncher partagé, la liste des sous-agents autorisés par l'agent principal (noms), un @EventSink partagé, une @Clock, l'@EventHub (source `subagent`) et un schéma de résultat par sous-agent (nom vers schéma et corrections).
-  @RunRegistry::start: le nom d'un sous-agent, la tâche et le @CancelHandle de l'appelant ; rend un @RunHandle sans attendre.
-  @RunRegistry::status: un @RunId. @RunRegistry::wait: un @RunId ; asynchrone, rend le @SubagentOutcome à la fin. @RunRegistry::cancel: un @RunId. @RunRegistry::records: aucun argument ; les @RunRecord des runs en cours, à persister (`SessionState::run handles`). @RunRegistry::restore: les @RunRecord persistés ; produit un événement `RunInterrupted` par run non terminé.
-  @run_batch: un @TurnRunner (générique), la tâche, le @ResultCollector et le @CancelHandle du run ; asynchrone ; rend un @SubagentOutcome.
+  @SubagentLauncher::launch: une @LaunchRequest ; asynchrone ; rend `DelegationResult<SubagentOutcome>`. Trait de l'hôte (`Send + Sync + 'static`), qui assemble le sous-agent (définition, profil, fournisseur, @Grants sans module de délégation, @TurnRunner) ; la librairie ne sait pas le construire seule.
+  @LaunchRequest (accesseurs, aucun argument) : le nom du sous-agent (`subagent`), la tâche (`task`), l'@RunId (`run`), l'@SessionId du sous-agent (`session`, fournie par le registre pour un run neuf, la session sauvegardée à reprendre pour une reprise), un booléen `resumed`, le @CancelHandle enfant de celui de l'appelant (`cancel`) et le @ResultCollector du run (`collector`, rendu en `&Arc<ResultCollector>` depuis le lot D6 : le module `result` (lot D7) clone l'@Arc). Ajout du lot D6 : `session` et `resumed` sont posés par le registre, l'hôte ne les fabrique pas.
+  @RunRegistry::new: un @SubagentLauncher partagé (@Arc), la table des sous-agents autorisés (nom vers le schéma de résultat et le nombre de corrections : les clés forment la liste autorisée), un @EventSink partagé, une @Clock, l'@EventHub (source `subagent`) et l'@SessionId de la session principale, qui porte les événements `RunEnded` et `RunInterrupted`. Ajout du lot D6 : l'identifiant de session principale ; chaque schéma est compilé à la construction (refus par `InvalidSchema`).
+  @RunRegistry::start: le nom d'un sous-agent, la tâche et le @CancelHandle de l'appelant ; rend un @RunHandle sans attendre. Ajout du lot D6 : le registre attribue l'@RunId (`run-<n>`, `n` croissant, en sautant tout identifiant déjà connu, et en restant au-dessus des identifiants restaurés) et l'@SessionId du sous-agent `<session principale>-<run>` (décision du développeur principal, 2026-10-30) : deux sessions principales ne donnent jamais la même session de sous-agent.
+  @RunRegistry::resume (ajouté au lot D6, décision du développeur principal, 2026-10-30) : le nom, la tâche, le @CancelHandle de l'appelant et l'@SessionId à reprendre ; rend un @RunHandle. Contrôles dans cet ordre : sous-agent déclaré (sinon `UnknownSubagent`) ; session d'un run restauré de ce même sous-agent (sinon `UnknownSession` portant l'identifiant de session) ; aucun run en cours ayant déjà repris cette session (sinon `DuplicateRun` nommant ce run : une session se reprend une fois tant que le run repris vit). Décision de forme : un refus de session occupée est exprimé par `DuplicateRun` faute de variante dédiée, le run tenant déjà la session étant connu du registre.
+  @RunRegistry::status: un @RunId ; rend un @RunProgress. @RunRegistry::wait: un @RunId ; asynchrone, rend le @SubagentOutcome à la fin (réveil à la conclusion, sans scrutation). @RunRegistry::cancel: un @RunId. @RunRegistry::records: aucun argument ; les @RunRecord des runs en cours (ceux dont le collecteur n'est pas conclu), à persister (`SessionState::run handles`). @RunRegistry::restore: les @RunRecord persistés ; produit un événement `RunInterrupted` par run, puis notifie la source `subagent`.
+  @run_batch: un `&mut` @TurnRunner (générique), la tâche, le @ResultCollector et le @CancelHandle du run ; asynchrone ; rend `DelegationResult<SubagentOutcome>`.
 
 Returns:
-  @RunHandle: l'@RunId du run (copiable, sérialisable). @RunRecord: l'@RunId, le nom du sous-agent et l'@SessionId du sous-agent (serialisable).
-  @RunRegistry::status: `Running` ou le @SubagentOutcome final. 
+  @RunHandle: l'@RunId du run (`run`), sérialisable. Il n'est pas copiable : un @RunId porte une chaîne. @RunRecord: l'@RunId, le nom du sous-agent et l'@SessionId du sous-agent (sérialisable).
+  @RunProgress: `Running`, ou `Ended` avec le @SubagentOutcome final.
+  @RunRegistry::status: `Running` ou `Ended` ; @RunRegistry::wait : le @SubagentOutcome.
 
 Raises:
-  @DelegationError::UnknownSubagent: nom absent de la liste autorisée de l'agent principal ; aucun run n'est créé (`agent-sessions/delegation#AC-1`).
-  @DelegationError::UnknownRun: identifiant inconnu pour status, wait et cancel.
-  @DelegationError::Launch: voir ./error.sdd.
+  @DelegationError::UnknownSubagent: nom absent de la liste autorisée de l'agent principal ; aucun run n'est créé (`agent-sessions/delegation#AC-1`). Aussi à `restore` pour un enregistrement dont le nom n'est plus autorisé ; rien n'est alors modifié ni émis.
+  @DelegationError::UnknownRun: identifiant inconnu pour status, wait, cancel. `resume` ne le rend plus (voir UnknownSession).
+  @DelegationError::UnknownSession: session donnée à `resume` qui n'est pas celle d'un run restauré du sous-agent (ajout du lot D6, décision du développeur principal, 2026-10-30, faute d'autre variante adaptée) ; le texte ne porte que l'identifiant de session.
+  @DelegationError::Launch: échec du lancement par l'hôte (voir ./error.sdd). Le registre conclut alors le run en `Failed` avec une raison fixe.
+  @DelegationError::InvalidSchema: à la construction du registre, pour un schéma qui ne se compile pas (ajout du lot D6).
+  @DelegationError::Poisoned: verrou du registre ou du collecteur empoisonné. Une issue illisible ne déclenche pas cette erreur dans `status`, `wait` ou `records` : elle est rendue comme échec à raison fixe (voir Must).
 
 Must:
-  @RunRegistry::start rend le handle immédiatement ; le run s'exécute dans une tâche détachée (`tokio::spawn`) ; à sa fin, `RunEnded` (identifiant et issue) est émis, puis un événement `ended` est notifié à l'@EventHub (source `subagent`, donnée : identifiant du run et statut) pour les watchers ; l'attente par @RunRegistry::wait n'est qu'un sucre au-dessus (`agent-sessions/delegation#FR-6`).
+  @RunRegistry::start rend le handle immédiatement ; le run s'exécute dans une tâche détachée (`tokio::spawn`) ; à sa fin, `RunEnded` (identifiant et issue) est émis, puis un événement `ended` est notifié à l'@EventHub (source `subagent`, donnée : identifiant du run et statut `valid`, `failed`, `cancelled` ou `interrupted`) pour les watchers ; l'attente par @RunRegistry::wait n'est qu'un sucre au-dessus, réveillée à la conclusion (`agent-sessions/delegation#FR-6`).
+  Les événements `RunEnded` et `RunInterrupted` portent l'@SessionId de la session principale (argument de @RunRegistry::new) ; `RunInterrupted` porte le run et la session du sous-agent.
+  Issue d'un run terminé par le registre : le registre lit toujours l'issue au travers d'une même fonction, `resolve`, pour `status`, `wait`, `records` et l'événement `RunEnded` : tous disent donc la même chose. Si le collecteur d'un run vivant porte une issue que le registre ne retient pas (ci-dessous), l'issue rendue est l'issue fixe correspondante, calculée à la création du run, jamais la raison brute de l'hôte. Si le collecteur ne peut pas être lu (verrou empoisonné), l'issue rendue est un `Failed` à raison fixe « the outcome of the run could not be read ». Si le collecteur est déjà conclu, son issue fait foi ; sinon, si le @CancelHandle du run est annulé, l'issue est `Cancelled` quelle que soit la valeur rendue par le lanceur ; sinon, un lanceur qui rend `Err` ou une issue qui n'est ni `Cancelled` ni `Failed` (`Interrupted` compris, réservé à la restauration) donne `Failed` avec une raison fixe. Ajout du lot D6.
+  Fenêtre (lot D6, correction) : entre la conclusion du collecteur par le lanceur et la fin du run (RunEnded), `status` et `wait` rendent déjà l'issue normalisée ; `RunEnded` et la notice ne partent qu'à la fin du run (`Scenario` de fenêtre).
+  Invariant (décision du développeur principal, 2026-10-30) : l'@SubagentOutcome porte une référence de session seulement pour `Interrupted`, posé par la restauration ; le registre tient l'invariant quoi que fasse l'hôte. Un lanceur qui conclut lui-même `Interrupted` sur le collecteur de sa requête voit son issue ramenée à `Failed` avec la raison fixe « the sub-agent reported an interruption outside a restore » ; un `Cancelled` qui porte une session est rendu sans session. Ces issues normalisées sont celles que `wait`, `status` et `RunEnded` rapportent.
+  Un run est toujours conclu et son attente réveillée, même si le lanceur panique ou si la tâche est arrêtée : une garde à la destruction conclut en `Failed` (raison fixe), émet `RunEnded` et notifie `ended`. Ajout du lot D6.
   Le sous-agent choisi est parmi ceux que la définition de l'agent principal autorise et rien d'autre : un agent principal ne peut ni accorder de toolset à un sous-agent ni en créer un (`agent-sessions/delegation#FR-1`).
   L'annulation d'un run, ou celle du @CancelHandle de l'appelant, annule ses sous-agents en cours : chaque run reçoit un @CancelHandle enfant, de sorte que l'annulation du parent se propage (`agent-sessions/delegation#FR-7`) ; l'issue d'un run annulé est `Cancelled`.
-  Les runs en cours sont persistables (@RunRegistry::records). À la restauration, un run qui n'est pas terminé n'est pas repris d'office : @RunRegistry::restore émet pour chacun un événement `RunInterrupted` (run et session du sous-agent) et le notifie à la source `subagent` (statut `Interrupted`) ; l'agent principal relance en démarrant un nouveau run qui reprend la session sauvegardée (`agent-sessions/delegation#AC-10`).
-  @run_batch : le premier message du sous-agent est la tâche ; après chaque tour, si le collecteur n'est pas conclu, un message de relance fixe rappelle de soumettre le résultat par `result::submit` et, en cas de rejet, renvoie les erreurs de validation (les corrections se font dans le même run) ; le run s'arrête quand le collecteur est conclu, quand un tour est `Failed` ou `Cancelled`, ou après un nombre maximal de tours sans résultat (8 par défaut) ; l'issue `Valid` exige un résultat accepté.
+  Les runs en cours sont persistables (@RunRegistry::records) : un run dont le collecteur est conclu, par le registre ou par son lanceur, n'est plus en cours et n'est pas listé, même si son lanceur n'a pas encore rendu la main (décision du lot D6, conservée : son issue est définitive pour `status`). Après une restauration, les runs restaurés sont conclus `Interrupted` : `records` est alors vide ; une seconde sauvegarde de la session principale avant `resume` perd donc les sessions à reprendre (voir [?] #6). À la restauration, un run qui n'est pas terminé n'est pas repris d'office : @RunRegistry::restore émet pour chacun un événement `RunInterrupted` (run et session du sous-agent) et le notifie à la source `subagent` (statut `interrupted`) ; l'issue du run restauré est `Interrupted` avec la session ; l'agent principal relance en démarrant un nouveau run qui reprend la session sauvegardée (`agent-sessions/delegation#AC-10`).
+  @run_batch : le premier message du sous-agent est la tâche ; après chaque tour où le collecteur n'est pas conclu, un message de relance fixe rappelle de soumettre le résultat par `result::submit` ; le run s'arrête quand le collecteur est conclu, quand un tour est `Failed` ou `Cancelled` (échec d'un tour : `Failed` avec raison fixe ; erreur de session : même issue), ou après 8 tours sans résultat (constante `BATCH_MAX_TURNS`, sans paramètre) : `Failed` avec une raison fixe ; l'issue `Valid` exige un résultat accepté.
+  Décision du développeur principal, 2026-10-30 : `run_batch` ne renvoie pas au sous-agent les erreurs de validation de sa soumission ; la Must d'origine est tenue par le module `result` (lot D7), dont la soumission rend le refus (`Rejected`, avec les erreurs et les corrections restantes) au sous-agent dans le même run. Le collecteur n'expose ses erreurs qu'une fois conclu. Le test de correction vérifie le refus renvoyé à la soumission et la poursuite du run dans le même appel.
   Le décompte des runs et leur table sont protégés par un verrou dont l'empoisonnement est rapporté ; aucune fuite de tâche : un registre détruit n'annule pas les runs, ils finissent et émettent leurs événements.
-  Aucun secret : ni la tâche, ni le résultat, ni les erreurs de validation ne figurent dans les événements `RunEnded`, `RunInterrupted` ou de source ; le résultat est lu par `wait` et `status` seulement.
+  Aucun secret : ni la tâche, ni le résultat, ni les erreurs de validation ne figurent dans les événements `RunEnded`, `RunInterrupted` ou de source, ni dans les erreurs ; le résultat est lu par `wait` et `status` seulement. `Debug` de @LaunchRequest ne montre ni la tâche ni le collecteur.
+  Restauration tout-ou-rien : tous les enregistrements sont vérifiés (nom autorisé, identifiant non connu, non répété) et leurs collecteurs construits avant toute modification ni émission.
 
 Depends on:
   ./result.sdd
@@ -60,7 +74,7 @@ Depends on:
   tokio
 
 Can modify:
-  ../session/event.rs: nouvelle variante `RunInterrupted { run, session }` de @EventKind, avec ../session/event.sdd (tâche à ajouter) et ses tests.
+  ../session/event.rs: nouvelle variante `RunInterrupted { run, session }` de @EventKind, avec ../session/event.sdd (tâche #10 ; livrée au lot D6, à valider) et ses tests.
 
 Scenario: délégation immédiate et événement de fin
   Given un lanceur dont le run se termine après un signal
@@ -70,7 +84,7 @@ Scenario: délégation immédiate et événement de fin
 Scenario: sous-agent non autorisé
   Given une liste autorisée sans `reviewer`
   When start est appelé pour `reviewer`
-  Then l'erreur est UnknownSubagent et aucun run n'existe
+  Then l'erreur est UnknownSubagent et aucun run n'existe, et le lanceur n'est jamais appelé
 
 Scenario: attente synchrone
   Given un run lancé
@@ -100,7 +114,7 @@ Scenario: relance d'un run interrompu
 Scenario: pilote batch avec correction
   Given un sous-agent scripté qui soumet un résultat invalide puis un résultat valide
   When run_batch s'exécute
-  Then l'issue est Valid, avec le résultat validé et l'erreur de validation renvoyée au sous-agent dans le même run
+  Then l'issue est Valid, avec le résultat validé et le refus renvoyé à la soumission, dans le même run
 
 Scenario: pilote batch qui n'aboutit pas
   Given un sous-agent scripté qui ne soumet jamais de résultat
@@ -112,7 +126,127 @@ Scenario: statut d'un run inconnu
   When status, wait et cancel sont appelés
   Then l'erreur est UnknownRun
 
+Scenario: échec de lancement
+  Given un lanceur qui rend une erreur sans conclure le collecteur
+  When le run finit
+  Then l'issue est Failed avec une raison fixe, et `RunEnded` est émis
+
+Scenario: un registre détruit ne tue pas ses runs
+  Given un run en cours et son registre détruit
+  When le lanceur se termine
+  Then le run finit, `RunEnded` est émis et l'attente déjà posée est réveillée
+
+Scenario: annulation sans session
+  Given un run annulé et un run interrompu
+  When leurs issues sont lues
+  Then l'issue annulée n'a pas de session, l'issue interrompue a celle de son sous-agent
+
+Scenario: records ne liste que les runs en cours
+  Given un run terminé et un run en cours
+  When records est appelé
+  Then seul le run en cours figure
+
+Scenario: schéma invalide refusé à la construction
+  Given une table autorisée dont un schéma ne se compile pas
+  When le registre est construit
+  Then l'erreur est InvalidSchema
+
+Scenario: aucun secret dans les événements
+  Given une tâche et un résultat qui contiennent un secret
+  When le run finit
+  Then les événements et les notifications ne contiennent pas le secret
+
+Scenario: restauration refusée sans modification
+  Given un enregistrement dont le nom n'est pas autorisé, suivi d'un enregistrement valide
+  When restore est appelé
+  Then l'erreur est UnknownSubagent, aucun événement n'est émis et le second run n'est pas connu
+
+Scenario: un identifiant déjà connu est refusé par restore
+  Given un run en cours d'identifiant `run-1`
+  When restore reçoit un enregistrement de `run-1`
+  Then l'erreur est DuplicateRun qui nomme `run-1`, et rien n'est émis
+
+Scenario: la session d'un sous-agent porte la session principale
+  Given deux registres de sessions principales différentes
+  When chacun lance un run
+  Then les sessions de sous-agents diffèrent, au format `<session principale>-<run>`
+
+Scenario: le compteur de runs reste au-dessus des identifiants restaurés
+  Given un run restauré `run-7`
+  When un nouveau run démarre
+  Then son identifiant est `run-8`
+
+Scenario: resume refuse une session qui n'appartient pas à un run restauré du sous-agent
+  Given un run restauré du sous-agent `awaiting` sur la session `session-7`
+  When resume est appelé pour `session-unknown`, puis pour `session-7` avec un autre sous-agent
+  Then chaque appel est refusé et le lanceur n'est pas appelé
+
+Scenario: un lanceur qui conclut Interrupted hors restauration est ramené à Failed
+  Given un lanceur qui conclut son collecteur Interrupted avec une session
+  When le run finit
+  Then l'issue est Failed, avec la raison fixe de normalisation et sans session
+
+Scenario: une annulation qui porte une session la perd
+  Given un lanceur qui conclut son collecteur Cancelled avec une session
+  When le run finit
+  Then l'issue est Cancelled sans session
+
+Scenario: RunEnded est émis avant la notice ended, avec la session principale
+  Given un run qui se termine normalement
+  When il finit
+  Then RunEnded porte la session principale et précède la notice ended
+
+Scenario: le registre ne montre ni la tâche ni le collecteur dans Debug
+  Given une requête de lancement d'une tâche secrète
+  When elle est formatée
+  Then le texte ne contient ni la tâche ni le collecteur
+
+Scenario: annuler un run n'annule pas l'appelant
+  Given un run lancé sous un handle d'appelant
+  When cancel est appelé pour ce run
+  Then le handle de l'appelant n'est pas annulé
+
+Scenario: wait sur un run restauré rend immédiatement
+  Given un run restauré
+  When wait est appelé
+  Then il rend l'issue Interrupted sans attendre
+
+Scenario: fenêtre entre la conclusion du lanceur et la fin du run
+  Given un lanceur qui conclut son collecteur Interrupted avec une session, puis continue de tourner
+  When status et records sont lus avant la fin du run
+  Then status rend Failed à raison fixe sans session, records n'inclut pas le run, et RunEnded n'est pas encore émis
+
+Scenario: resume refuse un sous-agent non déclaré avant de vérifier la session
+  Given une session restaurée du sous-agent `awaiting`
+  When resume est appelé pour le sous-agent `ghost` avec cette session
+  Then l'erreur est UnknownSubagent
+
+Scenario: une session restaurée ne se reprend qu'une fois tant que le run repris vit
+  Given une session restaurée reprise par un run en cours
+  When resume est appelé une seconde fois sur cette session
+  Then l'erreur est DuplicateRun qui nomme le run en cours
+
+Scenario: resume refuse une session qui n'est pas celle d'un run restauré
+  Given un run terminé dont la session n'a pas été restaurée
+  When resume est appelé sur cette session
+  Then l'erreur est UnknownSession
+
+Scenario: numérotation épuisée refusée sans boucle
+  Given un run restauré au plus grand numéro possible
+  When un nouveau run démarre
+  Then l'erreur est DuplicateRun, en un temps borné
+
+Scenario: issue illisible rendue comme échec à raison fixe
+  Given un collecteur qui ne peut pas être lu
+  When son issue est résolue
+  Then l'issue est Failed à raison fixe, jamais l'issue brute
+
+
 Tasks:
-  [ ] #1 Tests puis implémentation (lot D6).
-  [ ] #2 Ajouter la variante `RunInterrupted` à ../session/event.sdd et event.rs.
+  [x] #1 Tests puis implémentation (lot D6), validé le 2026-10-30.
+  [x] #2 Ajouter la variante `RunInterrupted` à ../session/event.sdd et event.rs (fait au lot D6, non coché : à valider par l'orchestrateur).
   [?] #3 Posé : un seul niveau d'agents (le sous-agent ne délègue pas ; `agent-sessions#BR-6`) ; le nombre maximal de tours sans résultat d'un run batch est de 8 par défaut. À confirmer.
+  [?] #4 Amendements du lot D6 (implémenteur, 2026-10-30), décisions du développeur principal du même jour : (1) identifiants de session `<session principale>-<run>`, compteur au-dessus des restaurés ; (2) normalisation côté registre (Interrupted hors restauration devient Failed ; session retirée hors Interrupted) ; (3) écart de `run_batch` acté, renvoi au module `result` (lot D7) ; (4) `resume` conservé et refusé hors session restaurée du sous-agent ; (5) `LaunchRequest::collector()` rend `&Arc<ResultCollector>` ; (6) variante `DuplicateRun { id }` ajoutée à `error.sdd` pour le doublon de restauration (texte « run `<id>` is already known to the registry »), en remplacement de l'usage de `UnknownRun` ; (7) `BATCH_MAX_TURNS = 8` reste une constante sans paramètre (documentée ici, à confirmer comme limite par défaut). Ajouts non prévus restants : `resume`, session principale passée à `new`, schéma vérifié à la construction.
+  [?] #5 Posé (lot D6) : `BATCH_MAX_TURNS` est une constante sans paramètre, 8 tours : ce choix est documenté, il n'est pas configurable par la spec. À confirmer.
+  [?] #6 Posé (lot D6, à décider par le développeur principal, non tranché par l'implémenteur) : après `restore`, `records()` est vide car les runs restaurés sont conclus `Interrupted`. Conséquence : une seconde sauvegarde de la session principale avant toute relance perd les sessions à reprendre, alors que le run interrompu existe encore dans les `RunInterrupted` émis. Trois pistes : (a) `records()` liste aussi les runs restaurés non repris ; (b) l'hôte conserve les enregistrements restaurés jusqu'à leur relance ; (c) l'interruption reste persistée comme donnée distincte. Aucune n'est appliquée.
+  [?] #7 Posé (lot D6) : numérotation épuisée : un identifiant restauré au plus grand numéro saturant le compteur fait refuser le démarrage d'un nouveau run par `DuplicateRun` (aucun identifiant libre). Le saut des identifiants connus est gardé ; il est redondant avec le compteur qui passe au-dessus des restaurés, sauf à la saturation.

@@ -17,6 +17,19 @@ pub enum DelegationError {
         /// Identifier of the unknown run.
         id: String,
     },
+    /// A session given to resume is not the session of a restored run of that sub-agent. The text carries the identifier
+    /// of the session only.
+    #[error("session `{id}` is not the session of a restored run of this sub-agent")]
+    UnknownSession {
+        /// Identifier of the session that cannot be resumed.
+        id: String,
+    },
+    /// A run identifier is already known to the registry, or repeated in a restore.
+    #[error("run `{id}` is already known to the registry")]
+    DuplicateRun {
+        /// Identifier of the run that is already known.
+        id: String,
+    },
     /// A watcher is refused. The reason is a fixed phrase, never the content of an event.
     #[error("invalid watcher `{id}`: {reason}")]
     InvalidWatcher {
@@ -95,6 +108,18 @@ mod tests {
                     id: "run-7".to_owned(),
                 },
                 ["run-7", "unknown"].as_slice(),
+            ),
+            (
+                DelegationError::UnknownSession {
+                    id: "session-9".to_owned(),
+                },
+                ["session-9", "not the session of a restored run"].as_slice(),
+            ),
+            (
+                DelegationError::DuplicateRun {
+                    id: "run-3".to_owned(),
+                },
+                ["run-3", "already known"].as_slice(),
             ),
             (
                 DelegationError::InvalidWatcher {
