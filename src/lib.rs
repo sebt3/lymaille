@@ -63,8 +63,8 @@ pub use toolsets::{
     Assembled, Bump, ConfigEnv, ConfigStores, ContextLevel, ContextStore, ContextType, ContextTypeStore,
     Contract, Delegation, FlatContextType, Gap, GapKind, InMemoryToolsets, InspectionSlot, ParamDecl,
     RemovalReason, RemovedSubagent, ResolvedContext, RoleDecl, RoleSpec, ScriptError, SessionFilter,
-    SessionIndex, SessionMeta, SessionSummary, Skill, Toolset, ToolsetContext, ToolsetStore, ToolsetsError,
-    ToolsetsResult, TypeRequirement, VersionWarning, assemble, check_context, check_creation_rule,
-    check_declared_version, check_template, config_registration, delegable_subagents, extract_contract,
-    render_prompt, render_skill,
+    SessionIndex, SessionMeta, SessionSummary, Skill, SkillTool, Toolset, ToolsetContext, ToolsetStore,
+    ToolsetsError, ToolsetsResult, TypeRequirement, VersionWarning, assemble, builtin_rhai_pad_skill,
+    check_context, check_creation_rule, check_declared_version, check_template, config_registration,
+    delegable_subagents, extract_contract, render_prompt, render_skill, session_context_registration,
 };

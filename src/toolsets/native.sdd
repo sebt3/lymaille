@@ -63,5 +63,14 @@ Scenario: same value from a module and a script
   Then they read the same value
 
 Tasks:
-  [ ] #1 Tests puis implémentation.
+  [x] #1 Tests puis implémentation, vérifié le 2026-10-30.
+      Livré le 2026-10-30 (implémentation, à valider par le développeur principal). Écarts et choix posés, à relire :
+      - le skill intégré s'appelle `rhai-pad` : un nom de skill n'admet pas `_` (./skill.sdd) ; l'outil reste `rhai_pad` dans son texte ;
+      - `session_context()` rend les clés `params` (paramètres partagés), `toolsets` et `roles` : `shared` est un mot réservé de Rhai ;
+      - `session_context` est enregistrée non volatile par `FuncRegistration` (déclarée déterministe) ; `register_fn` la rendrait volatile. L'indicateur n'est pas observable par l'API publique de Rhai (mutant survivant, non testé) ;
+      - `InvalidSkill` n'a qu'une raison `&'static str` : la liste des noms existants entre dans le champ `name` (« nom (known skills: …) »), faute de variante dédiée (./error.sdd) ;
+      - `skill` avec un nom de document seul : refusé par `InvalidSkill`, cas non prévu par la spec ;
+      - la liste sans argument rend aussi le corps de chaque skill (la description et le corps passent par le même rendu) : un corps qui ne se rend pas fait échouer la liste ;
+      - @builtin_rhai_pad_skill refuse un texte qui dépasse le plafond de rendu (`SkillTooLarge`) ;
+      - signatures : `SkillTool::new(granted: Vec<(String, Skill)>, builtin, context, session, cap_chars: usize)`, `call(name: Option<&str>, document: Option<&str>)`, `session_context_registration(context) -> impl FnOnce(&mut RhaiEngine)`, `builtin_rhai_pad_skill(limits) -> ToolsetsResult<Skill>`.
   [?] #2 Texte exact du skill intégré sur `rhai_pad` : à rédiger avec le code ; le bloc @limits_notice de ../scratchpad/introspect.sdd est cité (`introspect.sdd` #6).

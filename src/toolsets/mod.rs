@@ -8,6 +8,7 @@ mod config;
 mod context_type;
 mod contract;
 mod error;
+mod native;
 mod skill;
 mod store;
 mod template;
@@ -27,6 +28,7 @@ pub use config::{
 pub use context_type::{ContextType, FlatContextType, RoleSpec};
 pub use contract::{Contract, VersionWarning, check_declared_version, extract_contract};
 pub use error::{ToolsetsError, ToolsetsResult};
+pub use native::{SkillTool, builtin_rhai_pad_skill, session_context_registration};
 pub use skill::Skill;
 pub use store::{ContextStore, ContextTypeStore, InMemoryToolsets, ToolsetStore};
 pub use template::{SessionMeta, check_template, render_prompt, render_skill};
