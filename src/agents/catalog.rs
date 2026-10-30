@@ -534,6 +534,7 @@ mod tests {
         );
     }
 
+    // Scenario: put writes to the top layer only
     #[tokio::test]
     async fn put_writes_to_top_layer_only() {
         let layered = Layered::new(InMemoryCatalog::new(), InMemoryCatalog::new());
@@ -566,6 +567,100 @@ mod tests {
                 .expect("the lookup must succeed"),
             Some(provider()),
             "the layered catalog must return the put provider"
+        );
+    }
+
+    // Scenario: put writes to the top layer only
+    #[tokio::test]
+    async fn put_writes_to_top_layer_only_for_agent_and_profile() {
+        let layered = Layered::new(InMemoryCatalog::new(), InMemoryCatalog::new());
+        layered
+            .put_agent(&agent())
+            .await
+            .expect("the agent put must reach the top layer");
+        layered
+            .put_profile(&profile("strix-qwen"))
+            .await
+            .expect("the profile put must reach the top layer");
+        assert_eq!(
+            layered
+                .top
+                .get_agent("main")
+                .await
+                .expect("the lookup must succeed"),
+            Some(agent()),
+            "the top layer must hold the put agent"
+        );
+        assert_eq!(
+            layered
+                .base
+                .get_agent("main")
+                .await
+                .expect("the lookup must succeed"),
+            None,
+            "the base layer must not receive a put agent"
+        );
+        assert_eq!(
+            layered.get_agent("main").await.expect("the lookup must succeed"),
+            Some(agent()),
+            "the layered catalog must return the put agent"
+        );
+        assert_eq!(
+            layered
+                .top
+                .get_profile("strix-qwen")
+                .await
+                .expect("the lookup must succeed"),
+            Some(profile("strix-qwen")),
+            "the top layer must hold the put profile"
+        );
+        assert_eq!(
+            layered
+                .base
+                .get_profile("strix-qwen")
+                .await
+                .expect("the lookup must succeed"),
+            None,
+            "the base layer must not receive a put profile"
+        );
+        assert_eq!(
+            layered
+                .get_profile("strix-qwen")
+                .await
+                .expect("the lookup must succeed"),
+            Some(profile("strix-qwen")),
+            "the layered catalog must return the put profile"
+        );
+    }
+
+    // Must: the catalog keeps the JSON text of each object, so a stored text that is not valid JSON is a Store error on
+    // the get, for each of the three kinds of object.
+    #[tokio::test]
+    async fn invalid_json_in_storage_gives_store_error() {
+        let catalog = InMemoryCatalog::new();
+        let _previous_agent =
+            InMemoryCatalog::lock(&catalog.agents).insert("main".to_owned(), "{not json".to_owned());
+        let _previous_profile =
+            InMemoryCatalog::lock(&catalog.profiles).insert("strix-qwen".to_owned(), "[1, 2".to_owned());
+        let _previous_provider = InMemoryCatalog::lock(&catalog.providers)
+            .insert("vllm-strix".to_owned(), "\"unterminated".to_owned());
+        assert!(
+            matches!(catalog.get_agent("main").await, Err(AgentsError::Store(_))),
+            "an agent text that is not JSON must give a Store error on get"
+        );
+        assert!(
+            matches!(
+                catalog.get_profile("strix-qwen").await,
+                Err(AgentsError::Store(_))
+            ),
+            "a profile text that is not JSON must give a Store error on get"
+        );
+        assert!(
+            matches!(
+                catalog.get_provider("vllm-strix").await,
+                Err(AgentsError::Store(_))
+            ),
+            "a provider text that is not JSON must give a Store error on get"
         );
     }
 

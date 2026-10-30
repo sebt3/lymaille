@@ -417,6 +417,33 @@ mod tests {
         }
     }
 
+    // Must: the bounds of the classes. 1xx and 3xx, 4xx other than 429, 5xx beyond 599 and codes beyond 599 are permanent;
+    // the overflow signal changes only the answer for 400.
+    #[test]
+    fn status_classification_bounds() {
+        for status in [199, 300, 428, 430, 499, 600] {
+            assert_eq!(
+                classify_status(status, false),
+                Some(ErrorClass::Permanent),
+                "status {status} is outside the transient ranges and must be permanent"
+            );
+        }
+        assert_eq!(
+            classify_status(599, false),
+            Some(ErrorClass::Transient),
+            "599 is the last server error and must be transient"
+        );
+        for status in [
+            199, 200, 299, 300, 401, 403, 404, 418, 428, 429, 499, 500, 503, 599, 600,
+        ] {
+            assert_eq!(
+                classify_status(status, true),
+                classify_status(status, false),
+                "the overflow signal must not change the class of status {status}"
+            );
+        }
+    }
+
     #[test]
     fn context_overflow_is_its_own_class() {
         assert_eq!(
@@ -478,6 +505,23 @@ mod tests {
         assert!(
             matches!(&result, Err(error) if error.class() == ErrorClass::Permanent && error.message() == "script exhausted"),
             "an exhausted script must fail Permanent with the message `script exhausted`, got {result:?}"
+        );
+    }
+
+    // Must: every request is recorded before answering, and that holds when the script is exhausted too.
+    #[tokio::test]
+    async fn exhausted_script_still_records_the_request() {
+        let provider = ScriptedProvider::new(Vec::new());
+        let sent = request("exhausted");
+        let result = provider.complete(sent.clone()).await;
+        assert!(
+            matches!(&result, Err(error) if error.class() == ErrorClass::Permanent && error.message() == "script exhausted"),
+            "an exhausted script must still fail Permanent, got {result:?}"
+        );
+        assert_eq!(
+            provider.requests(),
+            vec![sent],
+            "the request received after the script is exhausted must be recorded"
         );
     }
 
@@ -628,8 +672,9 @@ mod tests {
         }
     }
 
+    // Scenario: défaut de stream quand complete échoue : aucun fragment
     #[tokio::test]
-    async fn default_stream_failure_emits_no_fragment_and_returns_the_error() {
+    async fn default_stream_failure_emits_no_fragment() {
         let provider = CompleteFailing;
         let mut received: Vec<String> = Vec::new();
         let result = provider
@@ -647,8 +692,9 @@ mod tests {
         );
     }
 
+    // Scenario: réponse vide en flux par défaut : aucun fragment
     #[tokio::test]
-    async fn default_stream_of_an_empty_answer_emits_no_fragment() {
+    async fn default_stream_empty_answer_emits_no_fragment() {
         let provider = CompleteEmpty;
         let mut received: Vec<String> = Vec::new();
         let response = provider

@@ -392,4 +392,57 @@ mod tests {
         );
         assert_eq!(history, before, "the history given is unchanged");
     }
+
+    // Must: multiline content is rendered on several lines without escaping, each line kept as written.
+    #[tokio::test]
+    async fn multiline_content_stays_readable() {
+        let mut history = History::new();
+        history.push(Message::user("line one\nline two"));
+        history.push(Message::assistant("first\nsecond\n\nfourth", None, Vec::new()));
+        let strategy = DefaultStrategy::new(RecordingSummarizer::answering("summary"), ReplayMode::AllTurns);
+        let result = strategy.compact(&history, None).await;
+        assert!(result.is_ok(), "the compaction succeeds, got {result:?}");
+        assert_eq!(
+            strategy.summarizer.first_transcript(),
+            "user: line one\nline two\nassistant: first\nsecond\n\nfourth",
+            "the multiline contents are given as written, each message still opening with its role line"
+        );
+    }
+
+    // Must: the reasoning is given on the line before its assistant message, in the exact form `reasoning: <text>`.
+    #[tokio::test]
+    async fn reasoning_line_has_the_exact_form() {
+        let mut history = History::new();
+        history.push(Message::user("question"));
+        history.push(Message::assistant(
+            "answer",
+            Some(Reasoning::new("provider-a", "thinking")),
+            Vec::new(),
+        ));
+        let strategy = DefaultStrategy::new(RecordingSummarizer::answering("summary"), ReplayMode::AllTurns);
+        let result = strategy.compact(&history, None).await;
+        assert!(result.is_ok(), "the compaction succeeds, got {result:?}");
+        assert_eq!(
+            strategy.summarizer.first_transcript(),
+            "user: question\nreasoning: thinking\nassistant: answer",
+            "the reasoning line is `reasoning: ` followed by the text, and comes before the assistant line"
+        );
+    }
+
+    // Must: @DefaultStrategy does not change the history it receives, on the success path too.
+    #[tokio::test]
+    async fn history_is_unchanged_on_success() {
+        let history = four_messages();
+        let before = history.clone();
+        let strategy = DefaultStrategy::new(
+            RecordingSummarizer::answering("the summary"),
+            ReplayMode::AllTurns,
+        );
+        let result = strategy.compact(&history, None).await;
+        assert!(result.is_ok(), "the compaction succeeds, got {result:?}");
+        assert_eq!(
+            history, before,
+            "the history given is unchanged after a successful compaction"
+        );
+    }
 }
