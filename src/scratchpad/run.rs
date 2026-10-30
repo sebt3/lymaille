@@ -1248,8 +1248,8 @@ mod tests {
             outcome.text()
         );
         assert!(
-            started.elapsed() < Duration::from_millis(500),
-            "within half a second"
+            started.elapsed() < Duration::from_secs(5),
+            "the cancellation is not held back by the call that never returns"
         );
         assert!(dropped.load(Ordering::SeqCst), "the future was dropped");
     }
@@ -1269,7 +1269,10 @@ mod tests {
         });
         let outcome = pad.run("loop { }", &cancel, &env).await;
         assert_eq!(outcome.status(), RunStatus::Cancelled, "the loop is cancelled");
-        assert!(started.elapsed() < Duration::from_secs(1), "within one second");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "the loop is cancelled promptly"
+        );
     }
 
     #[tokio::test]

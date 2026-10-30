@@ -19,6 +19,7 @@ Accepts:
   @LocalCounter::new: aucun argument ; décompte en mémoire du processus.
   @InferenceLimiter::new: la limite (@NonZeroU64, celle du profil de modèle : `ResolvedProfile` expose la concurrence) et un @RequestCounter partagé.
   @InferenceLimiter::acquire: aucun argument ; asynchrone, annulable (abandon du futur) ; rend un @Permit.
+  @InferenceLimiter::tick: aucun argument ; synchrone, sans E/S, sans minuterie ni tâche de fond ; l'hôte l'appelle quand le décompte partagé baisse hors du limiteur (`agent-sessions/delegation#FR-13`, décision #2 du 2026-10-30, même principe que `tick` des watchers). Il rend les places libres aux attentes, dans l'ordre d'arrivée.
   @announced_capacity: la limite du profil, les requêtes déjà consommées au démarrage de la session.
 
 Returns:
@@ -30,6 +31,8 @@ Must:
   Le décompte `in_flight` inclut les requêtes d'un autre processus quand l'hôte fournit un décompte partagé ; @LocalCounter ne compte que le processus.
   Abandonner un futur d'`acquire` en attente ne perd aucune place ; relâcher un permis réveille le premier de la file.
   Aucun débordement, aucune panique : l'arithmétique est saturée.
+  @InferenceLimiter::tick (décision du 2026-10-30) : relit le décompte sous le verrou de la file et accorde une place à la première attente tant que le décompte est inférieur à la limite ; chaque place accordée est comptée par `RequestCounter::acquired`. Sans attente ou sans place libre, il n'accorde rien et ne compte rien. Aucune attente n'est réveillée par un autre moyen que `tick` ou un relâchement local : l'hôte doit donc l'appeler après une baisse du décompte partagé, sans quoi une place libre reste inutilisée.
+  Une nouvelle arrivée ne prend pas une place libre tant que la file n'est pas vide : elle se met derrière les attentes, même si le décompte est bas, jusqu'au prochain `tick` ou relâchement (sinon elle doublerait la file).
 
 Depends on:
   ./error.sdd
@@ -65,6 +68,31 @@ Scenario: ordre d'arrivée
   When trois permis sont relâchés l'un après l'autre
   Then A, B puis C obtiennent leur permis dans cet ordre
 
+Scenario: le décompte baissé par l'hôte n'attribue la place qu'après tick
+  Given une limite de 1, un décompte partagé tenu à 1 et une attente A
+  When l'hôte baisse le décompte à 0 puis appelle tick
+  Then A n'obtient sa place qu'après l'appel de tick, et pas avant
+
+Scenario: tick attribue les places libres dans l'ordre d'arrivée
+  Given une limite de 3, un décompte tenu à 3 et quatre attentes A, B, C, D
+  When l'hôte baisse le décompte à 1 puis appelle tick
+  Then A et B obtiennent une place, C et D attendent, et deux acquisitions sont comptées
+
+Scenario: tick sans place libre n'attribue rien
+  Given une limite de 1, un décompte tenu à 1 et une attente A
+  When tick est appelé
+  Then A reste en attente et aucune acquisition n'est comptée
+
+Scenario: tick sans attente est sans effet
+  Given une limite de 2 et un décompte à 1 sans attente
+  When tick est appelé
+  Then aucune acquisition n'est comptée, le décompte et les places libres restent ceux de l'hôte
+
+Scenario: une nouvelle arrivée ne double pas la file quand le décompte baisse
+  Given une limite de 1, un décompte tenu à 1 et une attente A
+  When l'hôte baisse le décompte à 0, qu'une nouvelle requête B arrive, puis que tick est appelé
+  Then B attend derrière A, et A obtient la place seule
+
 Tasks:
   [x] #1 Tests puis implémentation (lot D2), validé le 2026-10-30.
-  [?] #2 Posé : le décompte partagé de l'hôte peut baisser sans passer par le limiteur (autre processus) ; sans notification de l'hôte ni minuterie, une attente en file n'est réveillée que par un relâchement local. À confirmer, ou à spécifier (par exemple un point d'appel `tick` de l'hôte, comme pour les watchers).
+  [x] #2 Décision du développeur principal (2026-10-30) : point d'appel `InferenceLimiter::tick`, appelé par l'hôte quand le décompte partagé baisse hors du limiteur. Il attribue les places libres aux attentes dans l'ordre d'arrivée, compte chaque place accordée, et n'a ni E/S, ni minuterie, ni tâche de fond. Une nouvelle arrivée se met derrière la file tant qu'elle n'est pas vide. Implémentée (2026-10-30) avec les scénarios ci-dessus et les tests `the_first_waiter_gets_its_place_only_after_the_tick`, `the_tick_grants_the_free_places_to_the_first_arrivals`, `a_tick_without_a_free_place_grants_nothing`, `a_tick_without_waiters_has_no_effect`, `a_new_arrival_does_not_overtake_a_waiter_when_the_count_drops`. Le mutant « file vide ignorée à la prise directe » est tué par ce dernier test.

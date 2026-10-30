@@ -286,10 +286,13 @@ struct Entry {
     normalized: Normalized,
 }
 
-/// Runs of the registry, by identifier, and the counter that numbers the new ones.
+/// Runs of the registry, by identifier, the restored runs whose session is not resumed yet, and the counter that numbers
+/// the new runs.
 #[derive(Default)]
 struct Table {
     entries: BTreeMap<RunId, Arc<Entry>>,
+    /// Identifiers of the restored runs not resumed yet: `records` keeps them until a resume takes them.
+    pending: BTreeSet<RunId>,
     last_run: u64,
 }
 
@@ -355,11 +358,13 @@ impl<L: SubagentLauncher> RunRegistry<L> {
     }
 
     /// Starts a run of `subagent` on `task` that resumes the saved `session` of an interrupted run, under a child of
-    /// `cancel`.
+    /// `cancel`. The restored run is consumed: it is no longer listed by [`RunRegistry::records`], and its session cannot
+    /// be resumed again.
     ///
     /// # Errors
     ///
-    /// Returns the same errors as [`RunRegistry::start`].
+    /// Returns the same errors as [`RunRegistry::start`], and [`DelegationError::UnknownSession`] or
+    /// [`DelegationError::DuplicateRun`] when `session` may not be resumed for `subagent`.
     pub fn resume(
         &self,
         subagent: &str,
@@ -372,35 +377,7 @@ impl<L: SubagentLauncher> RunRegistry<L> {
                 name: subagent.to_owned(),
             });
         }
-        self.check_resumable(subagent, session)?;
         self.launch_run(subagent, task, cancel, Some(session.clone()))
-    }
-
-    /// Checks that `session` may be resumed for `subagent` (`agent-sessions/delegation#AC-10`): it must be the session of a
-    /// restored run of that sub-agent, and no run that already resumed it may be in progress. The second refusal is
-    /// `DuplicateRun`, naming the run in progress that holds the session: a session is resumed once while that run lives.
-    fn check_resumable(&self, subagent: &str, session: &SessionId) -> DelegationResult<()> {
-        let entries: Vec<Arc<Entry>> = self.lock()?.entries.values().map(Arc::clone).collect();
-        let restored = entries
-            .iter()
-            .any(|entry| entry.restored && entry.subagent == subagent && entry.session == *session);
-        if !restored {
-            return Err(DelegationError::UnknownSession {
-                id: session.as_str().to_owned(),
-            });
-        }
-        for entry in &entries {
-            if !entry.restored
-                && entry.subagent == subagent
-                && entry.session == *session
-                && outcome_of(entry).is_none()
-            {
-                return Err(DelegationError::DuplicateRun {
-                    id: entry.run.as_str().to_owned(),
-                });
-            }
-        }
-        Ok(())
     }
 
     /// Registers a run and spawns it. `resume` is the saved session to resume, if any.
@@ -420,11 +397,15 @@ impl<L: SubagentLauncher> RunRegistry<L> {
         let child = cancel.child();
         let resumed = resume.is_some();
         let entry = {
+            // The check of a resumption and the consumption of the restored run happen under the same lock as the insertion.
             let mut table = self.lock()?;
-            let run = next_run_id(&mut table)?;
-            let session = match resume {
-                Some(session) => session,
-                None => session_of(&self.reporter.parent, &run)?,
+            let (run, session, taken) = if let Some(session) = resume {
+                let taken = check_resumable(&table, subagent, &session)?;
+                (next_run_id(&mut table)?, session, Some(taken))
+            } else {
+                let run = next_run_id(&mut table)?;
+                let session = session_of(&self.reporter.parent, &run)?;
+                (run, session, None)
             };
             let entry = Arc::new(Entry {
                 run: run.clone(),
@@ -436,6 +417,9 @@ impl<L: SubagentLauncher> RunRegistry<L> {
                 cancel: child.clone(),
                 done: watch::channel(false).0,
             });
+            if let Some(taken) = taken {
+                let _was_pending = table.pending.remove(&taken);
+            }
             let _previous = table.entries.insert(run, Arc::clone(&entry));
             entry
         };
@@ -498,16 +482,22 @@ impl<L: SubagentLauncher> RunRegistry<L> {
         Ok(())
     }
 
-    /// Records of the runs that are not concluded, to persist with the main session.
+    /// Records to persist with the main session: the runs in progress (those whose collector is not concluded), and the
+    /// restored runs not resumed yet, which a later restore needs as much as the runs in progress.
     ///
     /// # Errors
     ///
     /// Returns [`DelegationError::Poisoned`] when a lock is poisoned.
     pub fn records(&self) -> DelegationResult<Vec<RunRecord>> {
-        let entries: Vec<Arc<Entry>> = self.lock()?.entries.values().map(Arc::clone).collect();
+        let table = self.lock()?;
         let mut records = Vec::new();
-        for entry in entries {
-            if outcome_of(&entry).is_none() {
+        for entry in table.entries.values() {
+            let listed = if entry.restored {
+                table.pending.contains(&entry.run)
+            } else {
+                outcome_of(entry).is_none()
+            };
+            if listed {
                 records.push(RunRecord::new(
                     entry.run.clone(),
                     entry.subagent.clone(),
@@ -569,6 +559,7 @@ impl<L: SubagentLauncher> RunRegistry<L> {
         }
         for entry in &restored {
             let _previous = table.entries.insert(entry.run.clone(), Arc::clone(entry));
+            let _new_pending = table.pending.insert(entry.run.clone());
         }
         drop(table);
         for entry in &restored {
@@ -589,6 +580,33 @@ impl<L: SubagentLauncher> RunRegistry<L> {
     fn lock(&self) -> DelegationResult<MutexGuard<'_, Table>> {
         self.table.lock().map_err(|_poisoned| DelegationError::Poisoned)
     }
+}
+
+/// Checks that `session` may be resumed for `subagent` (`agent-sessions/delegation#AC-10`) and returns the identifier of the
+/// restored run that holds it. The session must be the one of a restored run of that sub-agent, else `UnknownSession`. No
+/// run in progress may already hold it: the refusal is `DuplicateRun`, naming that run, so a session is resumed once while
+/// that run lives. The restored run must not have been resumed already, else `UnknownSession`.
+fn check_resumable(table: &Table, subagent: &str, session: &SessionId) -> DelegationResult<RunId> {
+    let unknown = || DelegationError::UnknownSession {
+        id: session.as_str().to_owned(),
+    };
+    let holds = |entry: &Entry| entry.subagent == subagent && entry.session == *session;
+    if !table.entries.values().any(|entry| entry.restored && holds(entry)) {
+        return Err(unknown());
+    }
+    for entry in table.entries.values() {
+        if !entry.restored && holds(entry) && outcome_of(entry).is_none() {
+            return Err(DelegationError::DuplicateRun {
+                id: entry.run.as_str().to_owned(),
+            });
+        }
+    }
+    table
+        .entries
+        .values()
+        .find(|entry| entry.restored && holds(entry) && table.pending.contains(&entry.run))
+        .map(|entry| entry.run.clone())
+        .ok_or_else(unknown)
 }
 
 /// Next identifier of a run: `run-<n>` with `n` increasing, skipping any identifier the table already knows (a restored
@@ -2238,6 +2256,160 @@ mod tests {
         assert!(
             matches!(&refused, Err(DelegationError::UnknownSession { id }) if id == "main-session-run-1"),
             "a session of a run that was not restored is refused as UnknownSession"
+        );
+    }
+
+    // Scenario: resume refuse la session d'un run neuf en cours comme une session non restaurée (UnknownSession)
+    #[tokio::test]
+    async fn resume_refuses_the_session_of_a_fresh_run_in_progress_as_unknown() {
+        let rig = rig(&["awaiting"]);
+        let caller = CancelHandle::new();
+        let started = rig
+            .registry
+            .start("awaiting", "task", &caller)
+            .expect("a declared sub-agent starts");
+        let session = SessionId::new("main-session-run-1").expect("a non-empty identifier");
+        let refused = rig
+            .registry
+            .resume("awaiting", "task", &CancelHandle::new(), &session);
+        assert!(
+            matches!(&refused, Err(DelegationError::UnknownSession { id }) if id == "main-session-run-1"),
+            "the session of a fresh run in progress is not a restored session: UnknownSession"
+        );
+        caller.cancel();
+        let _stopped = bounded_wait(&rig.registry, started.run()).await;
+    }
+
+    // Scenario: un run restauré reste dans records tant qu'il n'est pas repris : une seconde sauvegarde ne le perd pas
+    #[tokio::test]
+    async fn a_restored_run_stays_in_records_until_it_is_resumed() {
+        let first = rig(&["awaiting"]);
+        let caller = CancelHandle::new();
+        let started = first
+            .registry
+            .start("awaiting", "task", &caller)
+            .expect("a declared sub-agent starts");
+        let saved = first.registry.records().expect("records");
+        caller.cancel();
+        let _stopped = bounded_wait(&first.registry, started.run()).await;
+        let second = rig(&["awaiting"]);
+        second
+            .registry
+            .restore(saved.clone())
+            .expect("the record is restored");
+        let resaved = second.registry.records().expect("records");
+        assert_eq!(
+            resaved, saved,
+            "a second save before the resume keeps the restored run, with its sub-agent and its session"
+        );
+    }
+
+    // Scenario: restaurer, sauvegarder à nouveau, restaurer encore, puis reprendre
+    #[tokio::test]
+    async fn a_restored_session_survives_two_saves_before_its_resume() {
+        let first = rig(&["awaiting"]);
+        let caller = CancelHandle::new();
+        let started = first
+            .registry
+            .start("awaiting", "task", &caller)
+            .expect("a declared sub-agent starts");
+        let saved = first.registry.records().expect("records");
+        let session = saved
+            .first()
+            .map(|record| record.session().clone())
+            .expect("one record is persisted");
+        caller.cancel();
+        let _stopped = bounded_wait(&first.registry, started.run()).await;
+        let second = rig(&["awaiting"]);
+        second.registry.restore(saved).expect("the record is restored");
+        let resaved = second.registry.records().expect("records");
+        let third = rig(&["awaiting"]);
+        third
+            .registry
+            .restore(resaved)
+            .expect("the record saved again is restored a second time");
+        let resumed_caller = CancelHandle::new();
+        let resumed = third
+            .registry
+            .resume("awaiting", "task", &resumed_caller, &session)
+            .expect("the session of the twice-restored run resumes");
+        settle_until(|| third.launcher.requests().len() == 1).await;
+        assert_eq!(
+            third.launcher.requests(),
+            vec![(session.clone(), true)],
+            "the launcher receives the saved session, flagged as resumed"
+        );
+        resumed_caller.cancel();
+        let _resumed_done = bounded_wait(&third.registry, resumed.run()).await;
+    }
+
+    // Scenario: resume retire l'entrée restaurée de records, et le run repris n'est listé qu'une fois
+    #[tokio::test]
+    async fn resuming_takes_the_restored_run_out_of_records() {
+        let first = rig(&["awaiting"]);
+        let caller = CancelHandle::new();
+        let started = first
+            .registry
+            .start("awaiting", "task", &caller)
+            .expect("a declared sub-agent starts");
+        let saved = first.registry.records().expect("records");
+        let session = saved
+            .first()
+            .map(|record| record.session().clone())
+            .expect("one record is persisted");
+        caller.cancel();
+        let _stopped = bounded_wait(&first.registry, started.run()).await;
+        let second = rig(&["awaiting"]);
+        second.registry.restore(saved).expect("the record is restored");
+        assert_eq!(
+            second.registry.records().expect("records").len(),
+            1,
+            "the restored run is listed until it is resumed"
+        );
+        let resumed_caller = CancelHandle::new();
+        let resumed = second
+            .registry
+            .resume("awaiting", "task", &resumed_caller, &session)
+            .expect("the session resumes");
+        let listed = second.registry.records().expect("records");
+        let [only] = listed.as_slice() else {
+            panic!("only the resumed run is listed, once");
+        };
+        assert_eq!(
+            only.run(),
+            resumed.run(),
+            "the restored run is no longer listed: only the resumed run is"
+        );
+        assert_eq!(
+            only.session(),
+            &session,
+            "the resumed run keeps the saved session of its sub-agent"
+        );
+        resumed_caller.cancel();
+        let _resumed_done = bounded_wait(&second.registry, resumed.run()).await;
+    }
+
+    // Scenario: une session reprise ne se reprend plus une fois le run repris terminé
+    #[tokio::test]
+    async fn a_resumed_session_is_not_resumed_again_once_its_run_ended() {
+        let rig = rig(&["awaiting"]);
+        rig.registry
+            .restore(vec![sample_record("run-7", "awaiting", "session-7")])
+            .expect("the record is restored");
+        let session = SessionId::new("session-7").expect("a non-empty identifier");
+        let caller = CancelHandle::new();
+        let first = rig
+            .registry
+            .resume("awaiting", "task", &caller, &session)
+            .expect("the first resume starts");
+        caller.cancel();
+        let _stopped = bounded_wait(&rig.registry, first.run()).await;
+        let again = rig
+            .registry
+            .resume("awaiting", "task", &CancelHandle::new(), &session);
+        assert!(
+            matches!(&again, Err(DelegationError::UnknownSession { id }) if id == "session-7"),
+            "the restored entry is consumed by the resume: a second resume is refused as UnknownSession"
         );
     }
 

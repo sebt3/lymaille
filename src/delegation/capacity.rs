@@ -223,6 +223,27 @@ impl InferenceLimiter {
         })
     }
 
+    /// Gives the free places to the waiting requests, in arrival order. The host calls it when the shared count fell
+    /// outside the limiter, as when another process ends its requests: without a call, a waiter is woken only by a local
+    /// release. Each place granted is counted as a new request. It blocks nothing, sets no timer and starts no task.
+    pub fn tick(&self) {
+        self.grant_free_places(&mut self.shared.lock_queue());
+    }
+
+    /// Grants the places that the count leaves free to the first waiters of `queue`, the queue lock being held by the
+    /// caller. The count is read again after each grant, which it counts.
+    fn grant_free_places(&self, queue: &mut Queue) {
+        while self.shared.counter.in_flight() < self.shared.limit.get() {
+            let Some(waiter) = queue.waiters.pop_front() else {
+                break;
+            };
+            // A waiter whose receiver is gone cannot take the place: the next one is tried.
+            if waiter.grant.send(()).is_ok() {
+                self.shared.counter.acquired();
+            }
+        }
+    }
+
     /// Number of free places seen by this limiter: the limit minus the in-flight requests, never below zero.
     #[must_use]
     pub fn available(&self) -> u64 {
@@ -463,6 +484,187 @@ mod tests {
         assert!(
             poll_once(next.as_mut()).is_ready(),
             "a request that finds a free place must not queue behind an abandoned wait"
+        );
+    }
+
+    /// Host counter the test lowers, and that counts the places the limiter grants (`acquired`), as a shared count does.
+    struct SharedCount {
+        in_flight: AtomicU64,
+        acquisitions: AtomicU64,
+    }
+
+    impl SharedCount {
+        fn new(in_flight: u64) -> Arc<Self> {
+            Arc::new(Self {
+                in_flight: AtomicU64::new(in_flight),
+                acquisitions: AtomicU64::new(0),
+            })
+        }
+
+        /// The host lowers or raises the count, as another process starting or ending its requests would.
+        fn set(&self, value: u64) {
+            self.in_flight.store(value, Ordering::SeqCst);
+        }
+
+        fn acquisitions(&self) -> u64 {
+            self.acquisitions.load(Ordering::SeqCst)
+        }
+    }
+
+    impl RequestCounter for SharedCount {
+        fn in_flight(&self) -> u64 {
+            self.in_flight.load(Ordering::SeqCst)
+        }
+
+        fn acquired(&self) {
+            let _previous = self.in_flight.fetch_add(1, Ordering::SeqCst);
+            let _counted = self.acquisitions.fetch_add(1, Ordering::SeqCst);
+        }
+
+        fn released(&self) {
+            let _previous = self
+                .in_flight
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
+                    Some(count.saturating_sub(1))
+                });
+        }
+    }
+
+    // Scenario: le décompte baissé par l'hôte n'attribue la place qu'après l'appel de tick, pas avant
+    #[test]
+    fn the_first_waiter_gets_its_place_only_after_the_tick() {
+        let count = SharedCount::new(1);
+        let shared: Arc<dyn RequestCounter> = Arc::<SharedCount>::clone(&count);
+        let limiter = InferenceLimiter::new(NonZeroU64::MIN, shared);
+        let mut first = pin!(limiter.acquire());
+        assert!(
+            poll_once(first.as_mut()).is_pending(),
+            "the request waits while the only place is held elsewhere"
+        );
+        count.set(0);
+        assert!(
+            poll_once(first.as_mut()).is_pending(),
+            "a count lowered by the host is not seen before the tick"
+        );
+        limiter.tick();
+        assert!(
+            poll_once(first.as_mut()).is_ready(),
+            "after the tick the first waiter obtains the free place"
+        );
+    }
+
+    // Scenario: ordre d'arrivée respecté par tick, et une place par attente libre
+    #[test]
+    fn the_tick_grants_the_free_places_to_the_first_arrivals() {
+        let count = SharedCount::new(3);
+        let shared: Arc<dyn RequestCounter> = Arc::<SharedCount>::clone(&count);
+        let limiter = InferenceLimiter::new(limit(3), shared);
+        let mut first = pin!(limiter.acquire());
+        let mut second = pin!(limiter.acquire());
+        let mut third = pin!(limiter.acquire());
+        let mut fourth = pin!(limiter.acquire());
+        for (name, wait) in [
+            ("first", &mut first),
+            ("second", &mut second),
+            ("third", &mut third),
+            ("fourth", &mut fourth),
+        ] {
+            assert!(
+                poll_once(wait.as_mut()).is_pending(),
+                "{name} must wait while the three places are held"
+            );
+        }
+        count.set(1);
+        limiter.tick();
+        // The grants are kept: dropping a granted permit would give its place to the next waiter.
+        let first_grant = poll_once(first.as_mut());
+        let second_grant = poll_once(second.as_mut());
+        assert!(first_grant.is_ready(), "the first arrival obtains a free place");
+        assert!(
+            second_grant.is_ready(),
+            "the second arrival obtains the other free place"
+        );
+        assert!(
+            poll_once(third.as_mut()).is_pending(),
+            "the third arrival waits: the free places are used up"
+        );
+        assert!(
+            poll_once(fourth.as_mut()).is_pending(),
+            "the fourth arrival waits behind the third"
+        );
+        assert_eq!(
+            count.acquisitions(),
+            2,
+            "each place granted by the tick is counted as a new request"
+        );
+    }
+
+    // Scenario: sans place libre, l'appel de tick n'attribue rien
+    #[test]
+    fn a_tick_without_a_free_place_grants_nothing() {
+        let count = SharedCount::new(1);
+        let shared: Arc<dyn RequestCounter> = Arc::<SharedCount>::clone(&count);
+        let limiter = InferenceLimiter::new(NonZeroU64::MIN, shared);
+        let mut waiting = pin!(limiter.acquire());
+        assert!(
+            poll_once(waiting.as_mut()).is_pending(),
+            "the request waits while the only place is held"
+        );
+        limiter.tick();
+        assert!(
+            poll_once(waiting.as_mut()).is_pending(),
+            "a tick with no free place leaves the waiter queued"
+        );
+        assert_eq!(count.acquisitions(), 0, "no place is granted, so none is counted");
+    }
+
+    // Scenario: appel de tick sans attente = sans effet
+    #[test]
+    fn a_tick_without_waiters_has_no_effect() {
+        let count = SharedCount::new(1);
+        let shared: Arc<dyn RequestCounter> = Arc::<SharedCount>::clone(&count);
+        let limiter = InferenceLimiter::new(limit(2), shared);
+        limiter.tick();
+        assert_eq!(
+            count.acquisitions(),
+            0,
+            "a tick with an empty queue counts nothing"
+        );
+        assert_eq!(count.in_flight(), 1, "the host count is left as the host set it");
+        assert_eq!(
+            limiter.available(),
+            1,
+            "the free place is still the one of the count"
+        );
+    }
+
+    // Scenario: une nouvelle arrivée ne double pas la file quand le décompte baisse
+    #[test]
+    fn a_new_arrival_does_not_overtake_a_waiter_when_the_count_drops() {
+        let count = SharedCount::new(1);
+        let shared: Arc<dyn RequestCounter> = Arc::<SharedCount>::clone(&count);
+        let limiter = InferenceLimiter::new(NonZeroU64::MIN, shared);
+        let mut first = pin!(limiter.acquire());
+        assert!(
+            poll_once(first.as_mut()).is_pending(),
+            "the first request waits while the only place is held"
+        );
+        count.set(0);
+        let mut arrival = pin!(limiter.acquire());
+        assert!(
+            poll_once(arrival.as_mut()).is_pending(),
+            "a new arrival must queue behind the waiter even though the count is free"
+        );
+        limiter.tick();
+        // The grant is kept: dropping a granted permit would give its place to the arrival.
+        let first_grant = poll_once(first.as_mut());
+        assert!(
+            first_grant.is_ready(),
+            "the tick gives the free place to the waiter, which arrived first"
+        );
+        assert!(
+            poll_once(arrival.as_mut()).is_pending(),
+            "the arrival still waits: the place went to the first waiter"
         );
     }
 
