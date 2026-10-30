@@ -10,9 +10,9 @@ pub enum ModulesError {
     InvalidTodo(String),
     /// A Memory is refused: blank identifier or title, identifier already taken or unknown. The reason is a fixed phrase
     /// chosen by the caller; it never carries the body.
-    #[error("invalid memory `{id}` at level {level}: {reason}")]
+    #[error("invalid memory `{id}`{}: {reason}", level_note(.level))]
     InvalidMemory {
-        /// Level of the Memory: user, project or session.
+        /// Level of the Memory: user, project or session. Empty when the refusal happens before a level is known.
         level: String,
         /// Identifier of the Memory within its level.
         id: String,
@@ -39,6 +39,15 @@ pub enum ModulesError {
 /// Result of the `modules` domain.
 pub type ModulesResult<T> = Result<T, ModulesError>;
 
+/// The ` at level X` part of a Memory refusal, empty when the level is not known.
+fn level_note(level: &str) -> String {
+    if level.is_empty() {
+        String::new()
+    } else {
+        format!(" at level {level}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::error::Error;
@@ -57,6 +66,19 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "invalid memory `notes-1` at level project: unknown identifier"
+        );
+    }
+
+    #[test]
+    fn memory_error_without_level_omits_it() {
+        let error = ModulesError::InvalidMemory {
+            level: String::new(),
+            id: "a b".to_owned(),
+            reason: "the identifier must not contain a blank".to_owned(),
+        };
+        assert_eq!(
+            error.to_string(),
+            "invalid memory `a b`: the identifier must not contain a blank"
         );
     }
 

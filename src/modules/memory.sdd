@@ -19,8 +19,9 @@ Exposes:
   @InMemoryMemoryStore
 
 Accepts:
-  @Memory::new: un identifiant, un titre et un corps ; rend `ModulesResult<Self>` et refuse un identifiant ou un titre vide ou blanc, ou un identifiant qui contient un blanc (@ModulesError::InvalidMemory).
+  @Memory::new: un identifiant, un titre et un corps ; rend `ModulesResult<Self>` et refuse un identifiant ou un titre vide ou blanc, ou un identifiant qui contient un blanc au sens de `char::is_whitespace` (@ModulesError::InvalidMemory, dont le niveau est vide car @Memory::new ne le connaît pas ; le message l'omet). Un corps vide est accepté.
   @MemoryScope::user: la référence de l'utilisateur (texte fourni par l'hôte). @MemoryScope::project: la référence du projet. @MemoryScope::session: un @SessionId. Chacun rend la portée de son niveau.
+  Accesseurs en lecture : @Memory::id, @Memory::title, @Memory::body, @MemorySummary::id, @MemorySummary::title, @MemoryScope::level, @MemoryScope::reference ; `From<&Memory>` pour @MemorySummary ; `Default` pour @InMemoryMemoryStore (qu'un hôte qui implémente le trait utilise pour lire et fabriquer ces valeurs).
   @MemoryStore::list: une @MemoryScope. @MemoryStore::get: une @MemoryScope et un identifiant. @MemoryStore::put: une @MemoryScope et une @Memory (remplace celle de même identifiant). @MemoryStore::delete: une @MemoryScope et un identifiant.
 
 Returns:
@@ -29,14 +30,14 @@ Returns:
 
 Raises:
   @ModulesError::InvalidMemory: voir @Memory::new.
-  @ModulesError::Store: échec du stockage de l'hôte. @ModulesError::Poisoned: verrou de @InMemoryMemoryStore empoisonné.
+  @ModulesError::Store: échec du stockage de l'hôte, et échec de (dé)sérialisation JSON du stockage mémoire. @ModulesError::Poisoned: verrou de @InMemoryMemoryStore empoisonné.
 
 Must:
   La clé d'une Memory est sa portée (niveau et référence) puis son identifiant : deux Memory de même identifiant dans deux portées différentes sont indépendantes. Les trois niveaux passent par le même trait ; la portée de niveau session est qualifiée par l'identifiant de la session, l'état persisté de la session ne contient aucune Memory (`agent-sessions/modules#FR-2`).
   Les opérations sont asynchrones, sans futur boxé ni macro ; les futurs rendus sont `Send` ; le trait est `Send + Sync`.
   @InMemoryMemoryStore stocke chaque Memory sous sa forme JSON (jamais l'objet vivant), ne fait aucune E/S, et chaque `put` remplace la précédente de même clé.
   Le `Debug` d'une @Memory ne montre jamais le corps (nombre de caractères seulement).
-  Les types sont `#[non_exhaustive]`, `Clone`, `Send + Sync` ; @Memory et @MemorySummary se sérialisent.
+  Les types sont `#[non_exhaustive]`, `Clone`, `Send + Sync` ; @Memory et @MemorySummary se sérialisent ; @Memory se désérialise par les mêmes contrôles que @Memory::new (une forme stockée invalide est refusée).
 
 Depends on:
   ./error.sdd
@@ -85,6 +86,7 @@ Scenario: le stockage garde la forme sérialisée
   Then la lecture rend l'état enregistré
 
 Tasks:
-  [ ] #1 Tests puis implémentation.
+  [x] #1 Tests puis implémentation.
+      Validé le 2026-10-30 (validator, mutations manuelles) sous `scripts/check` complet.
   [?] #2 Posé : la portée utilisateur et la portée projet sont des textes que l'hôte fournit à la construction des modules (`agent-sessions/modules#FR-2` donne « niveau et identifiant » comme clé sans dire ce qui qualifie l'utilisateur et le projet). À confirmer.
   [?] #3 Posé : l'identifiant d'une Memory ne contient pas de blanc ; pas d'autre contrainte de charset ni de longueur. À confirmer.
