@@ -61,6 +61,16 @@ Scenario: check reports gaps without executing
   When `contexts::check` est appelé depuis le pad de configuration
   Then le résultat liste les écarts et aucune fonction du toolset n'a été exécutée
 
+Scenario: ouvrir une cible émet un événement
+  Given une session de configuration, un @RecordingSink et un agent connu
+  When `inspect::open_context` puis `inspect::open_session` ouvrent une cible chacun
+  Then deux `TargetOpened` sont émis, de nature `definition` puis `session`, sans contenu de session
+
+Scenario: une ouverture refusée n'émet rien
+  Given un identifiant de session inconnu
+  When `inspect::open_session` est appelé avec lui
+  Then l'erreur nomme l'identifiant et aucun événement n'est émis
+
 Scenario: opening a target replaces the previous one
   Given une cible Definition ouverte
   When `inspect::open_session(id)` est appelé
@@ -99,4 +109,4 @@ Tasks:
   [x] #4 Un pad d'inspection ne rend pas l'avertissement « the functions of this script were not persisted » (il ne persiste jamais) : à corriger dans ../scratchpad/run.sdd/run.rs avant la validation de #1.
       Validé le 2026-10-29 (validator, 76 mutants, `scripts/check` complet vert).
   [x] #2 Décidé le 2026-10-30 par le développeur principal : `SessionIndex` est un trait d'hôte séparé de @SessionStore (qui ne sait que charger et enregistrer par identifiant) ; son filtre est une liste de critères optionnels, à figer au premier usage réel avec l'hôte.
-  [ ] #3 Décidé le 2026-10-30 par le développeur principal : le nom du module `sessions` est validé ; l'ouverture d'une cible produit un événement d'audit distinct (`agent-sessions#BR-5`, par ex. `TargetOpened`), à déclarer dans ../session/event.sdd. La forme du résumé orienté échecs (`agent-sessions/toolsets#FR-19`) reste à poser.
+  [ ] #3 À réaliser (lot T14), décidé le 2026-10-30 par le développeur principal : le nom du module `sessions` est validé ; `inspect::open_context` et `inspect::open_session` émettent un @EventKind::TargetOpened (../session/event.sdd #9) daté par l'horloge injectée, une fois la cible posée (une ouverture refusée n'en émet pas). @config_registration reçoit pour cela un @EventSink partagé, une @Clock partagée et l'@SessionId de la session de configuration, regroupés avec le @Redactor dans une structure d'environnement (seuil de cinq arguments du harnais). La forme du résumé orienté échecs (`agent-sessions/toolsets#FR-19`) reste à poser.

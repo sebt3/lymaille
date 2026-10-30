@@ -96,4 +96,4 @@ Scenario: runtime current_thread
 Tasks:
   [x] #1 Tests puis implémentation.
       Validé le 2026-10-30 (validator) sous `scripts/check` complet. Posé à l'implémentation : un refus de validation (titre blanc, identifiant avec blanc) nomme le niveau et l'identifiant ; `update` d'un identifiant inconnu est refusé avant la validation du titre.
-  [!] #2 `agent-sessions/modules#AC-2` (second volet) : un agent en lecture seule sur le niveau utilisateur ne peut pas modifier. Le scénario de bout en bout (toolset qui n'expose que `read` et `list` sur une dépendance privée `memory_user`, assemblé, `create` introuvable) attend @assemble (../toolsets/assemble.sdd #1, non livré).
+  [x] #2 Fait le 2026-10-30 par ../toolsets/assemble.rs (`read_only_toolset_over_memory_user_cannot_modify`). `agent-sessions/modules#AC-2` (second volet) : un agent en lecture seule sur le niveau utilisateur ne peut pas modifier. Le scénario de bout en bout (toolset qui n'expose que `read` et `list` sur une dépendance privée `memory_user`, assemblé, `create` introuvable) attend @assemble (../toolsets/assemble.sdd #1, non livré).
