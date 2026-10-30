@@ -3,8 +3,10 @@
 
 mod error;
 mod memory;
+mod memory_module;
 mod todo;
 
 pub use error::{ModulesError, ModulesResult};
 pub use memory::{InMemoryMemoryStore, Memory, MemoryLevel, MemoryScope, MemoryStore, MemorySummary};
+pub use memory_module::{MemoryScopes, memory_module, memory_module_name};
 pub use todo::{TodoItem, TodoList, TodoStatus, todo_module};

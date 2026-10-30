@@ -23,8 +23,9 @@ pub use context::{
     UsageTracker, estimate_tokens, replayed_reasoning,
 };
 pub use modules::{
-    InMemoryMemoryStore, Memory, MemoryLevel, MemoryScope, MemoryStore, MemorySummary, ModulesError,
-    ModulesResult, TodoItem, TodoList, TodoStatus, todo_module,
+    InMemoryMemoryStore, Memory, MemoryLevel, MemoryScope, MemoryScopes, MemoryStore, MemorySummary,
+    ModulesError, ModulesResult, TodoItem, TodoList, TodoStatus, memory_module, memory_module_name,
+    todo_module,
 };
 pub use scratchpad::{
     CandidateSet, Catalog, CoreGroup, EngineBuilder, FunctionDescriptor, FunctionEntry, FunctionSource,
