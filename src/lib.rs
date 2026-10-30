@@ -6,6 +6,7 @@
 mod agents;
 mod clock;
 mod context;
+mod modules;
 mod scratchpad;
 mod session;
 mod toolsets;
@@ -21,6 +22,7 @@ pub use context::{
     Budget, CompactionStrategy, ContextError, ContextResult, DefaultStrategy, Digest, ReplayMode, Summarizer,
     UsageTracker, estimate_tokens, replayed_reasoning,
 };
+pub use modules::{ModulesError, ModulesResult, TodoItem, TodoList, TodoStatus, todo_module};
 pub use scratchpad::{
     CandidateSet, Catalog, CoreGroup, EngineBuilder, FunctionDescriptor, FunctionEntry, FunctionSource,
     GrantedModule, GrantedSkill, GrantedToolset, Grants, InspectionPad, InspectionTarget,

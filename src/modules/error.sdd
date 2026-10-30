@@ -35,4 +35,5 @@ Scenario: la collision de noms nomme les deux outils
   Then le message nomme le rôle et les deux noms d'origine
 
 Tasks:
-  [ ] #1 Tests puis implémentation.
+  [x] #1 Tests puis implémentation.
+      Validé le 2026-10-30 (validator) sous `scripts/check` complet.
