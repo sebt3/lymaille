@@ -15,25 +15,32 @@ Exposes:
   @DEFAULT_CORRECTIONS
 
 Accepts:
-  @ResultCollector::new: le schéma JSON (@serde_json::Value, objet de schéma) et le nombre maximal de corrections ; refuse (@DelegationError::InvalidSchema) un schéma qui n'est pas un schéma JSON compilable. @ResultCollector::with_default_corrections: le schéma seul, avec @DEFAULT_CORRECTIONS (3).
-  @ResultCollector::submit: une valeur JSON ; rend une @Submission.
-  @ResultCollector::fail: une raison (texte) ; l'échec explicite du sous-agent.
-  @ResultCollector::outcome: aucun argument ; le @SubagentOutcome courant si le collecteur est conclu, rien sinon.
+  @ResultCollector::new: le nom du sous-agent (pour @DelegationError::InvalidSchema), le schéma JSON (@serde_json::Value, objet de schéma) et le nombre maximal de corrections ; refuse (@DelegationError::InvalidSchema) un schéma qui n'est pas un schéma JSON compilable, remote `$ref` compris. @ResultCollector::with_default_corrections: le nom et le schéma, avec @DEFAULT_CORRECTIONS (3).
+  @ResultCollector::submit: une valeur JSON ; rend une @Submission (`DelegationResult`, erreur @DelegationError::Poisoned si le verrou est empoisonné).
+  @ResultCollector::fail: une raison (texte) ; l'échec explicite du sous-agent ; rend `true` s'il conclut le collecteur, `false` s'il était déjà conclu (sans effet). @DelegationResult.
+  @ResultCollector::conclude_as: un statut (`Cancelled` ou `Interrupted` seulement), une raison (texte, brute : l'appelant la masque avant exposition, comme pour `fail`) et une @SessionId optionnelle, celle du sous-agent que porte `Interrupted` (`./run.sdd`, `RunInterrupted`, `agent-sessions/delegation#FR-14`, `AC-10`). Rend `true` s'il conclut le collecteur. Rend `false`, sans effet, si le collecteur est déjà conclu ou si le statut n'est ni `Cancelled` ni `Interrupted` : ce refus n'est pas une erreur distincte (`error.sdd` n'a pas de variante pour lui), donc un `false` signifie seulement que cet appel n'a pas conclu. `DelegationResult`.
+  @ResultCollector::outcome: aucun argument ; le @SubagentOutcome courant si le collecteur est conclu, rien sinon (`DelegationResult`).
 
 Returns:
-  @Submission: `Accepted` (la valeur validée), `Rejected` (les erreurs de validation et le nombre de corrections restantes, à renvoyer au sous-agent pour qu'il corrige dans le même run) ou `Exhausted` (la liste des erreurs de la dernière tentative : le run échoue).
-  @SubagentStatus: `Valid`, `Failed`, `Cancelled`, `Interrupted`. @SubagentOutcome: statut, résultat validé s'il existe, erreurs de validation, raison de l'échec explicite.
+  @Submission: `Accepted` (la valeur validée), `Rejected` (les erreurs de validation et le nombre de corrections restantes, à renvoyer au sous-agent pour qu'il corrige dans le même run), `Exhausted` (la liste des erreurs de la dernière tentative : le run échoue) ou `Closed` (collecteur déjà conclu : soumission refusée, issue inchangée).
+  @SubagentStatus: `Valid`, `Failed`, `Cancelled`, `Interrupted`. Le collecteur ne conclut lui-même qu'en `Valid` ou `Failed` ; `Cancelled` et `Interrupted` sont posés par le registre des runs via `conclude_as` (./run.sdd). @SubagentOutcome: statut, résultat validé s'il existe, erreurs de validation, raison de l'échec explicite, référence de session (présente pour `Interrupted`, via `session()`).
+  Après un `fail` ou un `conclude_as` qui suit un rejet, l'issue porte les erreurs de la dernière tentative rejetée (non vides) ; sans rejet préalable, la liste est vide.
+  Pour le registre des runs (D6), à la charge de D6 et non du collecteur : `conclude_as(Interrupted, _, None)` et `conclude_as(Cancelled, _, Some(_))` sont acceptés ; l'invariant « une session seulement pour `Interrupted` » n'est donc pas imposé ici, D6 le garantit en passant `Some` pour `Interrupted` seulement. Le collecteur n'offre aucun réveil pour `RunRegistry::wait` : D6 doit lui-même notifier l'attente à la conclusion (par `conclude_as` ou `fail`, puis son propre mécanisme).
 
 Must:
   La première tentative et chaque correction sont des résultats soumis : avec 3 corrections, quatre soumissions invalides au plus ; la quatrième invalide donne `Exhausted` et le run échoue avec la liste des erreurs (`agent-sessions/delegation#AC-8`).
   Un résultat accepté conclut le collecteur : toute soumission suivante est refusée (le résultat est unique).
   Les erreurs de validation nomment le chemin du champ et la règle violée du schéma, jamais la valeur soumise (un résultat peut porter un secret ; `agent-sessions#CON-3`) ; elles sont renvoyées au sous-agent telles quelles.
   @ResultCollector::fail conclut le collecteur en `Failed` avec la raison fournie, masquée par l'appelant avant exposition ; il est aussi utilisable après des soumissions rejetées.
+  Les chemins d'erreur ne rendent une clé d'objet soumise que si le schéma la déclare sous `properties`, à toute profondeur ; toute autre clé devient le marqueur fixe `*`. Les index de tableau sont rendus. Le texte d'une erreur ne contient donc que du texte du schéma, des chiffres et `*`, jamais une clé inconnue du schéma (`agent-sessions#CON-3`). Une propriété déclarée garde son chemin lisible. Cas figé à dessein : une clé non déclarée à cet endroit mais déclarée ailleurs dans le schéma est rendue telle quelle, car son texte est celui du schéma.
+  La conclusion est unique, quel que soit son auteur (`submit`, `fail` ou `conclude_as`) : la seconde est refusée et l'issue ne change pas.
+  @Submission, @SubagentOutcome et @ResultCollector dérivent `Debug` (exigence `missing_debug_implementations`) et exposent la valeur validée et les erreurs. Le registre des runs (`./run.sdd`) ne doit jamais les formater dans un événement (`RunEnded`, `RunInterrupted`, source), une erreur ou une notification.
   Le collecteur est `Send + Sync` (état derrière un verrou dont l'empoisonnement est rapporté, jamais de panique) et partagé entre le module Rhai `result` et le registre des runs.
   Le schéma est compilé une fois ; aucun accès réseau ni fichier pendant la validation (un `$ref` distant est refusé à la compilation).
 
 Depends on:
   ./error.sdd
+  ../session/id.sdd
   jsonschema
   serde_json
 
@@ -78,4 +85,5 @@ Scenario: schéma invalide refusé
   Then la création échoue par InvalidSchema
 
 Tasks:
-  [ ] #1 Tests puis implémentation (lot D5).
+  [x] #1 Tests puis implémentation (lot D5), validé le 2026-10-30.
+      Amendement de l'implémenteur (lot D5, 2026-10-30), à valider par le développeur principal : les signatures ci-dessus sont celles livrées. Ajouts non prévus par la spec d'origine : le nom du sous-agent en paramètre de `new` (requis par `InvalidSchema`) ; la variante `Submission::Closed` (la spec demandait un refus sans le représenter) ; la valeur de retour `bool` de `fail` et de `conclude_as` ; `conclude_as` avec la référence de session pour `Interrupted` (demandé par la revue du 2026-10-30) ; masquage des clés non déclarées dans les chemins d'erreur (même revue, règle en Must).
