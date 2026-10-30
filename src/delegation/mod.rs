@@ -7,7 +7,9 @@
 mod capacity;
 mod error;
 mod sources;
+mod watcher;
 
 pub use capacity::{InferenceLimiter, LocalCounter, Permit, RequestCounter, announced_capacity};
 pub use error::{DelegationError, DelegationResult};
 pub use sources::{BUILTIN_SOURCES, EventHub, EventSource, Timer, TimerKind, TimerSource, WatchEvent};
+pub use watcher::{Notification, Triggered, Watcher, WatcherAction, WatcherSet};

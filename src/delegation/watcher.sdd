@@ -20,19 +20,26 @@ Exposes:
 
 Accepts:
   @Watcher::new: un identifiant, le nom d'une source, un prédicat (texte d'expression Rhai) et une @WatcherAction (`Inject` avec le texte de la notification, ou `LaunchTurn` avec le texte du message de lancement) ; refuse (@DelegationError::InvalidWatcher) un identifiant vide, une source vide, un prédicat qui ne compile pas ou qui n'est pas une expression.
-  @WatcherSet::new: aucun argument. @WatcherSet::add: un @Watcher ; refuse un identifiant en double. @WatcherSet::remove: un identifiant. @WatcherSet::watchers: aucun argument. @WatcherSet::to_values / @WatcherSet::from_values: la forme JSON persistée avec la session (`SessionState::watchers`).
+  @Watcher::id, @Watcher::source, @Watcher::predicate : aucun argument ; rendent l'identifiant, la source et le texte du prédicat. @Watcher::action : aucun argument ; rend la @WatcherAction.
+  @WatcherSet::new: aucun argument. @WatcherSet::add: un @Watcher ; refuse un identifiant en double (`InvalidWatcher`, raison fixe). @WatcherSet::remove: un identifiant ; rend un booléen, vrai si un watcher a été retiré. @WatcherSet::watchers: aucun argument ; rend `&[Watcher]` dans l'ordre d'ajout.
+  @WatcherSet::to_values: aucun argument ; rend `Vec<serde_json::Value>`, sans `Result` (construction infaillible) : un objet par watcher, dans l'ordre d'ajout, de la forme `{"id", "source", "predicate", "action": {"kind": "inject" | "launch_turn", "text"}}`. @WatcherSet::from_values: un tableau de valeurs (`&[serde_json::Value]`, la forme de `SessionState::watchers`) ; rend `DelegationResult<WatcherSet>`.
   @WatcherSet::evaluate: un @WatchEvent ; rend un @Triggered.
+  @Notification::watcher, @Notification::source, @Notification::text : aucun argument ; rendent l'identifiant du watcher, la source de l'événement et le texte rendu.
 
 Returns:
-  @Triggered: les @Notification à injecter dans le tour suivant (identifiant du watcher, source, texte), les demandes de lancement de tour (identifiant du watcher, texte) et les échecs de prédicat (identifiants des watchers dont le prédicat a échoué).
-  @Notification: le texte rendu au modèle porte la source, l'identifiant du watcher et le texte déclaré, jamais le contenu brut de l'événement.
+  @Triggered: les @Notification à injecter dans le tour suivant, les demandes de lancement de tour sous forme de couples `(identifiant du watcher, texte)` (`Triggered::launches`, en tuples faute de type dédié dans `Exposes`) et les échecs de prédicat (identifiants des watchers dont le prédicat a échoué).
+  @Notification::text: le texte rendu au modèle, en anglais, de la forme « watcher `<identifiant>` on source `<source>`: <texte déclaré> ». Il porte la source, l'identifiant et le texte déclaré, jamais le contenu brut de l'événement.
 
 Raises:
-  @DelegationError::InvalidWatcher: voir @Watcher::new ; un doublon d'identifiant.
+  @DelegationError::InvalidWatcher: voir @Watcher::new ; un doublon d'identifiant ; une valeur persistée mal formée ou dont le prédicat ne compile pas (@WatcherSet::from_values).
 
 Must:
-  Le prédicat s'évalue dans un moteur isolé : seul le groupe pur de `vynil-core` est enregistré (`@base_engine` de ../scratchpad/engine.sdd sans aucun groupe, module ni toolset accordé), l'événement est l'unique entrée (une constante `event` : table `#{source, name, data, at}`), il n'y a ni scope de session, ni fonction définie par le LLM, ni `import`. Un prédicat est une expression qui rend un booléen.
-  Un prédicat qui rend `true` déclenche l'action ; `false` ne déclenche rien ; un prédicat qui échoue (appel d'une fonction de module ou de scope inexistante, erreur d'exécution, valeur non booléenne, plafond d'opérations atteint) ne déclenche rien et son watcher figure dans les échecs de @Triggered, sans effet de bord sur la session (`agent-sessions/delegation#AC-9`). Un plafond d'opérations borne l'évaluation d'un prédicat.
+  Le format persisté de @WatcherSet::to_values (champs `id`, `source`, `predicate` et `action` avec `kind` valant `inject` ou `launch_turn`, et `text`) devient un format persisté : il ne change pas sans migration.
+  @WatcherSet::from_values refuse tout l'ensemble au premier enregistrement invalide (mal formé, prédicat qui ne compile pas, identifiant en double) : aucun ensemble partiel. Décision du développeur principal, 2026-10-30.
+  Le prédicat s'évalue dans un moteur isolé : seul le groupe pur de `vynil-core` est enregistré (`@base_engine` de ../scratchpad/engine.sdd sans aucun groupe, module ni toolset accordé), l'événement est l'unique entrée (une constante `event` du scope : table `#{source, name, data, at}`, `at` en millisecondes sous forme d'entier `i64` ; un prédicat qui tente de l'affecter échoue), il n'y a ni scope de session, ni fonction définie par le LLM, ni `import`. Un prédicat est une expression qui rend un booléen.
+  Un prédicat qui rend `true` déclenche l'action ; `false` ne déclenche rien ; un prédicat qui échoue (appel d'une fonction de module ou de scope inexistante, erreur d'exécution, valeur non booléenne, plafond d'opérations atteint) ne déclenche rien et son watcher figure dans les échecs de @Triggered, sans effet de bord sur la session (`agent-sessions/delegation#AC-9`). Un plafond d'opérations de 10 000 borne l'évaluation d'un prédicat. Ce plafond passe par un compteur d'appels du crochet `on_progress` de Rhai, non par `set_max_operations` seul : en Rhai 1.27, `set_max_operations` ne borne pas les fermetures appelées par une fonction native (`map`), qui démarrent leur propre décompte (`Observed in`). Le crochet d'annulation du moteur de base est remplacé pour les prédicats : un prédicat est donc borné, mais l'hôte ne peut pas l'annuler.
+    Observed in: mesure du lot D4 (2026-10-30), Rhai 1.27.0. Un `map` imbriqué de dix éléments à profondeur 6 (10^6 appels de fermeture) sous `set_max_operations(10 000)` rend `true` après 27 s, sans erreur ; le même prédicat sous le compteur `on_progress` échoue en quelques millisecondes. `compile_expression` refuse les blocs `{ }`, `if`, `loop`, `while`, `let` et `import` : un prédicat est une expression seule.
+  Une conversion impossible de l'événement en table (instant hors de `i64`, donnée non sérialisable) fait échouer le prédicat, sans déclencher.
   Chaque évaluation part d'un moteur neuf ou remis à zéro : un watcher n'observe rien d'un autre ni d'une évaluation précédente.
   Seuls les watchers de la source de l'événement sont évalués, dans l'ordre d'ajout.
   Aucune E/S ; le texte d'une notification est fixé par le watcher, le contenu de l'événement n'y entre que par les champs que le watcher cite explicitement dans son prédicat (jamais copié).
@@ -76,9 +83,24 @@ Scenario: demande de lancement de tour
   Then une demande de lancement de tour est rendue avec le texte déclaré
 
 Scenario: un prédicat qui boucle est borné
-  Given un watcher dont le prédicat boucle indéfiniment
+  Given un watcher dont le prédicat est un `map` imbriqué de six niveaux sur dix éléments (dix puissance six appels de fermeture)
   When evaluate reçoit un événement
   Then l'évaluation s'arrête au plafond d'opérations et le watcher figure dans les échecs
+
+Scenario: l'événement est une constante
+  Given un watcher dont le prédicat tente d'affecter `event.name` dans une fermeture
+  When evaluate reçoit l'événement
+  Then rien n'est déclenché et le watcher figure dans les échecs
+
+Scenario: format persisté
+  Given un @WatcherSet d'un watcher `inject` et d'un watcher `launch_turn`
+  When to_values est appelé
+  Then la valeur est un objet par watcher, dans l'ordre d'ajout, de la forme `{"id", "source", "predicate", "action": {"kind", "text"}}`
+
+Scenario: restauration refusée au premier enregistrement invalide
+  Given une liste persistée de deux enregistrements valides encadrant un enregistrement dont le prédicat ne compile pas
+  When from_values est appelé
+  Then l'erreur est une InvalidWatcher et aucun ensemble n'est rendu
 
 Scenario: aller-retour persistant
   Given un @WatcherSet de deux watchers
@@ -96,6 +118,7 @@ Scenario: le contenu de l'événement n'est pas dans la notification
   Then son texte ne contient pas le secret
 
 Tasks:
-  [ ] #1 Tests puis implémentation (lot D4).
+  [x] #1 Tests puis implémentation (lot D4), validé le 2026-10-30.
   [?] #2 Posé : un plafond d'opérations de 10 000 pour un prédicat (la valeur n'est pas fixée par le DSD). À confirmer.
+  [?] #4 Posé (lot D4) : `print` et `debug` d'un prédicat sont neutralisés (crochets sans effet sur le moteur du prédicat) ; l'absence d'écriture dans le tampon d'un run ouvert sur le même fil n'est pas testée ici : `RunScope` est de visibilité `pub(in crate::scratchpad)`, inaccessible depuis `delegation`. Test à placer dans `scratchpad`, ou visibilité à élargir.
   [?] #3 Posé : l'injection d'une notification dans le tour suivant est faite par l'appelant (hôte ou boucle de tour) qui lit @Triggered ; ce fichier ne touche ni l'historique ni @UserInbox. À confirmer.

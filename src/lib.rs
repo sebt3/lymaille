@@ -27,7 +27,8 @@ pub use context::{
 };
 pub use delegation::{
     BUILTIN_SOURCES, DelegationError, DelegationResult, EventHub, EventSource, InferenceLimiter,
-    LocalCounter, Permit, RequestCounter, Timer, TimerKind, TimerSource, WatchEvent, announced_capacity,
+    LocalCounter, Notification, Permit, RequestCounter, Timer, TimerKind, TimerSource, Triggered, WatchEvent,
+    Watcher, WatcherAction, WatcherSet, announced_capacity,
 };
 pub use modules::{
     InMemoryMemoryStore, McpConnector, McpEnv, McpError, McpLister, McpRetryPolicy, McpTool, Memory,
