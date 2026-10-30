@@ -24,6 +24,8 @@ Raises:
   @SessionError::PendingToolCall: un message utilisateur ne peut s'insérer entre un appel d'outil et son résultat.
   @SessionError::Poisoned: un verrou interne empoisonné.
   @SessionError::SecretTooShort: un secret non vide de moins de 6 caractères est refusé à l'ajout (`./redact.sdd`) ; le message ne contient pas le secret.
+  @SessionError::NotSubSession: une session parente est posée sur une session qui n'est pas de nature `Sub` ; porte l'identifiant de la session.
+  @SessionError::NotConfigSession: une cible d'inspection est posée sur une session qui n'est pas de nature `Config` (`./state.sdd`) ; porte l'identifiant de la session. Textes `Display` : « an inspection target can only be set on a configuration session, not on session {id} » et « a parent session can only be set on a sub-agent session, not on session {id} ».
 
 Must:
   @SessionError est `#[non_exhaustive]` et dérive `thiserror::Error` ; chaque variante a un texte `Display` en anglais.
@@ -47,7 +49,9 @@ Scenario: display texts are stable
 Tasks:
   [x] #1 Tests des textes Display, puis l'énumération.
   [x] #3 `IncompatibleFormat` porte deux @FormatVersion (enregistrée et courante) ; le Display est inchangé.
-  [?] #4 La variante `SecretTooShort` (redact.sdd #4) est ajoutée ici alors que ce fichier ne figurait pas dans le périmètre de la tâche
+  [x] #4 La variante `SecretTooShort` (redact.sdd #4) est ajoutée ici alors que ce fichier ne figurait pas dans le périmètre de la tâche
       redact : à valider par le développeur principal.
-  [?] #2 Les erreurs d'inférence (transitoire, permanente, dépassement de contexte, `agent-sessions#FR-6`) se classent
+      Validé le 2026-10-29 par le développeur principal.
+  [x] #2 Les erreurs d'inférence (transitoire, permanente, dépassement de contexte, `agent-sessions#FR-6`) se classent
       dans le module `agents`, pas ici : confirmer.
+      Validé le 2026-10-29 par le développeur principal.

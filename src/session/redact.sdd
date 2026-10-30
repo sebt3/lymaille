@@ -1,7 +1,7 @@
 Spec: redact
 
 Purpose:
-  Masquer mécaniquement les secrets que la librairie détient dans tout texte ou toute valeur JSON destinés aux événements
+  Masquer mécaniquement les secrets que la librairie détient dans tout texte ou toute valeur JSON destinés aux événements, au journal d'audit et aux sorties renvoyées au LLM
     (`agent-sessions/session#FR-8`, `agent-sessions#CON-3`).
 
 Owns:
@@ -88,10 +88,13 @@ Scenario: empty secret ignored
 
 Tasks:
   [x] #1 Tests puis implémentation.
-  [?] #3 Rejeter à l'ajout les secrets qui commencent ou finissent par `*` pour rendre l'idempotence inconditionnelle ? Non fait : les secrets réels
+  [x] #3 Rejeter à l'ajout les secrets qui commencent ou finissent par `*` pour rendre l'idempotence inconditionnelle ? Non fait : les secrets réels
       sont des jetons opaques ; à rouvrir si le cas se présente.
+      Décidé le 2026-10-29 par le développeur principal : statu quo, les secrets commençant ou finissant par `*` ne sont pas rejetés.
   [x] #2 Décidé le 2026-10-27 : un secret de moins de 6 caractères est refusé à l'ajout avec une erreur explicite (il masquerait trop).
   [x] #4 Refuser à l'ajout un secret de moins de 6 caractères (nouvelle erreur, tests puis implémentation, Scenario ci-dessus à ajouter).
-  [?] #5 La chaîne vide reste ignorée (Scenario « empty secret ignored », Accepts) et n'est pas refusée : elle ne masque rien, donc
+  [x] #5 La chaîne vide reste ignorée (Scenario « empty secret ignored », Accepts) et n'est pas refusée : elle ne masque rien, donc
       ne fuit pas. Le texte « moins de 6 caractères » de la décision l'inclurait ; à trancher par le développeur principal.
-  [?] #6 La variante `SecretTooShort` est ajoutée à `SessionError` (`./error.rs`, hors `Owns` de cette spec) : voir `./error.sdd` #4.
+      Décidé le 2026-10-29 par le développeur principal : statu quo, la chaîne vide reste ignorée.
+  [x] #6 La variante `SecretTooShort` est ajoutée à `SessionError` (`./error.rs`, hors `Owns` de cette spec) : voir `./error.sdd` #4.
+      Validé le 2026-10-29 par le développeur principal.

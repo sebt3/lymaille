@@ -60,10 +60,10 @@ Must:
 
 Tasks:
   [x] #1 Déclarer les sous-modules dans ./mod.rs au fil des specs enfants livrées.
-  [?] #2 Boucle de tour (`agent-sessions/session#FR-4` à `FR-7`, `FR-14`, `AC-3`, `AC-8` à `AC-11`) : dépend du trait de
+  [!] #2 Boucle de tour (`agent-sessions/session#FR-4` à `FR-7`, `FR-14`, `AC-3`, `AC-8` à `AC-11`) : dépend du trait de
       fournisseur d'inférence (`agents`), du scratchpad (`scratchpad`) et de la fenêtre de contexte (`context-window`).
       Ne s'écrit qu'après leurs specs.
-  [?] #3 Restauration complète (`FR-3`, `AC-2`) : recompiler les fonctions exige le moteur Rhai (`scratchpad`). Cette spec
+  [!] #3 Restauration complète (`FR-3`, `AC-2`) : recompiler les fonctions exige le moteur Rhai (`scratchpad`). Cette spec
       ne livre que le diff de provenance (./notice.sdd) et le format.
   [x] #4 Décidé le 2026-10-27 : le texte de streaming est émis en fragments comme événements ; la réponse complète figure dans l'événement de fin de tour.
   [x] #6 Ajouter à @Event la variante des fragments de streaming (`./event.sdd` #2 : spec, tests, implémentation).

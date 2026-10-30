@@ -61,4 +61,5 @@ Tasks:
   [x] #1 Tests (exécuteur tokio de test) puis implémentation.
   [x] #2 Décidé le 2026-10-27 : le trait ne prévoit ni liste, ni suppression, ni recherche de sessions : relève de l'hôte (`agent-sessions#CON-1`) ;
       reprise d'une session par identifiant seulement.
-  [?] #3 Choix du `async fn` natif et de la généricité sur le stockage contre `Box<dyn ...>` : posé générique, sans objet dynamique.
+  [x] #3 Choix du `async fn` natif et de la généricité sur le stockage contre `Box<dyn ...>` : posé générique, sans objet dynamique.
+      Validé le 2026-10-29 par le développeur principal.

@@ -32,6 +32,12 @@ pub enum SessionError {
     /// A secret shorter than six characters was offered to the redactor. It is not retained, and the text carries no part of it.
     #[error("a secret must be at least 6 characters long")]
     SecretTooShort,
+    /// An inspection target was set on a session that is not of the configuration nature. Carries the session identifier.
+    #[error("an inspection target can only be set on a configuration session, not on session {0}")]
+    NotConfigSession(SessionId),
+    /// A parent session was set on a session that is not of the sub-agent nature. Carries the session identifier.
+    #[error("a parent session can only be set on a sub-agent session, not on session {0}")]
+    NotSubSession(SessionId),
 }
 
 /// Result of the session module.
@@ -61,7 +67,7 @@ mod tests {
                 "incompatible session format: saved version 2.0, current version 1.0",
             ),
             (
-                SessionError::TurnActive(session),
+                SessionError::TurnActive(session.clone()),
                 "a turn is already active for session s-1",
             ),
             (
@@ -72,6 +78,14 @@ mod tests {
             (
                 SessionError::SecretTooShort,
                 "a secret must be at least 6 characters long",
+            ),
+            (
+                SessionError::NotSubSession(session.clone()),
+                "a parent session can only be set on a sub-agent session, not on session s-1",
+            ),
+            (
+                SessionError::NotConfigSession(session),
+                "an inspection target can only be set on a configuration session, not on session s-1",
             ),
         ];
         for (error, expected) in cases {

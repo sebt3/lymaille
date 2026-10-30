@@ -85,13 +85,66 @@ impl TokenCounters {
     }
 }
 
+/// Nature of a session: work, configuration or sub-agent.
+///
+/// It is written in lowercase, and a document written before the field existed reads as `Work`
+/// (`agent-sessions#BR-8`, `agent-sessions/session#FR-2`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+#[serde(rename_all = "lowercase")]
+pub enum SessionKind {
+    /// A work session: runs a work agent, which may delegate to sub-agents.
+    #[default]
+    Work,
+    /// A configuration session: creates toolsets and inspects agent definitions and sessions.
+    Config,
+    /// A sub-agent session, bound to the session that delegated to it.
+    Sub,
+}
+
+impl SessionKind {
+    /// Tells whether the kind is `Work`. The field is omitted from the JSON when it is `Work`, so a state written before the
+    /// field existed keeps the same text.
+    #[must_use]
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if hands the field over by reference, and cannot take it by value"
+    )]
+    pub(crate) const fn is_work(kind: &Self) -> bool {
+        matches!(kind, Self::Work)
+    }
+}
+
+/// Target of the inspection of a configuration session: an agent definition, with the name of the toolset context it runs
+/// with, or another session. Reserved to a session of the `Config` nature.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+#[serde(rename_all = "lowercase")]
+pub enum InspectionTargetRef {
+    /// The definition of an agent, read with a toolset context.
+    Definition {
+        /// Name of the inspected agent.
+        agent: String,
+        /// Name of the toolset context the agent is read with.
+        context: String,
+    },
+    /// Another session, by its identifier.
+    Session(SessionId),
+}
+
 /// Persisted state of one session. Built by [`SessionState::new`], read by [`SessionState::from_json`], rendered by
 /// [`SessionState::to_json`].
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Clone, PartialEq, Serialize)]
 #[non_exhaustive]
 pub struct SessionState {
     id: SessionId,
     format: FormatVersion,
+    #[serde(skip_serializing_if = "SessionKind::is_work")]
+    kind: SessionKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent: Option<SessionId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    inspection_target: Option<InspectionTargetRef>,
     created_at: Timestamp,
     agent: AgentRef,
     toolset_context: String,
@@ -114,6 +167,12 @@ pub struct SessionState {
 struct StateRecord {
     id: SessionId,
     format: FormatVersion,
+    #[serde(default)]
+    kind: SessionKind,
+    #[serde(default)]
+    parent: Option<SessionId>,
+    #[serde(default)]
+    inspection_target: Option<InspectionTargetRef>,
     #[serde(default = "default_created_at")]
     created_at: Timestamp,
     agent: AgentRef,
@@ -155,6 +214,9 @@ impl StateRecord {
         SessionState {
             id: self.id,
             format: self.format,
+            kind: self.kind,
+            parent: self.parent,
+            inspection_target: self.inspection_target,
             created_at: self.created_at,
             agent: self.agent,
             toolset_context: self.toolset_context,
@@ -202,6 +264,9 @@ impl SessionState {
         Self {
             id,
             format: FormatVersion::CURRENT,
+            kind: SessionKind::Work,
+            parent: None,
+            inspection_target: None,
             created_at,
             agent,
             toolset_context: toolset_context.into(),
@@ -237,12 +302,31 @@ impl SessionState {
     /// # Errors
     ///
     /// Returns [`SessionError::IncompatibleFormat`] when the major version differs from the current one, and
-    /// [`SessionError::Serialization`] when the text is not a valid state.
+    /// [`SessionError::Serialization`] when the text is not a valid state, or when its nature cannot carry what it holds:
+    /// a parent outside the `Sub` nature, or an inspection target outside the `Config` nature. The error names neither
+    /// the session nor the parent or target.
     pub fn from_json(text: &str) -> SessionResult<Self> {
         let header: FormatHeader = serde_json::from_str(text).map_err(|error| read_error(&error))?;
         header.format.check()?;
         let record: StateRecord = serde_json::from_str(text).map_err(|error| read_error(&error))?;
-        Ok(record.into_state())
+        let state = record.into_state();
+        state.check_placement()?;
+        Ok(state)
+    }
+
+    /// Refuses a state whose nature does not carry what it holds. The error gives the rule, never the content.
+    fn check_placement(&self) -> SessionResult<()> {
+        if self.parent.is_some() && self.kind != SessionKind::Sub {
+            return Err(SessionError::Serialization(
+                "a parent session is only carried by a sub-agent session".to_owned(),
+            ));
+        }
+        if self.inspection_target.is_some() && self.kind != SessionKind::Config {
+            return Err(SessionError::Serialization(
+                "an inspection target is only carried by a configuration session".to_owned(),
+            ));
+        }
+        Ok(())
     }
 
     /// Returns the session identifier.
@@ -340,6 +424,86 @@ impl SessionState {
     pub const fn signals(&self) -> &BTreeMap<TurnId, RunSignals> {
         &self.signals
     }
+
+    /// Returns the nature of the session.
+    #[must_use]
+    pub const fn kind(&self) -> SessionKind {
+        self.kind
+    }
+
+    /// Returns the identifier of the parent session, for a sub-agent session.
+    #[must_use]
+    pub const fn parent(&self) -> Option<&SessionId> {
+        self.parent.as_ref()
+    }
+
+    /// Returns the inspection target, when the session has one.
+    #[must_use]
+    pub const fn inspection_target(&self) -> Option<&InspectionTargetRef> {
+        self.inspection_target.as_ref()
+    }
+
+    /// Sets the nature of the session. What the new nature does not carry is dropped: the inspection target unless the
+    /// nature is `Config`, and the parent session unless the nature is `Sub`.
+    #[must_use]
+    pub fn with_kind(mut self, kind: SessionKind) -> Self {
+        self.kind = kind;
+        if !matches!(kind, SessionKind::Config) {
+            self.inspection_target = None;
+        }
+        if !matches!(kind, SessionKind::Sub) {
+            self.parent = None;
+        }
+        self
+    }
+
+    /// Sets the parent session of a sub-agent session.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError::NotSubSession`], naming the session, when the session is not of the `Sub` nature. The state
+    /// is taken by value, so a refused call gives no state back.
+    pub fn with_parent(mut self, parent: SessionId) -> SessionResult<Self> {
+        if self.kind != SessionKind::Sub {
+            return Err(SessionError::NotSubSession(self.id));
+        }
+        self.parent = Some(parent);
+        Ok(self)
+    }
+
+    /// Sets the inspection target, or clears it with `None`. A target can only be set on a session of the `Config` nature.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError::NotConfigSession`], naming the session, when a target is set on a session that is not of
+    /// the `Config` nature. The state is then unchanged.
+    pub fn set_inspection_target(&mut self, target: Option<InspectionTargetRef>) -> SessionResult<()> {
+        if target.is_some() && self.kind != SessionKind::Config {
+            return Err(SessionError::NotConfigSession(self.id.clone()));
+        }
+        self.inspection_target = target;
+        Ok(())
+    }
+}
+
+/// The Debug of a state shows its identifier, its nature and the number of each of its elements. It never shows the
+/// history, the variables, the function sources nor the other content, which may hold secrets.
+impl std::fmt::Debug for SessionState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SessionState")
+            .field("id", &self.id)
+            .field("kind", &self.kind)
+            .field("messages", &self.history.messages().len())
+            .field("segments", &self.segments.len())
+            .field("variables", &self.variables.len())
+            .field("functions", &self.functions.len())
+            .field("todo", &self.todo.len())
+            .field("watchers", &self.watchers.len())
+            .field("run_handles", &self.run_handles.len())
+            .field("labels", &self.labels.iter().count())
+            .field("signals", &self.signals.len())
+            .finish_non_exhaustive()
+    }
 }
 
 #[cfg(test)]
@@ -356,7 +520,7 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{AgentRef, SessionState, TokenCounters};
+    use super::{AgentRef, InspectionTargetRef, SessionKind, SessionState, TokenCounters};
     use crate::clock::{ManualClock, Timestamp};
     use crate::session::{
         BoundaryKind, FormatVersion, LabelAuthor, LabelTarget, Message, ModelSnapshot, Outcome, RunSignals,
@@ -677,5 +841,323 @@ mod tests {
         let alpha = first.find("alpha").expect("the variable alpha must be written");
         let zeta = first.find("zeta").expect("the variable zeta must be written");
         assert!(alpha < zeta, "the variables must be written in key order");
+    }
+
+    /// Writes the state and reads it back, through the text form.
+    fn round_trip(state: &SessionState) -> SessionState {
+        let text = state.to_json().expect("the state must serialize");
+        SessionState::from_json(&text).expect("the text written by to_json must load")
+    }
+
+    // Scenario: kind defaults to work
+    #[test]
+    fn kind_defaults_to_work() {
+        let state = SessionState::from_json(&minimal_document(&json!({})))
+            .expect("a document without a kind must load");
+        assert_eq!(
+            state.kind(),
+            SessionKind::Work,
+            "a document written without a nature field must read as a work session"
+        );
+    }
+
+    // Scenario: sub-agent keeps its parent
+    #[test]
+    fn sub_agent_keeps_its_parent() {
+        let state = minimal()
+            .with_kind(SessionKind::Sub)
+            .with_parent(SessionId::new("s-parent").expect("a non-empty identifier"))
+            .expect("a sub-agent session accepts a parent session");
+        let restored = round_trip(&state);
+        assert_eq!(
+            restored.kind(),
+            SessionKind::Sub,
+            "the sub-agent nature must survive a round trip"
+        );
+        assert_eq!(
+            restored.parent().map(SessionId::as_str),
+            Some("s-parent"),
+            "the parent session must survive a round trip"
+        );
+        assert_eq!(
+            restored, state,
+            "the sub-agent state must equal the original after a round trip"
+        );
+    }
+
+    // Scenario: inspection target round trip
+    #[test]
+    fn inspection_target_round_trips() {
+        let mut state = minimal().with_kind(SessionKind::Config);
+        let definition = InspectionTargetRef::Definition {
+            agent: "main-agent".to_owned(),
+            context: "k8s-context".to_owned(),
+        };
+        state
+            .set_inspection_target(Some(definition.clone()))
+            .expect("a configuration session accepts a definition target");
+        let restored = round_trip(&state);
+        assert_eq!(
+            restored.inspection_target(),
+            Some(&definition),
+            "the definition target must come back equal to the original"
+        );
+
+        let session = InspectionTargetRef::Session(SessionId::new("s-2").expect("a non-empty identifier"));
+        state
+            .set_inspection_target(Some(session.clone()))
+            .expect("a configuration session accepts a session target");
+        let restored_session = round_trip(&state);
+        assert_eq!(
+            restored_session.inspection_target(),
+            Some(&session),
+            "the session target must come back equal to the original"
+        );
+        assert_eq!(
+            restored_session, state,
+            "the configuration state must equal the original after a round trip"
+        );
+    }
+
+    // Scenario: inspection target refused outside config
+    #[test]
+    fn inspection_target_refused_outside_config() {
+        let mut state = minimal();
+        let before = state.clone();
+        let refused = state.set_inspection_target(Some(InspectionTargetRef::Session(
+            SessionId::new("s-2").expect("a non-empty identifier"),
+        )));
+        assert!(
+            matches!(&refused, Err(SessionError::NotConfigSession(id)) if id.as_str() == "s-1"),
+            "a target on a work session must fail with NotConfigSession naming the session, got {refused:?}"
+        );
+        assert_eq!(
+            state, before,
+            "the refused operation must leave the state unchanged"
+        );
+    }
+
+    // Control of the scenario above: the same target is accepted on a configuration session.
+    #[test]
+    fn inspection_target_accepted_on_config() {
+        let mut state = minimal().with_kind(SessionKind::Config);
+        assert!(
+            state
+                .set_inspection_target(Some(InspectionTargetRef::Session(
+                    SessionId::new("s-2").expect("a non-empty identifier"),
+                )))
+                .is_ok(),
+            "control: the same target must be accepted on a configuration session"
+        );
+    }
+
+    // Scenario: parent refused outside sub-agent
+    #[test]
+    fn parent_refused_outside_sub_agent() {
+        let parent = SessionId::new("s-parent").expect("a non-empty identifier");
+        let refused = minimal().with_parent(parent.clone());
+        assert!(
+            matches!(&refused, Err(SessionError::NotSubSession(id)) if id.as_str() == "s-1"),
+            "a parent on a work session must fail with NotSubSession naming the session, got {refused:?}"
+        );
+        assert!(
+            minimal().with_kind(SessionKind::Sub).with_parent(parent).is_ok(),
+            "control: the same parent must be accepted on a sub-agent session"
+        );
+    }
+
+    // Scenario: changing kind drops the target
+    #[test]
+    fn changing_kind_drops_the_target() {
+        let mut state = minimal().with_kind(SessionKind::Config);
+        state
+            .set_inspection_target(Some(InspectionTargetRef::Session(
+                SessionId::new("s-2").expect("a non-empty identifier"),
+            )))
+            .expect("a configuration session accepts a session target");
+        let kept = state.clone().with_kind(SessionKind::Config);
+        assert!(
+            kept.inspection_target().is_some(),
+            "control: keeping the configuration nature must keep the target"
+        );
+        let work = state.with_kind(SessionKind::Work);
+        assert!(
+            work.inspection_target().is_none(),
+            "a session that leaves the configuration nature must have no target"
+        );
+    }
+
+    // Must (#9): changing the kind drops the parent when the new nature is not sub-agent.
+    #[test]
+    fn changing_kind_drops_the_parent() {
+        let sub = minimal()
+            .with_kind(SessionKind::Sub)
+            .with_parent(SessionId::new("s-parent").expect("a non-empty identifier"))
+            .expect("a sub-agent session accepts a parent session");
+        let kept = sub.clone().with_kind(SessionKind::Sub);
+        assert!(
+            kept.parent().is_some(),
+            "control: keeping the sub-agent nature must keep the parent"
+        );
+        let work = sub.with_kind(SessionKind::Work);
+        assert!(
+            work.parent().is_none(),
+            "a session that leaves the sub-agent nature must have no parent"
+        );
+    }
+
+    // Must (#9): an inspection target is cleared with None.
+    #[test]
+    fn inspection_target_cleared_with_none() {
+        let mut state = minimal().with_kind(SessionKind::Config);
+        state
+            .set_inspection_target(Some(InspectionTargetRef::Session(
+                SessionId::new("s-2").expect("a non-empty identifier"),
+            )))
+            .expect("a configuration session accepts a session target");
+        assert!(
+            state.set_inspection_target(None).is_ok(),
+            "clearing the target must be accepted on a configuration session"
+        );
+        assert!(
+            state.inspection_target().is_none(),
+            "the target must be gone after set_inspection_target(None)"
+        );
+    }
+
+    #[test]
+    fn kind_is_written_in_lowercase() {
+        let config = minimal()
+            .with_kind(SessionKind::Config)
+            .to_json()
+            .expect("the state must serialize");
+        let sub = minimal()
+            .with_kind(SessionKind::Sub)
+            .to_json()
+            .expect("the state must serialize");
+        assert!(
+            config.contains(r#""kind":"config""#),
+            "the configuration nature must be written as config, got {config}"
+        );
+        assert!(
+            sub.contains(r#""kind":"sub""#),
+            "the sub-agent nature must be written as sub, got {sub}"
+        );
+    }
+
+    #[test]
+    fn work_state_without_parent_or_target_keeps_its_json() {
+        let text = minimal().to_json().expect("the state must serialize");
+        for key in ["\"kind\"", "\"parent\"", "\"inspection_target\""] {
+            assert!(
+                !text.contains(key),
+                "an absent optional field must be omitted from the JSON, but {key} is written: {text}"
+            );
+        }
+    }
+
+    /// A document of the given nature carrying a parent session, with an identifier that must not leak into the error.
+    fn document_with_parent(kind: &str) -> String {
+        minimal_document(&json!({"kind": kind, "parent": "parent-session-leak"}))
+    }
+
+    /// A document of the given nature carrying an inspection target, with names that must not leak into the error.
+    fn document_with_target(kind: &str) -> String {
+        minimal_document(&json!({
+            "kind": kind,
+            "inspection_target": {"definition": {"agent": "agent-name-leak", "context": "context-name-leak"}},
+        }))
+    }
+
+    // T9 (4): a document whose nature cannot carry its parent is refused, without the session content in the error.
+    #[test]
+    fn from_json_refuses_a_parent_outside_sub_agent() {
+        for kind in ["work", "config"] {
+            let result = SessionState::from_json(&document_with_parent(kind));
+            let Err(SessionError::Serialization(message)) = &result else {
+                panic!("a parent on a `{kind}` document must be refused as Serialization, got {result:?}");
+            };
+            assert!(
+                !message.contains("parent-session-leak") && !message.contains("s-1"),
+                "the refusal must not carry the session content, got {message}"
+            );
+        }
+        assert!(
+            SessionState::from_json(&document_with_parent("sub")).is_ok(),
+            "control: the same parent is read on a sub-agent document"
+        );
+    }
+
+    // T9 (4): a document whose nature cannot carry its inspection target is refused, without the names in the error.
+    #[test]
+    fn from_json_refuses_a_target_outside_config() {
+        for kind in ["work", "sub"] {
+            let result = SessionState::from_json(&document_with_target(kind));
+            let Err(SessionError::Serialization(message)) = &result else {
+                panic!("a target on a `{kind}` document must be refused as Serialization, got {result:?}");
+            };
+            assert!(
+                !message.contains("agent-name-leak") && !message.contains("context-name-leak"),
+                "the refusal must not carry the names of the target, got {message}"
+            );
+        }
+        assert!(
+            SessionState::from_json(&document_with_target("config")).is_ok(),
+            "control: the same target is read on a configuration document"
+        );
+    }
+
+    // T9 (4): clearing the target is accepted on every nature, and a state without a target is left as it was.
+    #[test]
+    fn inspection_target_cleared_with_none_on_any_nature() {
+        for state in [
+            minimal(),
+            minimal().with_kind(SessionKind::Config),
+            minimal()
+                .with_kind(SessionKind::Sub)
+                .with_parent(session_id("s-parent"))
+                .expect("a sub-agent session accepts a parent session"),
+        ] {
+            let mut cleared = state.clone();
+            assert!(
+                cleared.set_inspection_target(None).is_ok(),
+                "clearing the target must be accepted on the {:?} nature",
+                state.kind()
+            );
+            assert_eq!(
+                cleared,
+                state,
+                "clearing an absent target leaves the {:?} state unchanged",
+                state.kind()
+            );
+        }
+    }
+
+    // T9 (4): the Debug of a state shows its identifier, its nature and the counts of its elements, never the content.
+    #[test]
+    fn debug_of_a_state_shows_no_content() {
+        let mut state = minimal().with_kind(SessionKind::Config);
+        state.history.push(Message::user("FAKE-SECRET in the history"));
+        state.variables.extend([(
+            "token".to_owned(),
+            TaggedValue::String("FAKE-SECRET in a variable".to_owned()),
+        )]);
+        state.functions.extend([(
+            "fetch/1".to_owned(),
+            "fn fetch(x) { \"FAKE-SECRET in a source\" }".to_owned(),
+        )]);
+        let rendered = format!("{state:?}");
+        for forbidden in ["FAKE-SECRET", "history", "token", "fetch"] {
+            assert!(
+                !rendered.contains(forbidden),
+                "the Debug of a state must not show its content, but it shows {forbidden}: {rendered}"
+            );
+        }
+        for expected in ["s-1", "Config", "variables", "functions"] {
+            assert!(
+                rendered.contains(expected),
+                "the Debug of a state shows {expected}: {rendered}"
+            );
+        }
     }
 }

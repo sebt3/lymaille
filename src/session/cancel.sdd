@@ -59,6 +59,7 @@ Tasks:
   [x] #1 Tests (temps tokio en pause), puis implémentation sur le jeton de `tokio-util`.
   [x] #3 Renforcer les tests : `sleep_elapses` doit asserter que 2 secondes se sont écoulées (temps tokio en pause), et le sommeil d'un handle déjà
       annulé doit asserter qu'aucun temps ne s'est écoulé.
-  [?] #2 Le pont vers `vynil_core::cancel::CancelToken`, lu par `vynil_core::rt::block_on` pendant un appel de script
+  [x] #2 Le pont vers `vynil_core::cancel::CancelToken`, lu par `vynil_core::rt::block_on` pendant un appel de script
       (jeton d'annulation de `vynil-core`, livré), s'écrit avec le domaine `scratchpad` : prévoir une conversion ou un
       second jeton. `tokio-util` est le choix par défaut, à confirmer.
+      Résolu par ../scratchpad/run.sdd #5 : pont par tâche async, validé le 2026-10-29.

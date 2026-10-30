@@ -54,5 +54,7 @@ Scenario: turn ids are successive
 Tasks:
   [x] #1 Tests puis implémentation.
   [x] #4 Désérialisation validante de @SessionId et @RunId (nécessaire à @SessionState), voir le Scenario correspondant.
-  [?] #3 Choix faits à l'implémentation : @TurnId::new accepte 0 ; @TurnId est copiable.
-  [?] #2 Les identifiants sont-ils générés par la librairie (UUID, dépendance) ou toujours fournis par l'hôte ? Posé : fournis par l'hôte, aucune dépendance.
+  [x] #3 Choix faits à l'implémentation : @TurnId::new accepte 0 ; @TurnId est copiable.
+      Validé le 2026-10-29 par le développeur principal.
+  [x] #2 Les identifiants sont-ils générés par la librairie (UUID, dépendance) ou toujours fournis par l'hôte ? Posé : fournis par l'hôte, aucune dépendance.
+      Validé le 2026-10-29 par le développeur principal.

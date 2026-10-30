@@ -32,7 +32,7 @@ pub use notice::{Provenance, restore_notices};
 pub use redact::Redactor;
 pub use segment::{BoundaryKind, ModelSnapshot, Segment, SegmentContext};
 pub use signals::{Outcome, RunSignals};
-pub use state::{AgentRef, SessionState, TokenCounters};
+pub use state::{AgentRef, InspectionTargetRef, SessionKind, SessionState, TokenCounters};
 pub use store::{InMemoryStore, SessionStore};
 pub use tagged_value::TaggedValue;
 pub use turn_gate::{TurnGate, TurnPermit};

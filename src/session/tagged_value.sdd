@@ -23,6 +23,8 @@ Must:
     elle ne rend pas `null` en silence ; l'appelant l'exclut avec l'avertissement de `agent-sessions/scratchpad#FR-7`.
   Un `Map` garde un ordre stable (par clé) pour une sérialisation reproductible.
   Une étiquette de type inconnue à la lecture est une erreur, pas une valeur par défaut.
+  Tant que la crate n'est pas publiée, un changement du format de persistance ne monte pas `FormatVersion::CURRENT` ; la publication
+    fige le format, et tout changement ultérieur monte la version.
 
 Depends on:
   serde
@@ -72,10 +74,13 @@ Scenario: invalid base64 blob refused
 Tasks:
   [x] #6 Test manquant : `Blob([1,2])` et `Array([Int(1),Int(2)])` restent distincts après aller-retour.
   [x] #1 Tests puis implémentation.
-  [?] #5 Les Scenarios d'aller-retour passent par les dérivations serde : seule la règle des flottants non finis contraint le code. Le format d'étiquetage est un contrat
+  [x] #5 Les Scenarios d'aller-retour passent par les dérivations serde : seule la règle des flottants non finis contraint le code. Le format d'étiquetage est un contrat
       de persistance (ne pas le modifier sans montée de version de format).
+      Validé le 2026-10-29 par le développeur principal.
   [x] #2 Décidé le 2026-10-27 : le `blob` s'encode en base64 (dépendance `base64`).
   [x] #7 Passer l'encodage du `blob` du tableau d'entiers à base64 (code, tests, Scenarios ; format de persistance : montée de version de format à trancher, la crate n'étant pas publiée).
-  [?] #8 Le format de persistance change pour le `blob` (tableau d'entiers → base64) sans montée de `FormatVersion::CURRENT` (1.0) : `./format.sdd` ne prévoit pas de migration, et la crate n'est pas publiée. Une session écrite avant ce changement porte un `blob` en tableau et ne se relit plus. À trancher : monter la version de format ou accepter la rupture avant publication.
+  [x] #8 Le format de persistance change pour le `blob` (tableau d'entiers → base64) sans montée de `FormatVersion::CURRENT` (1.0) : `./format.sdd` ne prévoit pas de migration, et la crate n'est pas publiée. Une session écrite avant ce changement porte un `blob` en tableau et ne se relit plus. À trancher : monter la version de format ou accepter la rupture avant publication.
+      Décidé le 2026-10-29 par le développeur principal : rupture acceptée tant que la crate n'est pas publiée (voir `Must`).
   [x] #3 Décidé le 2026-10-27 : horodatages et décimaux hors périmètre tant qu'aucun besoin n'est établi (`agent-sessions/session`, décision du 2026-10-27).
-  [?] #4 Le passage entre `rhai::Dynamic` et @TaggedValue vit dans `scratchpad` : cette spec ne dépend pas de Rhai.
+  [x] #4 Le passage entre `rhai::Dynamic` et @TaggedValue vit dans `scratchpad` : cette spec ne dépend pas de Rhai.
+      Validé le 2026-10-29 par le développeur principal.

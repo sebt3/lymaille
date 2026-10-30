@@ -45,6 +45,7 @@ Tasks:
   [x] #4 Renforcer `a_restore_creates_a_new_segment` : asserter le @BoundaryKind::Restore du second segment, et que le premier survit à une sérialisation.
   [x] #1 Tests puis implémentation.
   [x] #5 Renommer @ModelProfile en @ModelSnapshot (code et tests) : le type est un instantané du profil résolu tel qu'il a été envoyé, et le nom @ModelProfile appartient à `agents` (../agents/profile.sdd).
-  [?] #2 Le « mode de rejeu du raisonnement » est du texte libre ici : le domaine `agents` (mapping fournisseur et modèle,
+  [!] #2 Le « mode de rejeu du raisonnement » est du texte libre ici : le domaine `agents` (mapping fournisseur et modèle,
       `agent-sessions/context-window#FR-5`) en fixera l'énumération.
-  [?] #3 `agent-sessions/session#FR-11` : contenu confirmé le 2026-10-27 par le développeur principal, ASSUMPTION levée dans le DSD.
+      Dépend du domaine `agents` (énumération du mode de rejeu : context/replay.sdd #2).
+  [x] #3 `agent-sessions/session#FR-11` : contenu confirmé le 2026-10-27 par le développeur principal, ASSUMPTION levée dans le DSD.

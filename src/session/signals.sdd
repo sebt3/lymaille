@@ -55,6 +55,8 @@ Scenario: round trip keeps every field
 Tasks:
   [x] #0 Amorce : @Outcome seul est implémenté (requis par ./event.sdd).
   [x] #1 Tests puis implémentation.
-  [?] #4 Signatures posées : agent producteur et profil de modèle sont des chaînes (pas de dépendance sur ./segment.sdd) ; `new` prend aussi la table des toolsets.
-  [?] #2 Les versions de toolset sont des chaînes `major.minor.patch` ici ; passer à `vynil_core::Semver` quand cette dépendance entre (`toolsets`).
-  [?] #3 `agent-sessions/session#FR-13` : liste des signaux confirmée le 2026-10-27 par le développeur principal, ASSUMPTION levée dans le DSD.
+  [x] #4 Signatures posées : agent producteur et profil de modèle sont des chaînes (pas de dépendance sur ./segment.sdd) ; `new` prend aussi la table des toolsets.
+      Validé le 2026-10-29 par le développeur principal.
+  [ ] #2 Les versions de toolset sont des chaînes `major.minor.patch` ici ; passer à `vynil_core::Semver` quand cette dépendance entre (`toolsets`).
+      vynil_core::Semver est disponible depuis l'ajout de la dépendance (2026-10-29) : remplacement à planifier.
+  [x] #3 `agent-sessions/session#FR-13` : liste des signaux confirmée le 2026-10-27 par le développeur principal, ASSUMPTION levée dans le DSD.

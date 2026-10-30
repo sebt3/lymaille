@@ -64,15 +64,19 @@ Scenario: recording sink is shareable across threads
 
 Tasks:
   [x] #1 Tests puis implémentation.
-  [?] #4 Variantes et champs posés à l'implémentation : `TokenUsage{prompt, completion}`, `TodoChanged`, `MemoryChanged{level, id}`, `Script`, `McpCall`,
+  [x] #4 Variantes et champs posés à l'implémentation : `TokenUsage{prompt, completion}`, `TodoChanged`, `MemoryChanged{level, id}`, `Script`, `McpCall`,
       `Overrun{elapsed_ms}`, `InferenceRetry{attempt, delay_ms, error_class}`, `TurnStarted{turn}`, `TurnEnded{turn, outcome, response}`, `RunEnded{run, outcome}`.
       Durées en millisecondes. À confirmer, notamment l'issue dans `RunEnded`.
+      Validé le 2026-10-29 par le développeur principal.
   [ ] #5 Secrets (décidé : la session masque) : `TurnEnded.response` et `InferenceRetry.error_class` passent par le @Redactor dans la boucle de tour, avant émission ; le Must
       « aucun événement ne porte de secret » doit alors être tenu par la librairie. À réaliser avec la boucle de tour (../session/session.sdd #2) ; prévoir un constructeur d'événement qui masque.
   [x] #2 Variante de fragment de streaming `TextDelta { turn, text }` : décidé le 2026-10-27 (fragments comme événements, cf.
       `./session.sdd` #4). Champs choisis au plus petit, cohérents avec `TurnStarted` (tour) et `TurnEnded` (texte).
-  [?] #6 Un secret coupé entre deux fragments ne serait pas reconnu par le @Redactor fragment par fragment. La boucle de tour
+  [!] #6 Un secret coupé entre deux fragments ne serait pas reconnu par le @Redactor fragment par fragment. La boucle de tour
       doit masquer le flux avant émission, avec une fenêtre de report tant que le début d'un secret peut encore se compléter :
       règle non écrite ici, à trancher avec la boucle de tour (`../session/session.sdd` #2).
-  [?] #7 Le texte d'un `TextDelta` est un texte de réponse : il passe par le @Redactor de la boucle de tour comme `TurnEnded.response` (#5).
-  [?] #3 Événements de délégation (démarrage, fin de sous-agent, watcher déclenché) : définis par le domaine `delegation`.
+      Risque nommé le 2026-10-29 : fuite possible d'un secret coupé entre deux fragments en streaming ; à trancher avec la boucle de tour
+      (session.sdd #2).
+  [!] #7 Le texte d'un `TextDelta` est un texte de réponse : il passe par le @Redactor de la boucle de tour comme `TurnEnded.response` (#5).
+      Règle validée le 2026-10-29 ; son application revient à la boucle de tour (session.sdd #2).
+  [!] #3 Événements de délégation (démarrage, fin de sous-agent, watcher déclenché) : définis par le domaine `delegation`.

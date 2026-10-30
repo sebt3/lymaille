@@ -71,6 +71,8 @@ Tasks:
   [x] #5 Tests manquants relevés par la validation : ordre global des messages (agent, toolsets par nom croissant, fonctions cassées) ; majeure différente ET plus
       ancien (2.0.0 vers 1.9.0) selon la décision de #4.
   [x] #1 Tests puis implémentation.
-  [?] #4 Toolset à la fois de majeure différente et plus ancien (2.0.0 vers 1.9.0) : un seul message (majeure). Décidé le 2026-10-27 : pas de second message de rétrogradation.
-  [?] #2 Libellé exact des messages : posé ici en anglais court ; le domaine `scratchpad` ou `agents` pourra imposer le gabarit système.
-  [?] #3 Remplacer le petit analyseur de version par `vynil_core::Semver` quand cette dépendance entre dans la crate.
+  [x] #4 Toolset à la fois de majeure différente et plus ancien (2.0.0 vers 1.9.0) : un seul message (majeure). Décidé le 2026-10-27 : pas de second message de rétrogradation.
+  [x] #2 Libellé exact des messages : posé ici en anglais court ; le domaine `scratchpad` ou `agents` pourra imposer le gabarit système.
+      Validé le 2026-10-29 par le développeur principal.
+  [ ] #3 Remplacer le petit analyseur de version par `vynil_core::Semver` quand cette dépendance entre dans la crate.
+      vynil_core::Semver est disponible depuis l'ajout de la dépendance (2026-10-29) : remplacement à planifier.

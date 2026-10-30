@@ -12,10 +12,19 @@ Exposes:
   @SessionState
   @AgentRef
   @TokenCounters
+  @SessionKind
+  @InspectionTargetRef
+  @SessionState::with_kind
+  @SessionState::with_parent
+  @SessionState::set_inspection_target
+  @SessionState::kind
+  @SessionState::parent
+  @SessionState::inspection_target
 
 Accepts:
   @SessionState::new: un @SessionId, un @AgentRef (nom et empreinte de la définition), le nom du ToolsetContext, les versions de toolsets
     (nom → version) et un @Timestamp de création.
+  @SessionState::with_kind: un @SessionKind (`Work`, `Config` ou `Sub`) ; rend l'état modifié. @SessionState::with_parent: l'@SessionId de la session parente ; rend `SessionResult<Self>` et refuse (@SessionError::NotSubSession) une session qui n'est pas de nature `Sub`. @SessionState::set_inspection_target: un @InspectionTargetRef optionnel (`Definition` : nom de l'agent et nom du ToolsetContext ; `Session` : un @SessionId) ; réservé à une session `Config`.
   @SessionState::to_json: produit le texte JSON.
   @SessionState::from_json: lit un texte JSON.
 
@@ -25,6 +34,7 @@ Returns:
     (prompt, complétion, raisonnement), @AgentRef, nom du ToolsetContext, versions de toolsets, @Labels, signaux par tour (@TurnId → @RunSignals).
 
 Raises:
+  @SessionError::Serialization: aussi, à la lecture, un état dont la nature n'est pas `Sub` et qui porte un parent, ou dont la nature n'est pas `Config` et qui porte une cible d'inspection (message fixe, sans contenu de session).
   @SessionError::Serialization: JSON invalide ou valeur non sérialisable.
   @SessionError::IncompatibleFormat: majeure de format différente, vérifiée avant toute autre lecture des champs.
 
@@ -36,6 +46,8 @@ Must:
   Les tables sont ordonnées par clé pour une sortie reproductible.
   Les Memory ne font pas partie de cet état : elles se lisent par leur propre trait (`agent-sessions/modules#FR-2`).
   La création pose la version @FormatVersion::CURRENT.
+  @SessionState::with_kind retire ce que la nouvelle nature ne porte pas : la cible d'inspection quand la nature n'est plus `Config`, la session parente quand elle n'est plus `Sub` (décidé le 2026-10-29). @SessionState::set_inspection_target est un mutateur public (`&mut self`, état inchangé en cas de refus ; `None` efface la cible) : la cible d'inspection change en cours de session par construction, c'est l'exception à l'absence de mutateur public.
+  La nature de la session est un champ de l'état (`agent-sessions/session#FR-2`) : absente à la lecture, elle vaut `Work` ; un sous-agent porte l'identifiant de sa session parente ; seule une session `Config` porte une cible d'inspection, qui se relit à l'identique (`agent-sessions#BR-8`). @SessionState::set_inspection_target sur une session qui n'est pas `Config` est refusé par une variante d'erreur dédiée (tâche #8).
 
 Must not:
   Écrire ou lire quoi que ce soit : le texte est rendu ou reçu, le stockage est l'affaire de @SessionStore.
@@ -52,6 +64,27 @@ Depends on:
   ../clock.sdd
   serde
   serde_json
+
+Tasks:
+  [x] #1 Tests puis implémentation.
+  [x] #4 Décidé : aucun mutateur public sur @SessionState. La boucle de tour aura des mutateurs `pub(crate)` ; un hôte construit un état par @SessionState::new puis le confie à la librairie.
+  [ ] #5 Décidé : un état relu puis sauvegardé est réécrit en @FormatVersion::CURRENT (l'étiquette ne doit pas mentir sur le contenu). À réaliser avec son Scenario : relire un document 1.9 avec champ inconnu,
+      réécrire, constater `format` = 1.0 courant ; `created_at` absent vaut l'époque Unix (0).
+  [x] #6 Aucun `Deserialize` public sur @SessionState (la lecture passe par @SessionState::from_json, qui vérifie la version d'abord) ; un JSON syntaxiquement
+      invalide de format 2.0 rend @SessionError::Serialization et non IncompatibleFormat.
+      Validé le 2026-10-29 par le développeur principal.
+  [!] #2 Types de la todo, des watchers et des handles de runs : définis par `modules` (todo) et `delegation` (watchers, `FR-14`).
+      Valeurs JSON opaques en attendant ; remplacer par des types nommés à ce moment, sans changer la version de format.
+  [x] #3 L'empreinte de la définition d'agent est une chaîne opaque fournie par l'hôte ou le domaine `agents` ; l'algorithme n'est pas fixé ici.
+      Validé le 2026-10-29 par le développeur principal.
+  [x] #7 Nature de la session (`Work`, `Config`, `Sub`), identifiant de la session parente d'un sous-agent et cible d'inspection d'une session `Config` dans l'état persisté (DSD du 2026-10-29, `agent-sessions/session#FR-2`) ; changement du format de persistance, non publié (tagged_value.sdd #8).
+      Validé le 2026-10-29 (validator : 40 mutations manuelles, `scripts/check` complet vert).
+  [x] #8 Erreur de @SessionState::set_inspection_target hors session `Config` : variante dédiée de @SessionError (à ajouter dans ./error.sdd, qui énumère déjà ses variantes) ; test.
+      Validé le 2026-10-29 (validator : 40 mutations manuelles, `scripts/check` complet vert).
+  [x] #9 Décisions du 2026-10-29 sur les écarts relevés : `with_parent` refuse hors `Sub` (nouvelle erreur `NotSubSession`), `with_kind` retire cible et parent devenus sans objet (`Must`), `set_inspection_target(None)` efface ; Scenarios « parent refused outside sub-agent » et « changing kind drops the target » à tester.
+      Validé le 2026-10-29 (implémentation vérifiée par mutations de l'auteur) ; validation du validator groupée avec T7.
+  [x] #10 Validation du 2026-10-29 : `from_json` refuse (SessionError::Serialization, message sans contenu) un état dont la nature n'est pas `Sub` et qui porte un parent, ou dont la nature n'est pas `Config` et qui porte une cible d'inspection ; `set_inspection_target(None)` accepté sur toute nature, testé ; accesseurs `kind()`, `parent()`, `inspection_target()` ajoutés à `Exposes` ; Debug manuel de @SessionState (identifiant, nature, tailles, jamais l'historique ni les valeurs) ; `#[expect(clippy::trivially_copy_pass_by_ref)]` de `SessionKind::is_work` conservé (raison précise).
+      Validé le 2026-10-29 (validator, 76 mutants, `scripts/check` complet vert).
 
 Scenario: full round trip
   Given a state with history, two variables, one function source, a todo entry, token counters and labels
@@ -83,13 +116,42 @@ Scenario: absent optional fields default
   When read
   Then empty history, tables and counters are used
 
-Tasks:
-  [x] #1 Tests puis implémentation.
-  [x] #4 Décidé : aucun mutateur public sur @SessionState. La boucle de tour aura des mutateurs `pub(crate)` ; un hôte construit un état par @SessionState::new puis le confie à la librairie.
-  [ ] #5 Décidé : un état relu puis sauvegardé est réécrit en @FormatVersion::CURRENT (l'étiquette ne doit pas mentir sur le contenu). À réaliser avec son Scenario : relire un document 1.9 avec champ inconnu,
-      réécrire, constater `format` = 1.0 courant ; `created_at` absent vaut l'époque Unix (0).
-  [?] #6 Aucun `Deserialize` public sur @SessionState (la lecture passe par @SessionState::from_json, qui vérifie la version d'abord) ; un JSON syntaxiquement
-      invalide de format 2.0 rend @SessionError::Serialization et non IncompatibleFormat.
-  [?] #2 Types de la todo, des watchers et des handles de runs : définis par `modules` (todo) et `delegation` (watchers, `FR-14`).
-      Valeurs JSON opaques en attendant ; remplacer par des types nommés à ce moment, sans changer la version de format.
-  [?] #3 L'empreinte de la définition d'agent est une chaîne opaque fournie par l'hôte ou le domaine `agents` ; l'algorithme n'est pas fixé ici.
+Scenario: kind defaults to work
+  Given un JSON d'état écrit sans champ de nature
+  When il est lu
+  Then la nature est Work
+
+Scenario: sub-agent keeps its parent
+  Given un état de nature Sub avec une session parente
+  When il est sérialisé puis relu
+  Then la nature et la session parente sont égales à l'original
+
+Scenario: inspection target round trip
+  Given un état de nature Config avec une cible Definition puis une cible Session
+  When chacun est sérialisé puis relu
+  Then la cible est égale à l'original
+
+Scenario: inspection target refused outside config
+  Given un état de nature Work
+  When une cible d'inspection est posée
+  Then l'opération échoue et l'état est inchangé
+
+Scenario: parent refused outside sub-agent
+  Given un état de nature Work
+  When une session parente est posée
+  Then l'opération échoue avec NotSubSession
+
+Scenario: changing kind drops the target
+  Given un état de nature Config avec une cible d'inspection
+  When sa nature devient Work
+  Then il n'a plus de cible
+
+Scenario: changing kind drops the parent
+  Given un état de nature Sub avec une session parente
+  When sa nature devient Work
+  Then il n'a plus de session parente
+
+Scenario: clearing the inspection target
+  Given un état de nature Config avec une cible d'inspection
+  When la cible est posée à None
+  Then il n'a plus de cible
