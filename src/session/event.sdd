@@ -79,8 +79,9 @@ Tasks:
       `Overrun{elapsed_ms}`, `InferenceRetry{attempt, delay_ms, error_class}`, `TurnStarted{turn}`, `TurnEnded{turn, outcome, response}`, `RunEnded{run, outcome}`, `RunInterrupted{run, session}` (lot D6, tâche #10).
       Durées en millisecondes. À confirmer, notamment l'issue dans `RunEnded`.
       Validé le 2026-10-29 par le développeur principal.
-  [ ] #5 Secrets (décidé : la session masque) : `TurnEnded.response` et `InferenceRetry.error_class` passent par le @Redactor dans la boucle de tour, avant émission ; le Must
+  [x] #5 Secrets (décidé : la session masque) : `TurnEnded.response` et `InferenceRetry.error_class` passent par le @Redactor dans la boucle de tour, avant émission ; le Must
       « aucun événement ne porte de secret » doit alors être tenu par la librairie. À réaliser avec la boucle de tour (../session/session.sdd #2) ; prévoir un constructeur d'événement qui masque.
+      Réalisé par la boucle de tour (lot R1, validé le 2026-10-30) : `TurnEnded.response` et les fragments passent par le @Redactor avant émission (test « secret absent de toutes les sorties ») ; `InferenceRetry.error_class` est un nom de classe constant (`transient`, `permanent`, `context_overflow`), jamais un contenu. Pas de constructeur d'événement dédié : le masquage se fait au site d'émission.
   [x] #2 Variante de fragment de streaming `TextDelta { turn, text }` : décidé le 2026-10-27 (fragments comme événements, cf.
       `./session.sdd` #4). Champs choisis au plus petit, cohérents avec `TurnStarted` (tour) et `TurnEnded` (texte).
   [!] #6 Un secret coupé entre deux fragments ne serait pas reconnu par le @Redactor fragment par fragment. La boucle de tour

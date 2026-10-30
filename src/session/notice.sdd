@@ -15,6 +15,7 @@ Exposes:
 Accepts:
   @Provenance::new: l'empreinte de la définition d'agent et les versions de toolsets (nom → `major.minor.patch`).
   @restore_notices: la @Provenance enregistrée, la @Provenance courante et la liste des noms de fonctions dont la recompilation a échoué.
+  Les versions de toolsets sont lues par `vynil_core::Semver` (`Semver::opt_parse`) ; la @Provenance garde leur texte.
 
 Returns:
   @restore_notices: une liste de textes de message système, en anglais, vide si rien n'a changé.
@@ -23,14 +24,16 @@ Must:
   Un texte par changement détecté, dans cet ordre : définition d'agent, puis toolsets par nom croissant, puis fonctions cassées.
   Définition d'agent : signalée seulement si les empreintes diffèrent.
   Toolset : majeure différente → message qui nomme le toolset et les deux versions ; version courante strictement plus ancienne que
-    l'enregistrée → message de rétrogradation qui nomme les deux versions ; mineure ou correctif plus récent, même majeure → aucun message.
+    l'enregistrée (précédence de `vynil_core::Semver`) → message de rétrogradation qui nomme les deux versions ; mineure ou correctif plus
+    récent, même majeure → aucun message.
   Toolset présent à la sauvegarde et absent maintenant, ou l'inverse : signalé en nommant le toolset.
   Fonctions cassées : un seul message qui liste leurs noms, dans l'ordre reçu.
   Aucun texte ne reprend de contenu de session ni de secret : noms, empreintes et versions seulement.
-  Une version qui ne se lit pas comme `major.minor.patch` est comparée comme chaîne : différente → message, jamais de panique.
+  Une version que `vynil_core::Semver` ne lit pas est comparée comme chaîne : différente → message, jamais de panique.
 
 Depends on:
   serde
+  vynil-core
 
 Scenario: nothing changed
   Given identical provenances and no broken function
@@ -74,5 +77,23 @@ Tasks:
   [x] #4 Toolset à la fois de majeure différente et plus ancien (2.0.0 vers 1.9.0) : un seul message (majeure). Décidé le 2026-10-27 : pas de second message de rétrogradation.
   [x] #2 Libellé exact des messages : posé ici en anglais court ; le domaine `scratchpad` ou `agents` pourra imposer le gabarit système.
       Validé le 2026-10-29 par le développeur principal.
-  [ ] #3 Remplacer le petit analyseur de version par `vynil_core::Semver` quand cette dépendance entre dans la crate.
+  [x] #3 Remplacer le petit analyseur de version par `vynil_core::Semver` quand cette dépendance entre dans la crate.
       vynil_core::Semver est disponible depuis l'ajout de la dépendance (2026-10-29) : remplacement à planifier.
+      Remplacement fait le 2026-10-30 (`Semver::opt_parse`, comparaison par `Semver` ; API et texte de la @Provenance inchangés) ; non coché.
+  [x] #6 Écarts de sémantique introduits par `vynil_core::Semver`, non tranchés : (a) une pré-release (`1.4.0-rc.1`) est inférieure à `1.4.0`,
+      donc rétrogradation au lieu du message « changed version » ; (b) le préfixe `v` est accepté : `v1.4.0` et `1.4.0` ne donnent plus de message ;
+      (c) les métadonnées de build sont ignorées par la comparaison : `1.4.0+a` et `1.4.0+b` ne donnent plus de message (ils en donnaient un) ; (d) les zéros de tête sont refusés : `01.4.0` est comparé comme texte.
+      Posé : le comportement suit `vynil_core::Semver`. À trancher : faut-il garder le message « changed version » pour ces cas ?
+      Ce point n'est couvert par aucun Scenario ; le mutant « égal mais texte différent → message » survit faute de test.
+      Décidé le 2026-10-30 (développeur principal) : la sémantique de `vynil_core::Semver` est acceptée, écart par écart.
+      (a) pré-release puis version finale (`1.4.0-rc.1` → `1.4.0`) : pas de message (mise à jour, pas de rétrogradation) ; la
+      rétrogradation inverse (`1.4.0` → `1.4.0-rc.1`) donne le message « older » ; test `prerelease_to_release_is_not_a_rollback`.
+      (b) préfixe `v` : `v1.4.0` et `1.4.0` sont la même version, aucun message ; test `v_prefix_is_read_as_the_version`.
+      (c) métadonnées de build : aucun avis dans les deux sens, car elles sont retirées avant lecture (fonction `read_version`) ;
+      sans ce retrait, `Ord` de la crate `semver` départageait `+a` et `+b` et produisait un message « older » ; test
+      `build_metadata_is_not_a_change`.
+      (d) zéros de tête : refusés par Semver, donc comparés comme texte : différents → message « changed version » ; test
+      `leading_zero_is_compared_as_text`.
+      Les quatre tests ont été écrits VERTS sur le comportement décidé (a, b, d) ou ROUGE pour (c) (ordre inverse de métadonnées) ;
+      chacun est prouvé par mutation. Le marqueur `[?] #6` reste à basculer en `[x]` par l'orchestrateur après validation ;
+      la case #3 reste à cocher par la même voie (remplacement fait).

@@ -309,8 +309,11 @@ impl SessionState {
         let header: FormatHeader = serde_json::from_str(text).map_err(|error| read_error(&error))?;
         header.format.check()?;
         let record: StateRecord = serde_json::from_str(text).map_err(|error| read_error(&error))?;
-        let state = record.into_state();
+        let mut state = record.into_state();
         state.check_placement()?;
+        // The read content is interpreted under the current format: unknown fields are dropped, so the label must not
+        // keep the older minor version that was read.
+        state.format = FormatVersion::CURRENT;
         Ok(state)
     }
 
@@ -684,13 +687,50 @@ mod tests {
         let state = SessionState::from_json(&text).expect("a format 1.9 document must load");
         assert_eq!(
             state.format(),
-            FormatVersion::new(1, 9),
-            "the format read must be 1.9"
+            FormatVersion::CURRENT,
+            "a state read from format 1.9 must hold the current format version"
         );
         let rendered = state.to_json().expect("the loaded state must serialize");
         assert!(
             !rendered.contains("future_field"),
             "the unknown field must be ignored, not carried into the state"
+        );
+    }
+
+    // Scenario: rewritten state holds the current format
+    #[test]
+    fn rewritten_state_holds_the_current_format() {
+        let text = json!({
+            "id": "s-1",
+            "agent": {"name": "main-agent", "fingerprint": "sha-1"},
+            "format": {"major": 1, "minor": 9},
+            "future_field": {"x": 1},
+        })
+        .to_string();
+        let state = SessionState::from_json(&text).expect("a format 1.9 document must load");
+        let saved = state.to_json().expect("the loaded state must serialize");
+        let document: serde_json::Value =
+            serde_json::from_str(&saved).expect("the saved text must be valid JSON");
+        assert_eq!(
+            document["format"],
+            json!({"major": 1, "minor": 0}),
+            "the saved document must carry the current format version"
+        );
+        assert!(
+            document.get("future_field").is_none(),
+            "the saved document must not carry the unknown field"
+        );
+    }
+
+    // Scenario: absent creation date is the Unix epoch
+    #[test]
+    fn absent_creation_date_is_the_epoch() {
+        let state = SessionState::from_json(&minimal_document(&json!({})))
+            .expect("a minimal format 1.0 document must load");
+        assert_eq!(
+            state.created_at(),
+            Timestamp::from_millis(0),
+            "a document without creation date must read as the Unix epoch"
         );
     }
 

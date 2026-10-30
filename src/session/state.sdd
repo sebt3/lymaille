@@ -42,7 +42,9 @@ Raises:
 Must:
   Un aller-retour @SessionState::to_json puis @SessionState::from_json rend un état égal, fonctions et variables comprises.
   @SessionState::from_json lit d'abord la version de format et refuse une majeure différente sans interpréter le reste ; les champs
-    ajoutés par une mineure plus récente sont ignorés, les champs optionnels absents prennent leur valeur vide.
+    ajoutés par une mineure plus récente sont ignorés, les champs optionnels absents prennent leur valeur vide. Un état relu
+    porte la version @FormatVersion::CURRENT (décidé le 2026-10-30, tâche #5) : il est réécrit dans le format courant, et
+    l'étiquette de version ne ment pas sur le contenu ; sa date de création absente vaut l'époque Unix (0).
   L'état ne porte que des noms et des références : jamais de secret, ni de jeton, ni d'endpoint résolu (`agent-sessions#CON-3`).
   Les tables sont ordonnées par clé pour une sortie reproductible.
   Les Memory ne font pas partie de cet état : elles se lisent par leur propre trait (`agent-sessions/modules#FR-2`).
@@ -69,7 +71,7 @@ Depends on:
 Tasks:
   [x] #1 Tests puis implémentation.
   [x] #4 Décidé : aucun mutateur public sur @SessionState. La boucle de tour aura des mutateurs `pub(crate)` ; un hôte construit un état par @SessionState::new puis le confie à la librairie.
-  [ ] #5 Décidé : un état relu puis sauvegardé est réécrit en @FormatVersion::CURRENT (l'étiquette ne doit pas mentir sur le contenu). À réaliser avec son Scenario : relire un document 1.9 avec champ inconnu,
+  [x] #5 Décidé : un état relu puis sauvegardé est réécrit en @FormatVersion::CURRENT (l'étiquette ne doit pas mentir sur le contenu). À réaliser avec son Scenario : relire un document 1.9 avec champ inconnu,
       réécrire, constater `format` = 1.0 courant ; `created_at` absent vaut l'époque Unix (0).
   [x] #6 Aucun `Deserialize` public sur @SessionState (la lecture passe par @SessionState::from_json, qui vérifie la version d'abord) ; un JSON syntaxiquement
       invalide de format 2.0 rend @SessionError::Serialization et non IncompatibleFormat.
@@ -101,6 +103,16 @@ Scenario: newer minor with unknown field
   Given a JSON document of format 1.9 carrying an unknown field
   When read
   Then it loads and the unknown field is ignored
+
+Scenario: rewritten state holds the current format
+  Given a JSON document of format 1.9 carrying an unknown field
+  When it is read then saved again
+  Then the saved document has format 1.0, the current version, and no unknown field
+
+Scenario: absent creation date is the Unix epoch
+  Given a minimal JSON document of format 1.0 without creation date
+  When read
+  Then the creation date is 0
 
 Scenario: different major refused before reading
   Given a JSON document of format 2.0 with an otherwise invalid body

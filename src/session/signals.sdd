@@ -57,6 +57,8 @@ Tasks:
   [x] #1 Tests puis implémentation.
   [x] #4 Signatures posées : agent producteur et profil de modèle sont des chaînes (pas de dépendance sur ./segment.sdd) ; `new` prend aussi la table des toolsets.
       Validé le 2026-10-29 par le développeur principal.
-  [ ] #2 Les versions de toolset sont des chaînes `major.minor.patch` ici ; passer à `vynil_core::Semver` quand cette dépendance entre (`toolsets`).
+  [x] #2 Les versions de toolset sont des chaînes `major.minor.patch` ici ; passer à `vynil_core::Semver` quand cette dépendance entre (`toolsets`).
       vynil_core::Semver est disponible depuis l'ajout de la dépendance (2026-10-29) : remplacement à planifier.
+      Décidé le 2026-10-30 : versions conservées en texte major.minor.patch ; la comparaison Semver vit dans notice. Les signaux ne comparent rien, ils transportent la version. `RunSignals` inchangé.
+  [x] #5 Posé le 2026-10-30, tranché : passer les versions de @RunSignals à `vynil_core::Semver` change l'API publique (`RunSignals::new` et `toolsets()` ne prennent ni ne rendent plus de `String`) et la question de l'entrée non lisible (erreur, refus ou conservation du texte ?) n'est pas tranchée par la spec. Le JSON reste un texte dans les deux cas. Décidé le 2026-10-30 (développeur principal) : les versions restent des `String` ; voir #2. Marqueur `[?]` à basculer en `[x]` par l'orchestrateur.
   [x] #3 `agent-sessions/session#FR-13` : liste des signaux confirmée le 2026-10-27 par le développeur principal, ASSUMPTION levée dans le DSD.

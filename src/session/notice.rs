@@ -6,6 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
+use vynil_core::Semver;
 
 /// What the session was built with: the fingerprint of the agent definition and the versions of the toolsets, by name.
 /// Versions are `major.minor.patch` texts.
@@ -75,27 +76,21 @@ pub fn restore_notices(saved: &Provenance, current: &Provenance, broken_function
     notices
 }
 
-/// A `major.minor.patch` version read as numbers, compared lexicographically.
-type Version = (u64, u64, u64);
-
-/// Reads a version as `major.minor.patch`. Any other text yields `None`.
-fn parse_version(text: &str) -> Option<Version> {
-    let mut parts = text.split('.');
-    let major: u64 = parts.next()?.parse().ok()?;
-    let minor: u64 = parts.next()?.parse().ok()?;
-    let patch: u64 = parts.next()?.parse().ok()?;
-    parts.next().is_none().then_some((major, minor, patch))
+/// Reads a version with `vynil_core::Semver`, without its build metadata: the notice gives no opinion on build metadata
+/// (decision of 2026-10-30, `notice.sdd` #6). The text after the first `+` is dropped before parsing.
+fn read_version(text: &str) -> Option<Semver> {
+    Semver::opt_parse(text.split_once('+').map_or(text, |(core, _)| core))
 }
 
 /// Message for one toolset present in both provenances, or `None` when the change needs no message. A different major
 /// version is reported first; a strictly older version with the same major is a rollback; a newer minor or patch is
-/// silent. Versions that are not `major.minor.patch` are compared as text.
+/// silent. Versions that `vynil_core::Semver` does not read are compared as text.
 fn toolset_notice(name: &str, saved: &str, current: &str) -> Option<String> {
     if saved == current {
         return None;
     }
-    match (parse_version(saved), parse_version(current)) {
-        (Some(was), Some(now)) if was.0 != now.0 => Some(format!(
+    match (read_version(saved), read_version(current)) {
+        (Some(was), Some(now)) if was.version.major != now.version.major => Some(format!(
             "toolset `{name}` changed major version: saved {saved}, current {current}; the session resumes with the current definitions"
         )),
         (Some(was), Some(now)) if now < was => Some(format!(
@@ -197,8 +192,8 @@ mod tests {
         let current = provenance("sha-1", &[("k8s", "1.6.1")]);
         let notices = restore_notices(&saved, &current, &[]);
         assert!(
-            notices.iter().all(|notice| !notice.contains("k8s")),
-            "a newer minor and patch with the same major must produce no message for the toolset, got {notices:?}"
+            notices.is_empty(),
+            "a newer minor and patch with the same major must produce no message, got {notices:?}"
         );
     }
 
@@ -231,6 +226,62 @@ mod tests {
         assert!(
             matches!((first, second), (Some(a), Some(b)) if a < b),
             "the single message must list both names, in the order received, got {notice:?}"
+        );
+    }
+
+    // Decisions of 2026-10-30 on the Semver semantics (notice.sdd, #6): one test per divergence.
+
+    #[test]
+    fn prerelease_to_release_is_not_a_rollback() {
+        let saved = provenance("sha-1", &[("k8s", "1.4.0-rc.1")]);
+        let current = provenance("sha-1", &[("k8s", "1.4.0")]);
+        assert!(
+            restore_notices(&saved, &current, &[]).is_empty(),
+            "a pre-release followed by its release is a newer version: no message"
+        );
+        let saved_back = provenance("sha-1", &[("k8s", "1.4.0")]);
+        let current_back = provenance("sha-1", &[("k8s", "1.4.0-rc.1")]);
+        let notices = restore_notices(&saved_back, &current_back, &[]);
+        assert!(
+            notices.len() == 1 && notices[0].contains("older"),
+            "a release replaced by its pre-release is older under Semver precedence, got {notices:?}"
+        );
+    }
+
+    #[test]
+    fn v_prefix_is_read_as_the_version() {
+        let saved = provenance("sha-1", &[("k8s", "1.4.0")]);
+        let current = provenance("sha-1", &[("k8s", "v1.4.0")]);
+        assert!(
+            restore_notices(&saved, &current, &[]).is_empty(),
+            "v1.4.0 and 1.4.0 are the same version: no message"
+        );
+    }
+
+    #[test]
+    fn build_metadata_is_not_a_change() {
+        let saved = provenance("sha-1", &[("k8s", "1.4.0+a")]);
+        let current = provenance("sha-1", &[("k8s", "1.4.0+b")]);
+        assert!(
+            restore_notices(&saved, &current, &[]).is_empty(),
+            "two versions equal under the notice's reading but with different text: no message"
+        );
+        let saved_reverse = provenance("sha-1", &[("k8s", "1.4.0+b")]);
+        let current_reverse = provenance("sha-1", &[("k8s", "1.4.0+a")]);
+        assert!(
+            restore_notices(&saved_reverse, &current_reverse, &[]).is_empty(),
+            "build metadata has no opinion either way: the reverse order gives no message"
+        );
+    }
+
+    #[test]
+    fn leading_zero_is_compared_as_text() {
+        let saved = provenance("sha-1", &[("k8s", "01.4.0")]);
+        let current = provenance("sha-1", &[("k8s", "1.4.0")]);
+        let notices = restore_notices(&saved, &current, &[]);
+        assert!(
+            notices.len() == 1 && notices[0].contains("changed version"),
+            "a version Semver does not read is compared as text, so a difference gives a message, got {notices:?}"
         );
     }
 
