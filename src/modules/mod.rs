@@ -2,11 +2,13 @@
 //! pure logic; the storage of Memory and the MCP transport belong to the host or to later lots.
 
 mod error;
+mod mcp_name;
 mod memory;
 mod memory_module;
 mod todo;
 
 pub use error::{ModulesError, ModulesResult};
+pub use mcp_name::{function_name, name_tools};
 pub use memory::{InMemoryMemoryStore, Memory, MemoryLevel, MemoryScope, MemoryStore, MemorySummary};
 pub use memory_module::{MemoryScopes, memory_module, memory_module_name};
 pub use todo::{TodoItem, TodoList, TodoStatus, todo_module};

@@ -24,7 +24,7 @@ Must:
   `loki.query` donne `loki_query` et `get-pods` donne `get_pods` ; un nom déjà valide reste identique.
   Un nom qui commence par un chiffre, ou qui est un mot réservé de Rhai (`fn`, `let`, `import`, `const`, `global`, `this`...), n'est pas un identifiant utilisable : @name_tools le refuse (@ModulesError::InvalidMcp) au lieu de le déformer en silence.
   Le résultat de @function_name ne dépend que de son argument (pur) ; Unicode non ASCII devient `_` caractère par caractère.
-  Les règles d'identifiant sont celles de @GrantedModule::new (../scratchpad/grant.sdd) : une seule définition, pas de copie à maintenir.
+  Les règles d'identifiant sont celles de @GrantedModule::new (../scratchpad/grant.sdd), appelée telle quelle : une seule définition, pas de copie à maintenir.
 
 Depends on:
   ./error.sdd
@@ -56,5 +56,7 @@ Scenario: nom inutilisable refusé
   Then chaque appel rend @ModulesError::InvalidMcp
 
 Tasks:
-  [ ] #1 Tests puis implémentation. L'exposition des règles d'identifiant de @GrantedModule::new à ce fichier (fonction `pub(crate)` dans ../scratchpad/grant.rs) est la seule modification admise hors du module.
+  [x] #1 Tests puis implémentation.
+      Fait : le module `grant` du scratchpad étant privé, l'implémentation appelle @GrantedModule::new sur un module vide au lieu d'exposer une fonction `pub(crate)` ; aucune modification hors du module.
   [?] #2 Posé : un nom de tool qui commence par un chiffre ou qui est un mot réservé de Rhai fait échouer le chargement du module (`agent-sessions/modules#FR-10` ne parle que des caractères invalides). Alternative : préfixer par `_`. À décider.
+  [?] #3 `global` : ../scratchpad/grant.sdd compte `global` parmi les mots réservés, mais Rhai 1.27 l'accepte comme nom de fonction et @GrantedModule::new l'accepte : `name_tools` l'accepte donc aussi (règle unique). Corriger la liste de grant.sdd, ou refuser `global` dans @GrantedModule::new ? À décider.
