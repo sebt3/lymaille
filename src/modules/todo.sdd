@@ -97,5 +97,5 @@ Scenario: valeur illisible refusée
 Tasks:
   [x] #1 Tests puis implémentation.
       Validé le 2026-10-30 (validator, mutations manuelles) sous `scripts/check` complet.
-  [?] #2 Posé : les types de la todo vivent ici et @SessionState::todo reste une liste de valeurs JSON opaques (la session ne dépend pas de `modules`) ; la conversion se fait par to_values et from_values. Le DSD (`session#2` de ../session/state.sdd) prévoit des types nommés dans l'état ; les y mettre ferait dépendre `session` de `modules` ou obligerait à déplacer les types dans `session`. À décider.
-  [?] #3 Posé : trois états (`pending`, `in_progress`, `done`) ; le DSD (`agent-sessions/modules#FR-1`) parle de « changement d'état » sans fixer la liste. À confirmer (par exemple un état « annulée »).
+  [x] #2 Posé : les types de la todo vivent ici et @SessionState::todo reste une liste de valeurs JSON opaques (la session ne dépend pas de `modules`) ; la conversion se fait par to_values et from_values. Le DSD (`session#2` de ../session/state.sdd) prévoit des types nommés dans l'état ; les y mettre ferait dépendre `session` de `modules` ou obligerait à déplacer les types dans `session`. À décider. Décidé le 2026-10-30 par le développeur principal.
+  [x] #3 Posé : trois états (`pending`, `in_progress`, `done`) ; le DSD (`agent-sessions/modules#FR-1`) parle de « changement d'état » sans fixer la liste. À confirmer (par exemple un état « annulée »). Décidé le 2026-10-30 par le développeur principal.

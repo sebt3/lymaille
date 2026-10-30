@@ -33,7 +33,7 @@ Returns:
 
 Must:
   La définition d'agent est la seule source de ce qui est accordé (`agent-sessions#BR-2`) : @Grants ne déduit rien et n'a aucune valeur par défaut qui accorde un groupe, un module ou un toolset.
-  Un nom de module est un identifiant Rhai : ASCII alphanumérique et `_`, ne commence pas par un chiffre, n'est pas un mot réservé de Rhai (`let`, `fn`, `import`, `const`, `global`, `this`, ...), non vide. Le module est appelé en Rhai par `nom::fonction()`.
+  Un nom de module est un identifiant Rhai : ASCII alphanumérique et `_`, ne commence pas par un chiffre, n'est pas un mot réservé de Rhai (`let`, `fn`, `import`, `const`, `this`, ... ; `global` en est exclu depuis la décision du 2026-10-30 : Rhai l'accepte comme espace de noms, et le test de ./grant.rs compare à l'analyseur de Rhai), non vide. Le module est appelé en Rhai par `nom::fonction()`.
   Les noms de modules, de toolsets et de skills sont uniques chacun dans leur catégorie : deux ajouts du même nom ne s'accumulent pas.
   Un toolset décrit seulement ce que l'introspection liste (nom et description) : son module, s'il en a un, est un @GrantedModule distinct de même nom, que `toolsets` construit. Les dépendances d'un toolset ne figurent jamais dans @Grants (`agent-sessions/toolsets#FR-2`).
   Aucun secret : un @GrantedModule porte du code et des liaisons que l'hôte a déjà résolus, @Grants ne contient ni référence ni identifiant d'authentification.
