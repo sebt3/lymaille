@@ -173,6 +173,39 @@ Mesurés par les programmes de `spikes/rhai-1-25`, avec les features de `vynil-c
   une erreur de syntaxe et les affectations de propriétés de variables `let` restent possibles : c'est la parade retenue
   (FR-12).
 
+## Extension réservée : pad de workflow
+
+Hors du premier jalon (0.1), sans exigence `MUST` : le besoin est posé par le développeur principal (2026-10-30), l'intégration à miryad-core
+venant après la livraison de `lymaille`. Principe consigné : un workflow de miryad-core peut posséder un pad Rhai qui vit avec lui, sans
+session d'agent (ni historique, ni inférence, ni tour). Les steps d'un workflow utilisent alors les modules de `lymaille` (MCP avec validation de
+schéma, reconnexion et audit, Memory, toolsets) au lieu de n'appeler `vynil-core` que seul, et les variables du pad sont lisibles par les évaluations
+du workflow (gabarits, conditions).
+
+Exigences envisagées, à qualifier à l'ouverture du lot :
+
+- **PW-1 :** cycle de vie d'un pad sans boucle de tour : ouverture, restauration, exécution d'un script (`Scratchpad::run`), instantané, fermeture.
+  Les capacités sont celles que la définition du workflow accorde (`agent-sessions#BR-2`), jamais celles d'un LLM.
+- **PW-2 :** l'état du pad se persiste sous une `SessionState` d'une nature distincte (`Workflow`, à côté de `Work`, `Config` et `Sub`), pour
+  réutiliser le format, l'audit et les événements (`agent-sessions#BR-5`) ; l'identifiant est celui du workflow.
+- **PW-3 :** les variables du pad se lisent par le workflow comme un instantané JSON en lecture seule (valeurs étiquetées, closures et pointeurs de
+  fonction exclus avec avertissement, comme `FR-7`).
+- **PW-4 :** exécution déterministe vis-à-vis de la relecture du moteur durable de miryad-core (Restate) : l'exécution du script et la sauvegarde de
+  l'instantané forment une seule opération journalisée, de sorte qu'une relecture rende le résultat journalisé sans réexécuter le script ni ses
+  appels MCP.
+- **PW-5 :** un pad est séquentiel : un second step du même workflow qui demande le pad pendant qu'un script s'exécute est refusé ou mis en file
+  (comme le verrou de tour d'une session).
+
+Questions ouvertes :
+
+- **TBD :** nature `Workflow` dans `SessionState` ou format d'instantané propre au pad ? (Préférence : la nature, pour ne pas inventer un second format.)
+- **TBD :** pad séquentiel par refus ou par file d'attente ?
+- **TBD :** le kind de step `rhai` de miryad-core (qui utilise `Script::new_bare` de `vynil-core` et les conventions `import_run` et `import_template`) reste
+  inchangé ; un kind de step distinct porte le pad. Le moteur du pad est plus strict (`import` fermé, pas de `const`, les `fn` ne voient pas le scope) : les
+  deux ne sont pas interchangeables, à confirmer par le développeur principal.
+- **TBD :** à qui revient la résolution des références d'authentification MCP pour un workflow (l'hôte, comme pour une session) ?
+
+Source: user instruction, 2026-10-30
+
 ## Questions ouvertes
 
 ## Acceptation
