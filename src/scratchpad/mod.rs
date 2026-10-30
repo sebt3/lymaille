@@ -35,3 +35,13 @@ pub use persist::{
 pub use render::{Rendered, full_text, render_value, truncate_middle};
 pub use run::{PadSnapshot, Restored, RunEnv, RunOutcome, RunStatus, Scratchpad};
 pub use suggest::{CandidateSet, nearest, suggest_for};
+
+/// The Rhai engine every session engine and every toolset module is built from (see `engine::base_engine`), for the
+/// `toolsets` domain, which evaluates the modules of its toolsets on it.
+#[expect(
+    clippy::pub_with_shorthand,
+    reason = "rustfmt rewrites pub(in crate) into pub(crate), which this lint refuses: both are the crate visibility that unreachable_pub requires"
+)]
+pub(crate) fn base_engine(limits: &ScratchpadLimits) -> rhai::Engine {
+    engine::base_engine(limits)
+}

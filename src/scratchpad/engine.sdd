@@ -36,7 +36,7 @@ Exposes:
 Accepts:
   @ScratchpadEngine::builder: les @ScratchpadLimits et les @Grants de la session.
   @EngineBuilder::with_registration: une fermeture `FnOnce(&mut rhai::Engine) -> ScratchpadResult<()>` fournie par l'hôte ou par un domaine de confiance (`toolsets` pour `session_context()`, `modules` pour les fonctions natives MCP), exécutée une fois à la construction.
-  @base_engine: les @ScratchpadLimits ; fonction de crate (`pub(crate)`) partagée avec la construction des modules de toolset (`agent-sessions/toolsets`).
+  @base_engine: les @ScratchpadLimits ; fonction partagée avec la construction des modules de toolset (`agent-sessions/toolsets`) : définie `pub(in crate::scratchpad)` dans ./engine.rs et rendue joignable de la crate par un enveloppe `pub(crate)` dans ./mod.rs (un `pub(crate)` libre exige un `#[expect(clippy::pub_with_shorthand)]`, rustfmt réécrivant `pub(in crate)`).
 
 Returns:
   @EngineBuilder::build: un @ScratchpadEngine, ou @ScratchpadError::Engine.

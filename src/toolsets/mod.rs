@@ -2,6 +2,7 @@
 //! and the toolset context itself (`agent-sessions/toolsets`). This module holds types and pure logic; storage I/O
 //! belongs to the host.
 
+mod assemble;
 mod compat;
 mod config;
 mod context_type;
@@ -14,6 +15,7 @@ mod toolset;
 mod toolset_context;
 mod version;
 
+pub use assemble::{Assembled, assemble};
 pub use compat::{Gap, GapKind, check_context, check_creation_rule, delegable_subagents};
 pub use config::{
     ConfigStores, InspectionSlot, ScriptError, SessionFilter, SessionIndex, SessionSummary,

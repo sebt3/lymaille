@@ -50,10 +50,10 @@ pub use session::{
     TurnId, TurnPermit, restore_notices,
 };
 pub use toolsets::{
-    Bump, ConfigStores, ContextLevel, ContextStore, ContextType, ContextTypeStore, Contract, FlatContextType,
-    Gap, GapKind, InMemoryToolsets, InspectionSlot, ParamDecl, ResolvedContext, RoleDecl, RoleSpec,
-    ScriptError, SessionFilter, SessionIndex, SessionMeta, SessionSummary, Skill, Toolset, ToolsetContext,
-    ToolsetStore, ToolsetsError, ToolsetsResult, TypeRequirement, VersionWarning, check_context,
-    check_creation_rule, check_declared_version, check_template, config_registration, delegable_subagents,
-    extract_contract, render_prompt, render_skill,
+    Assembled, Bump, ConfigStores, ContextLevel, ContextStore, ContextType, ContextTypeStore, Contract,
+    FlatContextType, Gap, GapKind, InMemoryToolsets, InspectionSlot, ParamDecl, ResolvedContext, RoleDecl,
+    RoleSpec, ScriptError, SessionFilter, SessionIndex, SessionMeta, SessionSummary, Skill, Toolset,
+    ToolsetContext, ToolsetStore, ToolsetsError, ToolsetsResult, TypeRequirement, VersionWarning, assemble,
+    check_context, check_creation_rule, check_declared_version, check_template, config_registration,
+    delegable_subagents, extract_contract, render_prompt, render_skill,
 };
