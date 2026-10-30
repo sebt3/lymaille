@@ -39,8 +39,8 @@ Must:
   Aucun secret dans les événements, erreurs ni notifications : le contenu d'un événement de watcher n'est jamais copié dans une erreur.
 
 Tasks:
-  [ ] #1 Déclarer les sous-modules dans ./mod.rs au fil des specs enfants livrées, et le module dans ../lib.sdd et ../lib.rs (`mod delegation;` et ré-exports des types `Exposes` de chaque spec livrée).
-  [ ] #3 Ordre d'exécution des lots (chacun : tests des Scenario vus échouer, implémentation minimale, `scripts/check` complet vert, puis rapport ; une tâche ne se coche que par l'orchestrateur après validation) :
+  [x] #1 Déclarer les sous-modules dans ./mod.rs au fil des specs enfants livrées, et le module dans ../lib.sdd et ../lib.rs (`mod delegation;` et ré-exports des types `Exposes` de chaque spec livrée).
+  [x] #3 Ordre d'exécution des lots (chacun : tests des Scenario vus échouer, implémentation minimale, `scripts/check` complet vert, puis rapport ; une tâche ne se coche que par l'orchestrateur après validation) :
       lot D1 ./error.sdd ; lot D2 ./capacity.sdd (dépend de D1) ; lot D3 ./sources.sdd (D1) ; lot D4 ./watcher.sdd (D1, D3) ; lot D5 ./result.sdd (D1) ;
       lot D6 ./run.sdd (D1, D3, D5, et ../runtime/turn.sdd livré, voir ../runtime/runtime.sdd #1) ; lot D7 ./module.sdd (D2, D5, D6).
       Dépendance à ajouter : aucune (tokio, jsonschema, rhai, serde_json sont présents ; vérifier les features de `tokio` dans /Cargo.toml : `rt`, `sync`, `time`, `macros`).

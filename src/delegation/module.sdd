@@ -20,20 +20,26 @@ Exposes:
 
 Accepts:
   @MainAgent::from_definition: une @AgentDefinition ; rend `Some` seulement pour une définition de nature `Work`, `None` pour `Config` et `Sub`. Le type n'a pas d'autre constructeur (la preuve que la session peut déléguer).
-  @delegate_module: la preuve @MainAgent, le @RunRegistry partagé, l'@InferenceLimiter partagé et le @CancelHandle de la session de l'agent principal ; rend le @rhai::Module `delegate`.
+  @MainAgent::from_definition : la preuve est passée par valeur à @delegate_module (elle est consommée) ; décision du lot D7, à valider.
+  @delegate_module: la preuve @MainAgent, le @RunRegistry partagé, l'@InferenceLimiter partagé, le @CancelHandle de la session de l'agent principal et le @Redactor de la session (masquage de la raison d'un échec, décision du développeur principal, lot D7) ; rend le @rhai::Module `delegate`. Cinq paramètres, sous le seuil du harnais.
   @result_module: le @ResultCollector partagé du run ; rend le @rhai::Module `result`.
 
 Returns:
   Module `delegate` : `agents()` rend la liste des noms de sous-agents que la définition autorise ; `start(nom, tâche)` rend l'identifiant du run (texte) sans attendre ; `status(id)` rend une table `#{state, ...}` (`running`, `valid`, `failed`, `cancelled`, `interrupted`) ; `wait(id)` rend la table finale (`state`, `result`, `errors`, `reason`) en attendant la fin ; `cancel(id)` ; `capacity()` rend la capacité courante de sous-agents parallélisables (entier), relue à chaque appel.
-  Module `result` : `submit(valeur)` rend `#{accepted: true}` ou `#{accepted: false, errors: [...], corrections_left: n}` ; `fail(raison)` conclut le run en échec.
+  Module `result` : `submit(valeur)` rend `#{accepted: true}` ou `#{accepted: false, errors: [...], corrections_left: n}` ; `corrections_left` vaut 0 pour une soumission `Exhausted` (décision du lot D7 : le run échoue, aucune correction ne reste) ; `fail(raison)` conclut le run en échec.
 
 Raises:
   Les fonctions Rhai rendent des erreurs d'exécution explicites : sous-agent absent de la liste (nomme le sous-agent), run inconnu (nomme l'identifiant), résultat soumis après conclusion.
+  `result::fail` après conclusion : erreur Rhai à texte fixe « the result is already concluded » (décision du lot D7 : la spec ne le disait pas ; l'appel ne doit pas être silencieux). Même texte pour `result::submit` après conclusion.
+  Sans runtime courant sur le fil : erreur Rhai à texte fixe « no tokio runtime on this thread ... » (voir Must).
 
 Must:
   Un sous-agent n'a pas le module `delegate` : @delegate_module exige un @MainAgent, que seule une définition `Work` produit ; il n'existe pas de chemin de code qui construise le module pour une définition `Sub` ou `Config` (`agent-sessions/delegation#FR-2` : l'impossibilité tient au type).
   `start` ne choisit que parmi `agents()` ; aucune fonction du module n'accorde de toolset ni ne crée de sous-agent.
   Les fonctions sont synchrones et appellent le registre par `vynil_core::rt::block_on` (comme les modules de `modules`) ; sur un runtime `current_thread`, elles rendent l'erreur explicite de `vynil-core`. `start` ne bloque pas sur le run lui-même.
+  Garde sans runtime (décision du développeur principal, lot D7) : `start`, `status`, `wait` et `cancel` testent d'abord `tokio::runtime::Handle::try_current` ; sans runtime courant sur le fil, elles rendent une erreur Rhai à texte fixe « no tokio runtime on this thread: the delegate functions need the runtime of the host » et n'appellent pas le registre. Le scratchpad évalue dans un fil qui entre dans le handle de l'hôte (`../scratchpad/run.rs`) : le garde ne refuse donc pas le cas de production. `agents` et `capacity` ne touchent pas le registre et ne sont pas gardés.
+  Raison d'un échec masquée (décision du développeur principal, lot D7) : la raison donnée par `result::fail` est masquée par le @Redactor de la session dans `wait` et dans `status` avant d'être rendue au script ; les erreurs de chemin de validation ne portent aucune valeur.
+  `status` d'un run terminé rend la même table que `wait` (`state`, `result`, `errors`, `reason`) ; `status` d'un run en cours rend `#{state: "running"}`.
   `result::submit` renvoie immédiatement les erreurs de validation (sans la valeur) pour que le sous-agent corrige dans le même run.
   Aucune valeur de tâche, de résultat ou de secret n'entre dans un message d'erreur.
 
@@ -92,5 +98,21 @@ Scenario: runtime current_thread
   When une fonction est appelée
   Then l'erreur explicite de `vynil-core` est rendue
 
+Scenario: sans runtime, aucun appel ne bloque
+  Given un fil sans runtime tokio et un registre dont un run est possible
+  When delegate::start, status, wait et cancel sont appelés
+  Then chaque appel rend une erreur Rhai à texte fixe nommant l'absence de runtime, sans lancer de run
+
+Scenario: la raison d'un échec est masquée
+  Given un sous-agent qui échoue avec une raison contenant un secret déclaré dans le @Redactor de la session
+  When delegate::wait puis delegate::status sont appelés
+  Then la raison rendue ne contient pas le secret et garde le reste du texte
+
+Scenario: bout en bout, correction dans le même run
+  Given un sous-agent réel (tour de Rhai avec le module `result`, piloté par run_batch) dont le modèle soumet d'abord un résultat invalide puis un résultat valide
+  When delegate::wait est appelé
+  Then le second appel du modèle voit le refus `accepted` à faux avec `corrections_left` à 3, sans la clé ni la valeur soumises, et delegate::wait rend `valid` avec le résultat corrigé
+
 Tasks:
-  [ ] #1 Tests puis implémentation (lot D7).
+  [x] #1 Tests puis implémentation (lot D7). Livré le 2026-10-30 : 24 tests de `module.rs`, dont les trois Scenario ajoutés ci-dessus et les tests hors Scenario de `Must`, `Returns` et `Raises`. Tests de comblement ajoutés après l'implémentation (pas de rouge préalable) : `corrections_left_is_zero_on_exhaustion`, `cancel_ends_the_run_as_cancelled`, `cancelling_the_main_session_cancels_the_started_runs`, `a_failed_run_gives_its_state_and_reason_to_wait_and_status`, `an_interrupted_run_gives_its_state_and_reason`, `fail_after_conclusion_is_a_runtime_error`. Ces tests ont été rattachés à des mutants (voir rapport) ; la case reste à cocher par l'orchestrateur.
+  [?] #2 Décisions d'implémentation du lot D7 à valider : `MainAgent` par valeur ; `status` d'un run terminé = table de `wait` ; `corrections_left` = 0 pour `Exhausted` ; `result::fail` après conclusion = erreur Rhai ; garde sans runtime ; masquage de la raison par le @Redactor de la session.
