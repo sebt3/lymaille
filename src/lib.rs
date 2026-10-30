@@ -23,9 +23,10 @@ pub use context::{
     UsageTracker, estimate_tokens, replayed_reasoning,
 };
 pub use modules::{
-    InMemoryMemoryStore, McpConnector, McpError, McpLister, McpTool, Memory, MemoryLevel, MemoryScope,
-    MemoryScopes, MemoryStore, MemorySummary, ModulesError, ModulesResult, ScriptedConnector, TodoItem,
-    TodoList, TodoStatus, function_name, memory_module, memory_module_name, name_tools, todo_module,
+    InMemoryMemoryStore, McpConnector, McpEnv, McpError, McpLister, McpRetryPolicy, McpTool, Memory,
+    MemoryLevel, MemoryScope, MemoryScopes, MemoryStore, MemorySummary, ModulesError, ModulesResult,
+    ScriptedConnector, TodoItem, TodoList, TodoStatus, function_name, mcp_module, mcp_shell_descriptor,
+    memory_module, memory_module_name, name_tools, todo_module,
 };
 pub use scratchpad::{
     CandidateSet, Catalog, CoreGroup, EngineBuilder, FunctionDescriptor, FunctionEntry, FunctionSource,
