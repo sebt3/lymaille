@@ -16,6 +16,8 @@ References:
   ./scratchpad/scratchpad.sdd
   ./toolsets/toolsets.sdd
   ./modules/modules.sdd
+  ./runtime/runtime.sdd
+  ./delegation/delegation.sdd
 
 Must:
   Déclarer chaque module de ./, de ./session, de ./context, de ./agents, de ./scratchpad, de ./toolsets et de ./modules et ré-exporter à la racine les types publics qu'une spec enfant déclare

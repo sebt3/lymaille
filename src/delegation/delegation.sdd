@@ -1,0 +1,43 @@
+Spec: delegation
+
+Purpose:
+  Délégation à des sous-agents autonomes (runs batch) et watchers : limite de requêtes simultanées vers un moteur d'inférence, sources d'événements (dont les minuteurs), watchers à prédicat Rhai isolé, résultat structuré validé avec corrections, registre des runs avec annulation propagée et reprise,
+    modules Rhai `delegate` (agent principal) et `result` (sous-agent). Réalise `agent-sessions/delegation` (./dsd/agent-sessions/delegation.md).
+
+Structure:
+  ./mod.rs: déclarations et ré-exports
+  ./error.rs: erreur du module
+  ./capacity.rs: limiteur de requêtes, décompte local ou partagé, capacité annoncée
+  ./sources.rs: événements de watcher, trait de source, concentrateur, minuteurs
+  ./watcher.rs: déclaration persistée, prédicat Rhai isolé, notifications
+  ./result.rs: résultat structuré d'un sous-agent, validation JSON Schema, corrections
+  ./run.rs: registre des runs de sous-agents, handles, annulation propagée, reprise
+  ./module.rs: modules Rhai `delegate` et `result`
+
+Owns:
+  ./mod.rs
+
+References:
+  ../../lymaille.sdd
+  ../../dsd/agent-sessions/delegation.md
+  ../session/session.sdd
+  ../agents/agents.sdd
+  ../scratchpad/scratchpad.sdd
+  ../runtime/runtime.sdd
+  ./error.sdd
+  ./capacity.sdd
+  ./sources.sdd
+  ./watcher.sdd
+  ./result.sdd
+  ./run.sdd
+  ./module.sdd
+
+Must:
+  Ne réaliser aucune E/S propre : le décompte partagé, les sources d'événements externes et le lancement d'un sous-agent sont des traits que l'hôte implémente ; le temps passe par @Clock ; aucune minuterie ni tâche de fond n'est démarrée sans l'hôte (il appelle `tick`).
+  Un sous-agent n'a jamais de module de délégation : la construction du module `delegate` exige une preuve (@MainAgent) que seule une définition de nature `Work` fournit (`agent-sessions/delegation#FR-2`, `agent-sessions#BR-6`).
+  La définition de l'agent principal est la seule source de ce qui se délègue (`agent-sessions#BR-2`) : un sous-agent absent de sa liste ne se désigne pas.
+  Aucun secret dans les événements, erreurs ni notifications : le contenu d'un événement de watcher n'est jamais copié dans une erreur.
+
+Tasks:
+  [ ] #1 Déclarer les sous-modules dans ./mod.rs au fil des specs enfants livrées, et le module dans ../lib.sdd et ../lib.rs.
+  [?] #2 `agent-sessions/delegation#FR-7` : l'annulation d'un run se propage aux sous-agents en cours par la hiérarchie de @CancelHandle::child (déjà livrée) ; confirmer que cela suffit sans mécanisme de plus.

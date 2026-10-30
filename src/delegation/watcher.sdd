@@ -1,0 +1,101 @@
+Spec: watcher
+
+Purpose:
+  Watcher : souscription déclarative à une source d'événements, filtre exprimé comme prédicat Rhai évalué dans un moteur isolé, action unique (injecter une notification dans le tour suivant ou demander à l'hôte de lancer un tour) ; persisté avec la session
+    (`agent-sessions/delegation#FR-8`, `AC-4`, `AC-9`).
+
+Owns:
+  ./watcher.rs
+
+References:
+  ../scratchpad/engine.sdd
+  ../session/event.sdd
+
+Exposes:
+  @WatcherAction
+  @Watcher
+  @WatcherSet
+  @Notification
+  @Triggered
+
+Accepts:
+  @Watcher::new: un identifiant, le nom d'une source, un prédicat (texte d'expression Rhai) et une @WatcherAction (`Inject` avec le texte de la notification, ou `LaunchTurn` avec le texte du message de lancement) ; refuse (@DelegationError::InvalidWatcher) un identifiant vide, une source vide, un prédicat qui ne compile pas ou qui n'est pas une expression.
+  @WatcherSet::new: aucun argument. @WatcherSet::add: un @Watcher ; refuse un identifiant en double. @WatcherSet::remove: un identifiant. @WatcherSet::watchers: aucun argument. @WatcherSet::to_values / @WatcherSet::from_values: la forme JSON persistée avec la session (`SessionState::watchers`).
+  @WatcherSet::evaluate: un @WatchEvent ; rend un @Triggered.
+
+Returns:
+  @Triggered: les @Notification à injecter dans le tour suivant (identifiant du watcher, source, texte), les demandes de lancement de tour (identifiant du watcher, texte) et les échecs de prédicat (identifiants des watchers dont le prédicat a échoué).
+  @Notification: le texte rendu au modèle porte la source, l'identifiant du watcher et le texte déclaré, jamais le contenu brut de l'événement.
+
+Raises:
+  @DelegationError::InvalidWatcher: voir @Watcher::new ; un doublon d'identifiant.
+
+Must:
+  Le prédicat s'évalue dans un moteur isolé : seul le groupe pur de `vynil-core` est enregistré (`@base_engine` de ../scratchpad/engine.sdd sans aucun groupe, module ni toolset accordé), l'événement est l'unique entrée (une constante `event` : table `#{source, name, data, at}`), il n'y a ni scope de session, ni fonction définie par le LLM, ni `import`. Un prédicat est une expression qui rend un booléen.
+  Un prédicat qui rend `true` déclenche l'action ; `false` ne déclenche rien ; un prédicat qui échoue (appel d'une fonction de module ou de scope inexistante, erreur d'exécution, valeur non booléenne, plafond d'opérations atteint) ne déclenche rien et son watcher figure dans les échecs de @Triggered, sans effet de bord sur la session (`agent-sessions/delegation#AC-9`). Un plafond d'opérations borne l'évaluation d'un prédicat.
+  Chaque évaluation part d'un moteur neuf ou remis à zéro : un watcher n'observe rien d'un autre ni d'une évaluation précédente.
+  Seuls les watchers de la source de l'événement sont évalués, dans l'ordre d'ajout.
+  Aucune E/S ; le texte d'une notification est fixé par le watcher, le contenu de l'événement n'y entre que par les champs que le watcher cite explicitement dans son prédicat (jamais copié).
+
+Depends on:
+  ./sources.sdd
+  ./error.sdd
+  ../scratchpad/engine.sdd
+  rhai
+  serde
+  serde_json
+
+Scenario: un prédicat qui accepte injecte
+  Given un watcher sur la source `mcp` dont le prédicat est `event.name == "tools_changed"` et l'événement correspondant
+  When evaluate reçoit l'événement
+  Then une notification est rendue pour ce watcher
+
+Scenario: un prédicat qui refuse n'injecte rien
+  Given le même watcher et un événement `other`
+  When evaluate reçoit l'événement
+  Then rien n'est rendu et aucun échec n'est signalé
+
+Scenario: un prédicat isolé échoue sans effet de bord
+  Given des watchers dont les prédicats appellent `grafana::query()`, lisent une variable `secret_var` et appellent une fonction `f()`
+  When evaluate reçoit un événement de leur source
+  Then aucun ne déclenche, les trois figurent dans les échecs et l'état de la session n'a pas changé
+
+Scenario: un prédicat non booléen échoue
+  Given un watcher dont le prédicat rend un entier
+  When evaluate reçoit un événement
+  Then le watcher figure dans les échecs et ne déclenche rien
+
+Scenario: seuls les watchers de la source sont évalués
+  Given deux watchers de sources différentes
+  When evaluate reçoit un événement de la première
+  Then seul le premier est évalué
+
+Scenario: demande de lancement de tour
+  Given un watcher d'action `LaunchTurn` dont le prédicat accepte
+  When evaluate reçoit l'événement
+  Then une demande de lancement de tour est rendue avec le texte déclaré
+
+Scenario: un prédicat qui boucle est borné
+  Given un watcher dont le prédicat boucle indéfiniment
+  When evaluate reçoit un événement
+  Then l'évaluation s'arrête au plafond d'opérations et le watcher figure dans les échecs
+
+Scenario: aller-retour persistant
+  Given un @WatcherSet de deux watchers
+  When il est converti en valeurs puis relu
+  Then les watchers sont égaux et dans le même ordre
+
+Scenario: prédicat invalide refusé
+  Given le texte `let x = ;` et le texte `1 + 1; 2`
+  When @Watcher::new est appelé avec chacun
+  Then les deux sont refusés par InvalidWatcher
+
+Scenario: le contenu de l'événement n'est pas dans la notification
+  Given un événement dont la donnée contient un secret et un watcher qui accepte
+  When la notification est rendue
+  Then son texte ne contient pas le secret
+
+Tasks:
+  [ ] #1 Tests puis implémentation (lot D4).
+  [?] #2 Posé : un plafond d'opérations de 10 000 pour un prédicat (la valeur n'est pas fixée par le DSD). À confirmer.
+  [?] #3 Posé : l'injection d'une notification dans le tour suivant est faite par l'appelant (hôte ou boucle de tour) qui lit @Triggered ; ce fichier ne touche ni l'historique ni @UserInbox. À confirmer.

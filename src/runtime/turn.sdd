@@ -1,0 +1,165 @@
+Spec: turn
+
+Purpose:
+  Boucle de tour d'une session : un message entre (utilisateur, injection d'un watcher ou tâche d'un run batch), le modèle est appelé jusqu'à une réponse finale sans appel d'outil, chaque appel du tool `rhai_pad` s'exécute dans le scratchpad de la session ;
+    erreurs transitoires réessayées avec backoff, compaction avant requête, annulation, dépassement de délai signalé, persistance en fin de tour
+    (`agent-sessions/session#FR-4`, `FR-5`, `FR-6`, `FR-7`, `AC-3`, `AC-9`, `agent-sessions#FR-4`, `agent-sessions#FR-6`).
+
+Owns:
+  ./turn.rs
+
+References:
+  ../session/turn_gate.sdd
+  ../session/event.sdd
+  ../session/history.sdd
+  ../session/signals.sdd
+  ../context/budget.sdd
+  ../context/strategy.sdd
+  ../context/usage.sdd
+  ../agents/inference.sdd
+  ../scratchpad/run.sdd
+
+Exposes:
+  @TurnRunner
+  @TurnConfig
+  @TurnOutput
+  @UserInbox
+  @RHAI_PAD_TOOL
+
+Accepts:
+  @TurnConfig::new: la @Clock partagée, le @Redactor, un @EventSink partagé, un @CancelHandle racine et la @Budget de la session ; constructeurs chaînés : `with_overrun` (durée après laquelle `Overrun` est émis, jamais d'interruption), `with_max_steps` (nombre maximal d'appels au modèle dans un tour, 200 par défaut), `with_agent` (nom de l'agent pour l'audit).
+  @TurnRunner::new: un fournisseur d'inférence (@InferenceProvider, générique), une stratégie de compaction (@CompactionStrategy, générique), le @ResolvedProfile, le @SegmentContext (prompt système rendu et définitions des tools natifs), un @Scratchpad, un @SessionStore, un @SessionState de départ et une @TurnConfig.
+  @TurnRunner::run_turn: le texte du message d'entrée et un @CancelHandle propre au tour ; asynchrone.
+  @TurnRunner::inbox: aucun argument ; rend le @UserInbox de la session.
+  @UserInbox::send: un texte ; ne bloque pas.
+
+Returns:
+  @TurnRunner::run_turn: un @TurnOutput : l'issue (@Outcome `Valid`, `Failed` ou `Cancelled`), la réponse finale masquée (vide si annulé ou échec) et le nombre d'appels au modèle.
+  @TurnRunner::state: l'@SessionState courant (historique, segments, variables et fonctions du pad, compteurs de tokens, signaux du tour).
+
+Raises:
+  @SessionError::TurnActive: un tour est déjà actif pour la session ; rien n'est modifié.
+  @SessionError::Store: la sauvegarde de fin de tour échoue (le tour reste terminé, l'erreur est rendue).
+  Les échecs du modèle ne sont pas des erreurs de la fonction : ils donnent un @TurnOutput d'issue `Failed` (erreur permanente ou débordement non résolu) après avoir émis `TurnEnded`.
+
+Must:
+  Au plus un tour actif par session au sein d'un processus (@TurnGate de ../session/turn_gate.sdd) ; la permission est relâchée à la fin du tour, y compris sur annulation ou échec.
+  Un tour commence par `TurnStarted` et finit par `TurnEnded` (issue et réponse masquée) ; les fragments de la réponse en cours sont émis comme `TextDelta` dans l'ordre, après masquage par le @Redactor avec report des derniers caractères tant qu'ils pourraient former le début d'un secret coupé entre deux fragments (le report est vidé à la fin de la réponse). Le texte complet de `TurnEnded` est masqué aussi.
+  Avant chaque requête : si la @Budget demande la compaction, la @CompactionStrategy compacte et ouvre un nouveau segment (frontière `Compaction`, résumé en message utilisateur) ; un message d'entrée trop gros est refusé (`Failed`) sans appel au modèle.
+  La requête porte le prompt système et les tools du segment courant, l'historique et le raisonnement rejoué selon le mode du profil (`replayed_reasoning`) ; l'usage rapporté, ou estimé en repli, met à jour le @UsageTracker et émet `TokenUsage`.
+  Erreur transitoire : attente de @Backoff::next_delay, annulable (@CancelHandle::sleep), un `InferenceRetry` (numéro, délai, classe) par réessai, sans message d'erreur ajouté à l'historique ; l'annulation pendant l'attente termine le tour en `Cancelled` sans rien ajouter à l'historique (`agent-sessions/session#AC-3`) ; un appel réussi remet le calendrier à zéro.
+  Débordement de contexte : une compaction forcée puis une seule nouvelle tentative ; si elle déborde encore, issue `Failed`. Erreur permanente : issue `Failed`.
+  Appel de tool `rhai_pad` : le script s'exécute par @Scratchpad::run avec le @CancelHandle du tour ; le texte rendu au modèle est le résultat borné et masqué du script ; l'historique reçoit le résultat de l'outil pour chaque appel avant toute requête suivante ; un `Script` (@ScriptRecord) est émis par script ; une erreur Rhai incrémente le compteur de @RunSignals. Un appel de tool inconnu rend au modèle un résultat d'erreur fixe qui nomme l'outil, sans panique.
+  Un message envoyé par @UserInbox::send pendant un tour (script en cours compris) n'est jamais inséré entre un appel d'outil et son résultat : il entre dans l'historique juste après les résultats de l'itération et figure dans la requête suivante (`agent-sessions/session#AC-9`).
+  Délai : si un délai est configuré et dépassé, un seul `Overrun` (durée écoulée) est émis par tour, au plus tard à la frontière de l'itération suivante ; le tour n'est pas interrompu.
+  Nombre maximal d'itérations atteint : issue `Failed` avec un message fixe, sans autre appel au modèle.
+  L'annulation (handle du tour ou handle racine) est honorée avant chaque requête, pendant l'inférence (le futur est abandonné) et pendant un script (le @CancelHandle du run) ; l'issue est `Cancelled` et l'historique garde un état valide (aucun appel d'outil sans résultat).
+  En fin de tour : les signaux du tour (@RunSignals) portent l'issue, le nombre d'erreurs Rhai et de corrections ; l'état (historique, segments, variables et fonctions du pad, compteurs de tokens) est écrit par @SessionStore::save.
+  Aucun secret : réponses, erreurs d'inférence et sorties de script passent par le @Redactor avant l'historique, les événements et le modèle ; une erreur du modèle n'est jamais copiée dans l'historique.
+
+Must not:
+  Lire l'horloge système ou dormir en dehors de @Clock et de @CancelHandle::sleep ; ouvrir un fichier ou un processus.
+  Insérer un message utilisateur entre un appel d'outil et son résultat.
+
+Depends on:
+  ../session/turn_gate.sdd
+  ../session/event.sdd
+  ../session/history.sdd
+  ../session/segment.sdd
+  ../session/signals.sdd
+  ../session/state.sdd
+  ../session/store.sdd
+  ../session/redact.sdd
+  ../session/audit.sdd
+  ../session/cancel.sdd
+  ../session/backoff.sdd
+  ../context/budget.sdd
+  ../context/usage.sdd
+  ../context/strategy.sdd
+  ../context/replay.sdd
+  ../agents/inference.sdd
+  ../agents/profile.sdd
+  ../scratchpad/run.sdd
+  ../clock.sdd
+  tokio
+
+Can modify:
+  ../session/state.rs: mutateurs `pub(crate)` nécessaires à la boucle (historique, segments, pad, compteurs, signaux), avec leur spec ../session/state.sdd et leurs tests.
+  ../session/redact.rs: `Redactor::longest_secret_len` (`pub(crate)`) pour le report du masquage des fragments, avec sa spec ../session/redact.sdd.
+
+Scenario: réponse sans outil
+  Given un fournisseur scripté qui répond « bonjour »
+  When run_turn reçoit un message
+  Then l'issue est Valid, la réponse est « bonjour », l'historique garde le message et la réponse, et `TurnStarted` puis `TurnEnded` sont émis
+
+Scenario: appel de rhai_pad puis réponse
+  Given un fournisseur scripté qui demande `rhai_pad` avec `let x = 2 + 3; x` puis répond
+  When run_turn s'exécute
+  Then le résultat `5` est dans l'historique avant la requête suivante, un événement de script est émis et la variable `x` figure dans l'état
+
+Scenario: erreur transitoire réessayée
+  Given un fournisseur dont le premier appel échoue de façon transitoire puis réussit, et une horloge de test
+  When run_turn s'exécute
+  Then un `InferenceRetry` de délai 1000 ms est émis, la réponse est rendue et aucun message d'erreur n'est dans l'historique
+
+Scenario: annulation pendant le backoff
+  Given un fournisseur dont tous les appels échouent de façon transitoire
+  When le handle est annulé pendant l'attente
+  Then l'issue est Cancelled et l'historique ne contient que le message d'entrée
+
+Scenario: erreur permanente
+  Given un fournisseur dont l'appel échoue de façon permanente
+  When run_turn s'exécute
+  Then l'issue est Failed, `TurnEnded` est émis et l'historique ne contient pas le texte de l'erreur
+
+Scenario: débordement de contexte
+  Given un fournisseur qui déborde au premier appel puis répond
+  When run_turn s'exécute
+  Then une compaction a eu lieu, un seul nouvel appel a été fait et l'issue est Valid
+
+Scenario: compaction avant requête
+  Given un historique dont la taille dépasse le seuil de compaction
+  When run_turn s'exécute
+  Then un nouveau segment de frontière `Compaction` s'ouvre avant l'appel au modèle
+
+Scenario: message utilisateur pendant un script
+  Given un script en cours et un message envoyé par @UserInbox::send
+  When le tour continue
+  Then le message n'est pas inséré entre l'appel et son résultat et figure dans la requête suivante
+
+Scenario: un seul tour actif
+  Given un tour en cours
+  When un second run_turn est demandé pour la même session
+  Then l'erreur est TurnActive et l'état du tour en cours est intact
+
+Scenario: outil inconnu
+  Given un fournisseur qui demande un outil `inconnu`
+  When run_turn s'exécute
+  Then le modèle reçoit un résultat d'erreur qui nomme l'outil et le tour continue
+
+Scenario: secret absent des sorties
+  Given un secret déclaré au @Redactor et un modèle qui le répète, y compris coupé entre deux fragments
+  When run_turn s'exécute
+  Then ni les `TextDelta`, ni `TurnEnded`, ni l'historique ne contiennent le secret
+
+Scenario: dépassement de délai signalé sans interruption
+  Given un délai configuré et une horloge qui le dépasse pendant le tour
+  When le tour atteint l'itération suivante
+  Then un seul `Overrun` est émis et le tour se termine normalement
+
+Scenario: nombre maximal d'itérations
+  Given un fournisseur qui demande toujours un outil et un maximum de 3 itérations
+  When run_turn s'exécute
+  Then l'issue est Failed après 3 appels au modèle
+
+Scenario: persistance en fin de tour
+  Given un tour terminé et un @InMemoryStore
+  When l'état est rechargé par identifiant
+  Then il contient l'historique, les variables et les fonctions du pad du tour
+
+Tasks:
+  [ ] #1 Tests puis implémentation (lot R1).
+  [?] #2 Posé : un tool inconnu rend un résultat d'erreur au modèle ; le tool `skill` (../toolsets/native.sdd, non livré) s'y branchera par un point d'extension ajouté avec ce domaine. À confirmer.
+  [?] #3 Posé : plafond d'itérations par tour de 200 par défaut (`agent-sessions/session#FR-4` ne fixe aucune limite ; sans plafond, un modèle qui boucle sur un outil ne s'arrêterait jamais). À confirmer.
+  [?] #4 Posé : le report du masquage des fragments (secret coupé entre deux fragments, ../session/event.sdd #6 et #7) retient les `longest_secret_len - 1` derniers caractères jusqu'au fragment suivant ou à la fin de la réponse. À confirmer.
+  [?] #5 Posé : `Overrun` est vérifié à la frontière d'itération et non par une minuterie concurrente, faute d'horloge asynchrone injectée ; un appel unique plus long que le délai le déclenche donc après son retour. À confirmer.

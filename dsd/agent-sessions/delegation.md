@@ -156,4 +156,16 @@ Source: user instruction, 2026-10-25 ; enveloppe, sujet et invalidation par l'h�
 
 ## Réalisation SpecDD
 
-`TBD` : aucune spec `.sdd` n'existe encore.
+Specs dans `src/delegation/` (domaine `delegation`) et `src/runtime/` (boucle de tour, dont la délégation a besoin pour exécuter un sous-agent) :
+
+- `delegation.sdd` : spec de répertoire (frontière : aucune E/S propre, pas de module de délégation pour un sous-agent).
+- `error.sdd` : erreur typée du module.
+- `capacity.sdd` : limiteur de requêtes simultanées, décompte local ou partagé, capacité annoncée (FR-11, FR-13, AC-5, AC-7).
+- `sources.sdd` : trait de source, concentrateur, quatre sources fournies, minuteurs et leur restauration (FR-9, FR-10, FR-12, AC-6).
+- `watcher.sdd` : watchers persistés, prédicat Rhai isolé, notifications (FR-8, AC-4, AC-9).
+- `result.sdd` : résultat structuré validé par JSON Schema avec corrections (FR-4, AC-2, AC-8).
+- `run.sdd` : registre des runs, handles, annulation propagée, reprise après restauration, pilote batch (FR-1, FR-3, FR-6, FR-7, FR-14, AC-1, AC-3, AC-10).
+- `module.sdd` : modules Rhai `delegate` (agent principal, preuve de type `MainAgent`) et `result` (sous-agent) (FR-1, FR-2, FR-4, FR-6, FR-11, FR-13).
+- `../runtime/runtime.sdd`, `../runtime/turn.sdd` : boucle de tour (`session` FR-4 à FR-7, AC-3, AC-9).
+
+Écrites le 2026-10-30. L'idée réservée MessageBoard n'a pas de spec (aucune exigence).

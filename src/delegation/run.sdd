@@ -1,0 +1,118 @@
+Spec: run
+
+Purpose:
+  Registre des runs de sous-agents : lancement asynchrone avec handle immédiat, fin comme événement, attente synchrone en sucre, annulation propagée, reprise après restauration (run interrompu), pilote d'un run batch (tour répété jusqu'au résultat)
+    (`agent-sessions/delegation#FR-1`, `FR-3`, `FR-6`, `FR-7`, `FR-14`, `AC-1`, `AC-3`, `AC-10`, `agent-sessions#DEC-4`, `agent-sessions#DEC-8`).
+
+Owns:
+  ./run.rs
+
+References:
+  ./result.sdd
+  ./sources.sdd
+  ../runtime/turn.sdd
+  ../session/event.sdd
+  ../session/cancel.sdd
+
+Exposes:
+  @SubagentLauncher
+  @LaunchRequest
+  @RunRecord
+  @RunHandle
+  @RunRegistry
+  @run_batch
+
+Accepts:
+  @SubagentLauncher::launch: une @LaunchRequest (le nom du sous-agent, la tâche, l'@RunId, un @CancelHandle enfant de celui de l'appelant, le @ResultCollector du run et, pour une reprise, l'@SessionId à reprendre) ; asynchrone ; rend un @SubagentOutcome. Trait de l'hôte, qui assemble le sous-agent (définition, profil, fournisseur, @Grants sans module de délégation, @TurnRunner) ; la librairie ne sait pas le construire seule.
+  @RunRegistry::new: un @SubagentLauncher partagé, la liste des sous-agents autorisés par l'agent principal (noms), un @EventSink partagé, une @Clock, l'@EventHub (source `subagent`) et un schéma de résultat par sous-agent (nom vers schéma et corrections).
+  @RunRegistry::start: le nom d'un sous-agent, la tâche et le @CancelHandle de l'appelant ; rend un @RunHandle sans attendre.
+  @RunRegistry::status: un @RunId. @RunRegistry::wait: un @RunId ; asynchrone, rend le @SubagentOutcome à la fin. @RunRegistry::cancel: un @RunId. @RunRegistry::records: aucun argument ; les @RunRecord des runs en cours, à persister (`SessionState::run handles`). @RunRegistry::restore: les @RunRecord persistés ; produit un événement `RunInterrupted` par run non terminé.
+  @run_batch: un @TurnRunner (générique), la tâche, le @ResultCollector et le @CancelHandle du run ; asynchrone ; rend un @SubagentOutcome.
+
+Returns:
+  @RunHandle: l'@RunId du run (copiable, sérialisable). @RunRecord: l'@RunId, le nom du sous-agent et l'@SessionId du sous-agent (serialisable).
+  @RunRegistry::status: `Running` ou le @SubagentOutcome final. 
+
+Raises:
+  @DelegationError::UnknownSubagent: nom absent de la liste autorisée de l'agent principal ; aucun run n'est créé (`agent-sessions/delegation#AC-1`).
+  @DelegationError::UnknownRun: identifiant inconnu pour status, wait et cancel.
+  @DelegationError::Launch: voir ./error.sdd.
+
+Must:
+  @RunRegistry::start rend le handle immédiatement ; le run s'exécute dans une tâche détachée (`tokio::spawn`) ; à sa fin, `RunEnded` (identifiant et issue) est émis, puis un événement `ended` est notifié à l'@EventHub (source `subagent`, donnée : identifiant du run et statut) pour les watchers ; l'attente par @RunRegistry::wait n'est qu'un sucre au-dessus (`agent-sessions/delegation#FR-6`).
+  Le sous-agent choisi est parmi ceux que la définition de l'agent principal autorise et rien d'autre : un agent principal ne peut ni accorder de toolset à un sous-agent ni en créer un (`agent-sessions/delegation#FR-1`).
+  L'annulation d'un run, ou celle du @CancelHandle de l'appelant, annule ses sous-agents en cours : chaque run reçoit un @CancelHandle enfant, de sorte que l'annulation du parent se propage (`agent-sessions/delegation#FR-7`) ; l'issue d'un run annulé est `Cancelled`.
+  Les runs en cours sont persistables (@RunRegistry::records). À la restauration, un run qui n'est pas terminé n'est pas repris d'office : @RunRegistry::restore émet pour chacun un événement `RunInterrupted` (run et session du sous-agent) et le notifie à la source `subagent` (statut `Interrupted`) ; l'agent principal relance en démarrant un nouveau run qui reprend la session sauvegardée (`agent-sessions/delegation#AC-10`).
+  @run_batch : le premier message du sous-agent est la tâche ; après chaque tour, si le collecteur n'est pas conclu, un message de relance fixe rappelle de soumettre le résultat par `result::submit` et, en cas de rejet, renvoie les erreurs de validation (les corrections se font dans le même run) ; le run s'arrête quand le collecteur est conclu, quand un tour est `Failed` ou `Cancelled`, ou après un nombre maximal de tours sans résultat (8 par défaut) ; l'issue `Valid` exige un résultat accepté.
+  Le décompte des runs et leur table sont protégés par un verrou dont l'empoisonnement est rapporté ; aucune fuite de tâche : un registre détruit n'annule pas les runs, ils finissent et émettent leurs événements.
+  Aucun secret : ni la tâche, ni le résultat, ni les erreurs de validation ne figurent dans les événements `RunEnded`, `RunInterrupted` ou de source ; le résultat est lu par `wait` et `status` seulement.
+
+Depends on:
+  ./result.sdd
+  ./sources.sdd
+  ./error.sdd
+  ../runtime/turn.sdd
+  ../session/event.sdd
+  ../session/id.sdd
+  ../session/cancel.sdd
+  ../session/signals.sdd
+  ../clock.sdd
+  tokio
+
+Can modify:
+  ../session/event.rs: nouvelle variante `RunInterrupted { run, session }` de @EventKind, avec ../session/event.sdd (tâche à ajouter) et ses tests.
+
+Scenario: délégation immédiate et événement de fin
+  Given un lanceur dont le run se termine après un signal
+  When start est appelé
+  Then un handle est rendu avant la fin du run, puis `RunEnded` et l'événement de source `ended` sont émis à la fin
+
+Scenario: sous-agent non autorisé
+  Given une liste autorisée sans `reviewer`
+  When start est appelé pour `reviewer`
+  Then l'erreur est UnknownSubagent et aucun run n'existe
+
+Scenario: attente synchrone
+  Given un run lancé
+  When wait est appelé
+  Then il rend l'issue finale du run
+
+Scenario: annulation propagée
+  Given deux runs en cours dont le handle de l'appelant est annulé
+  When l'annulation a lieu
+  Then les deux runs voient leur handle annulé et finissent en Cancelled
+
+Scenario: annulation d'un seul run
+  Given deux runs en cours
+  When cancel est appelé pour le premier
+  Then seul le premier finit en Cancelled
+
+Scenario: run interrompu à la restauration
+  Given un registre dont un run n'est pas terminé, persisté par records
+  When un nouveau registre restore ces enregistrements
+  Then un `RunInterrupted` référence la session du sous-agent, et la source `subagent` reçoit un statut Interrupted
+
+Scenario: relance d'un run interrompu
+  Given un run interrompu dont la session est connue
+  When l'agent principal démarre un nouveau run sur cette session
+  Then le lanceur reçoit l'@SessionId à reprendre
+
+Scenario: pilote batch avec correction
+  Given un sous-agent scripté qui soumet un résultat invalide puis un résultat valide
+  When run_batch s'exécute
+  Then l'issue est Valid, avec le résultat validé et l'erreur de validation renvoyée au sous-agent dans le même run
+
+Scenario: pilote batch qui n'aboutit pas
+  Given un sous-agent scripté qui ne soumet jamais de résultat
+  When run_batch s'exécute
+  Then l'issue est Failed après le nombre maximal de tours
+
+Scenario: statut d'un run inconnu
+  Given un identifiant inconnu
+  When status, wait et cancel sont appelés
+  Then l'erreur est UnknownRun
+
+Tasks:
+  [ ] #1 Tests puis implémentation (lot D6).
+  [ ] #2 Ajouter la variante `RunInterrupted` à ../session/event.sdd et event.rs.
+  [?] #3 Posé : un seul niveau d'agents (le sous-agent ne délègue pas ; `agent-sessions#BR-6`) ; le nombre maximal de tours sans résultat d'un run batch est de 8 par défaut. À confirmer.

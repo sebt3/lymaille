@@ -1,0 +1,29 @@
+Spec: runtime
+
+Purpose:
+  Couche d'assemblage qui fait tourner une session : la boucle de tour (inférence, `rhai_pad`, fenêtre de contexte, persistance) au-dessus des types de `session`, `context`, `agents` et `scratchpad`.
+    Réalise `agent-sessions/session#FR-4` à `FR-7`, `AC-3` et `AC-9` ; le domaine `delegation` s'y appuie pour exécuter un sous-agent comme un run batch (`agent-sessions#DEC-4`).
+
+Structure:
+  ./mod.rs: déclarations et ré-exports
+  ./turn.rs: boucle de tour
+
+Owns:
+  ./mod.rs
+
+References:
+  ../../lymaille.sdd
+  ../../dsd/agent-sessions/session.md
+  ../session/session.sdd
+  ../context/context.sdd
+  ../agents/agents.sdd
+  ../scratchpad/scratchpad.sdd
+  ./turn.sdd
+
+Must:
+  Ne réaliser aucune E/S propre : le stockage de session, l'inférence et les modules viennent de traits ou d'objets fournis par l'hôte ; le temps passe par @Clock et par l'attente annulable de @CancelHandle.
+  Ne dépendre ni de `toolsets` ni de `modules` ni de `delegation` : ces domaines produisent des @Grants et des modules Rhai que l'hôte a déjà assemblés dans le @ScratchpadEngine reçu.
+  Ne laisser aucun secret atteindre l'historique, les événements, les erreurs ni les sorties renvoyées au LLM (`agent-sessions#CON-3`) : tout texte sort par le @Redactor de la session.
+
+Tasks:
+  [ ] #1 Déclarer les sous-modules dans ./mod.rs au fil des specs enfants livrées, et le module dans ../lib.sdd et ../lib.rs.

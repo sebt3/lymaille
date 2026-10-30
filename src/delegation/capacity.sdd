@@ -1,0 +1,69 @@
+Spec: capacity
+
+Purpose:
+  Limite des requêtes simultanées vers un moteur d'inférence (file au-delà), décompte local au processus ou partagé fourni par l'hôte, capacité de sous-agents annoncée à l'agent principal
+    (`agent-sessions/delegation#FR-11`, `FR-13`, `AC-5`, `AC-7`).
+
+Owns:
+  ./capacity.rs
+
+Exposes:
+  @RequestCounter
+  @LocalCounter
+  @InferenceLimiter
+  @Permit
+  @announced_capacity
+
+Accepts:
+  @RequestCounter::in_flight: aucun argument ; le nombre de requêtes en cours vers le moteur, tous processus confondus pour un décompte partagé. @RequestCounter::acquired: aucun argument, appelé quand une requête démarre. @RequestCounter::released: aucun argument, appelé quand elle se termine. Trait synchrone de l'hôte (`Send + Sync`).
+  @LocalCounter::new: aucun argument ; décompte en mémoire du processus.
+  @InferenceLimiter::new: la limite (@NonZeroU64, celle du profil de modèle : `ResolvedProfile` expose la concurrence) et un @RequestCounter partagé.
+  @InferenceLimiter::acquire: aucun argument ; asynchrone, annulable (abandon du futur) ; rend un @Permit.
+  @announced_capacity: la limite du profil, les requêtes déjà consommées au démarrage de la session.
+
+Returns:
+  @Permit: relâché à sa destruction (le compteur est prévenu). @InferenceLimiter::available: le nombre de places libres vues par ce limiteur ; @InferenceLimiter::capacity: la capacité de sous-agents parallélisables courante = limite - `in_flight` - 1 (la session de l'agent principal), minimum 0.
+  @announced_capacity: limite - consommées - 1, saturé à 0 (un instantané : `agent-sessions/delegation#FR-13`).
+
+Must:
+  Au plus `limite` permis sont tenus à la fois par un même limiteur ; au-delà, @InferenceLimiter::acquire attend en file (ordre d'arrivée) sans bloquer un fil.
+  Le décompte `in_flight` inclut les requêtes d'un autre processus quand l'hôte fournit un décompte partagé ; @LocalCounter ne compte que le processus.
+  Abandonner un futur d'`acquire` en attente ne perd aucune place ; relâcher un permis réveille le premier de la file.
+  Aucun débordement, aucune panique : l'arithmétique est saturée.
+
+Depends on:
+  ./error.sdd
+  tokio
+
+Scenario: capacité annoncée
+  Given une limite de 8 requêtes et 2 déjà consommées au démarrage
+  When la capacité annoncée est calculée
+  Then elle vaut 5
+
+Scenario: la neuvième requête est mise en file
+  Given un limiteur de limite 8 dont 8 permis sont tenus
+  When un neuvième acquire est demandé
+  Then il attend, puis obtient son permis quand un permis est relâché
+
+Scenario: capacité jamais négative
+  Given une limite de 2 et 5 requêtes en cours
+  When la capacité est calculée
+  Then elle vaut 0
+
+Scenario: décompte partagé de l'hôte
+  Given un décompte partagé qui rapporte 3 requêtes d'un autre processus
+  When la capacité courante est lue
+  Then elle tient compte de ces 3 requêtes
+
+Scenario: abandon d'une attente
+  Given un acquire en attente dont le futur est abandonné
+  When un permis est relâché
+  Then un autre acquire obtient la place
+
+Scenario: ordre d'arrivée
+  Given trois acquire en attente dans l'ordre A, B, C
+  When trois permis sont relâchés l'un après l'autre
+  Then A, B puis C obtiennent leur permis dans cet ordre
+
+Tasks:
+  [ ] #1 Tests puis implémentation (lot D2).

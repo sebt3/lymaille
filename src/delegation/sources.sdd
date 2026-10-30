@@ -1,0 +1,85 @@
+Spec: sources
+
+Purpose:
+  Événements que les watchers observent : trait de source branché par l'hôte, concentrateur qui reçoit les notifications, quatre sources fournies (fin d'un sous-agent, notifications MCP, changements de todo et de Memory, minuteurs échéance et périodique) et règles de restauration des minuteurs
+    (`agent-sessions/delegation#FR-9`, `FR-10`, `FR-12`, `AC-6`).
+
+Owns:
+  ./sources.rs
+
+Exposes:
+  @WatchEvent
+  @EventSource
+  @EventHub
+  @TimerKind
+  @Timer
+  @TimerSource
+  @BUILTIN_SOURCES
+
+Accepts:
+  @WatchEvent::new: le nom de la source, un nom d'événement, une donnée JSON et un @Timestamp.
+  @EventSource::name: aucun argument ; le nom stable de la source. @EventSource::drain: aucun argument ; rend les @WatchEvent en attente, une fois. Trait synchrone de l'hôte (`Send + Sync`).
+  @EventHub::new: aucun argument. @EventHub::register: une source (@EventSource, partagée) ; refuse un nom déjà pris. @EventHub::notify: une source par son nom, un nom d'événement et une donnée (l'appel de notification de l'hôte) ; refuse une source inconnue. @EventHub::poll: aucun argument ; rend tous les événements en attente de toutes les sources, dans l'ordre d'arrivée.
+  @Timer::deadline: un identifiant et un @Timestamp d'échéance. @Timer::periodic: un identifiant, une période (durée non nulle) et le prochain déclenchement (@Timestamp).
+  @TimerSource::new: aucun argument. @TimerSource::add: un @Timer ; refuse un identifiant vide ou en double. @TimerSource::remove: un identifiant. @TimerSource::tick: le @Timestamp courant ; fait avancer les minuteurs et met en attente leurs événements. @TimerSource::restore: les minuteurs persistés et le @Timestamp courant. @TimerSource::timers: aucun argument ; les minuteurs à persister.
+
+Returns:
+  @BUILTIN_SOURCES: les noms des quatre sources fournies : `subagent`, `mcp`, `workspace` (todo et Memory) et `timer`.
+  Un événement de minuteur porte le nom `due`, l'identifiant du minuteur et son retard en millisecondes (`late_ms`) en donnée.
+
+Must:
+  Un minuteur échéance se déclenche une fois quand l'horloge atteint son échéance, puis disparaît ; un minuteur périodique se déclenche quand l'horloge atteint son prochain déclenchement et se réarme sur le prochain multiple de sa période strictement postérieur à l'horloge (un déclenchement par `tick`, jamais en rafale).
+  À la restauration (@TimerSource::restore), une échéance manquée se déclenche une fois, immédiatement, avec son retard ; un minuteur périodique manqué plusieurs fois se déclenche au plus une fois puis saute les occurrences manquées et se réarme à la prochaine (`agent-sessions/delegation#FR-12`).
+  Les minuteurs se sérialisent (identifiant, nature, échéance ou période et prochain déclenchement) pour être persistés avec la session ; aucune tâche de fond : l'hôte appelle `tick` (`agent-sessions#NFR-1`).
+  Le concentrateur conserve l'ordre d'arrivée, est `Send + Sync` et ne bloque pas ; une source qui rend `drain` deux fois ne rend jamais deux fois le même événement.
+  Les noms de source sont des identifiants non vides ; les noms de source fournis (@BUILTIN_SOURCES) sont réservés : l'hôte ne peut pas les enregistrer sous un autre trait.
+
+Depends on:
+  ./error.sdd
+  ../clock.sdd
+  serde
+  serde_json
+
+Scenario: une échéance se déclenche une fois
+  Given un minuteur échéance à t=1000
+  When tick est appelé à t=999, t=1000 puis t=1500
+  Then un seul événement `due` est produit, au tick de t=1000, avec un retard de 0
+
+Scenario: échéance manquée à la restauration
+  Given un minuteur échéance à t=1000 persisté et restauré à t=5000
+  When restore est appelé
+  Then un seul événement `due` est produit immédiatement avec un retard de 4000 ms
+
+Scenario: minuteur périodique manqué plusieurs fois
+  Given un minuteur périodique de période 1000 dont le prochain déclenchement était t=1000, restauré à t=4500
+  When restore est appelé
+  Then un seul événement est produit et le prochain déclenchement est t=5000
+
+Scenario: un déclenchement par tick
+  Given un minuteur périodique de période 1000
+  When tick est appelé à t=3500 depuis un prochain déclenchement à t=1000
+  Then un seul événement est produit et le prochain déclenchement est t=4000
+
+Scenario: notification de l'hôte
+  Given une source branchée par l'hôte et le concentrateur
+  When l'hôte notifie un événement puis poll est appelé
+  Then l'événement est rendu une fois, avec son nom et sa donnée
+
+Scenario: source inconnue
+  Given un concentrateur sans source `ghost`
+  When notify est appelé pour `ghost`
+  Then l'erreur nomme la source
+
+Scenario: nom de source pris ou réservé
+  Given une source déjà enregistrée et une source nommée `timer`
+  When register est appelé pour un doublon puis pour la source `timer` de l'hôte
+  Then les deux sont refusés
+
+Scenario: aller-retour des minuteurs
+  Given des minuteurs persistés par timers
+  When ils sont sérialisés puis restaurés à la même heure
+  Then aucun événement n'est produit et les minuteurs sont égaux
+
+Tasks:
+  [ ] #1 Tests puis implémentation (lot D3).
+  [?] #2 Posé : les sources `subagent`, `mcp` et `workspace` sont alimentées par `notify` (le registre des runs, le connecteur MCP et le module de Memory/todo l'appellent) ; ce fichier ne les branche pas lui-même aux modules de ../modules/. À confirmer.

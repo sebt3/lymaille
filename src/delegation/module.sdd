@@ -1,0 +1,96 @@
+Spec: module
+
+Purpose:
+  Modules Rhai du domaine : `delegate` pour l'agent principal (lister, démarrer, suivre, attendre, annuler, capacité) et `result` pour le sous-agent (soumettre, échouer)
+    (`agent-sessions/delegation#FR-1`, `FR-2`, `FR-4`, `FR-6`, `FR-11`, `FR-13`, `AC-1`, `AC-5`, `AC-7`).
+
+Owns:
+  ./module.rs
+
+References:
+  ./run.sdd
+  ./result.sdd
+  ./capacity.sdd
+  ../agents/definition.sdd
+
+Exposes:
+  @MainAgent
+  @delegate_module
+  @result_module
+
+Accepts:
+  @MainAgent::from_definition: une @AgentDefinition ; rend `Some` seulement pour une définition de nature `Work`, `None` pour `Config` et `Sub`. Le type n'a pas d'autre constructeur (la preuve que la session peut déléguer).
+  @delegate_module: la preuve @MainAgent, le @RunRegistry partagé, l'@InferenceLimiter partagé et le @CancelHandle de la session de l'agent principal ; rend le @rhai::Module `delegate`.
+  @result_module: le @ResultCollector partagé du run ; rend le @rhai::Module `result`.
+
+Returns:
+  Module `delegate` : `agents()` rend la liste des noms de sous-agents que la définition autorise ; `start(nom, tâche)` rend l'identifiant du run (texte) sans attendre ; `status(id)` rend une table `#{state, ...}` (`running`, `valid`, `failed`, `cancelled`, `interrupted`) ; `wait(id)` rend la table finale (`state`, `result`, `errors`, `reason`) en attendant la fin ; `cancel(id)` ; `capacity()` rend la capacité courante de sous-agents parallélisables (entier), relue à chaque appel.
+  Module `result` : `submit(valeur)` rend `#{accepted: true}` ou `#{accepted: false, errors: [...], corrections_left: n}` ; `fail(raison)` conclut le run en échec.
+
+Raises:
+  Les fonctions Rhai rendent des erreurs d'exécution explicites : sous-agent absent de la liste (nomme le sous-agent), run inconnu (nomme l'identifiant), résultat soumis après conclusion.
+
+Must:
+  Un sous-agent n'a pas le module `delegate` : @delegate_module exige un @MainAgent, que seule une définition `Work` produit ; il n'existe pas de chemin de code qui construise le module pour une définition `Sub` ou `Config` (`agent-sessions/delegation#FR-2` : l'impossibilité tient au type).
+  `start` ne choisit que parmi `agents()` ; aucune fonction du module n'accorde de toolset ni ne crée de sous-agent.
+  Les fonctions sont synchrones et appellent le registre par `vynil_core::rt::block_on` (comme les modules de `modules`) ; sur un runtime `current_thread`, elles rendent l'erreur explicite de `vynil-core`. `start` ne bloque pas sur le run lui-même.
+  `result::submit` renvoie immédiatement les erreurs de validation (sans la valeur) pour que le sous-agent corrige dans le même run.
+  Aucune valeur de tâche, de résultat ou de secret n'entre dans un message d'erreur.
+
+Depends on:
+  ./run.sdd
+  ./result.sdd
+  ./capacity.sdd
+  ./error.sdd
+  ../agents/definition.sdd
+  ../session/cancel.sdd
+  rhai
+  vynil-core
+
+Scenario: un sous-agent n'a pas de module de délégation
+  Given une définition de nature `Sub` et une définition de nature `Config`
+  When MainAgent::from_definition est appelée avec chacune
+  Then les deux rendent None
+
+Scenario: l'agent principal ne désigne que les sous-agents autorisés
+  Given un agent principal autorisant `reviewer` seulement
+  When un script appelle `delegate::start("deployer", "tâche")`
+  Then une erreur Rhai nomme `deployer` et aucun run n'existe
+
+Scenario: démarrer rend un handle sans attendre
+  Given un lanceur dont le run attend un signal
+  When un script appelle `delegate::start("reviewer", "tâche")`
+  Then l'identifiant est rendu avant la fin du run et `delegate::status(id)` indique `running`
+
+Scenario: attendre rend le résultat
+  Given un lanceur dont le run rend un résultat valide
+  When un script appelle `delegate::wait(id)`
+  Then la table rendue a l'état `valid` et le résultat
+
+Scenario: capacité relue à chaque appel
+  Given un limiteur de limite 8 dont 2 requêtes sont en cours
+  When un script appelle `delegate::capacity()` avant et après une autre requête
+  Then les deux valeurs sont 5 puis 4
+
+Scenario: soumettre un résultat invalide puis valide
+  Given un collecteur dont le schéma exige `answer`
+  When un script appelle `result::submit(#{})` puis `result::submit(#{answer: "ok"})`
+  Then la première table a accepted à faux avec les erreurs et la seconde accepted à vrai
+
+Scenario: soumettre après la conclusion
+  Given un résultat déjà accepté
+  When un script appelle `result::submit(#{answer: "x"})`
+  Then une erreur Rhai est rendue
+
+Scenario: échec explicite
+  Given un collecteur
+  When un script appelle `result::fail("manque la clé API")`
+  Then le collecteur est conclu en échec avec cette raison
+
+Scenario: runtime current_thread
+  Given le module `delegate` appelé depuis un runtime `current_thread`
+  When une fonction est appelée
+  Then l'erreur explicite de `vynil-core` est rendue
+
+Tasks:
+  [ ] #1 Tests puis implémentation (lot D7).

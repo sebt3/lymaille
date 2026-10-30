@@ -1,0 +1,81 @@
+Spec: result
+
+Purpose:
+  Résultat structuré d'un run de sous-agent : validation contre le JSON Schema déclaré par sa définition, corrections dans le même run (trois au plus après la première tentative par défaut, valeur surchargeable), échec explicite
+    (`agent-sessions/delegation#FR-4`, `AC-2`, `AC-8`, `agent-sessions/session#AC-8`).
+
+Owns:
+  ./result.rs
+
+Exposes:
+  @ResultCollector
+  @Submission
+  @SubagentStatus
+  @SubagentOutcome
+  @DEFAULT_CORRECTIONS
+
+Accepts:
+  @ResultCollector::new: le schéma JSON (@serde_json::Value, objet de schéma) et le nombre maximal de corrections ; refuse (@DelegationError::InvalidSchema) un schéma qui n'est pas un schéma JSON compilable. @ResultCollector::with_default_corrections: le schéma seul, avec @DEFAULT_CORRECTIONS (3).
+  @ResultCollector::submit: une valeur JSON ; rend une @Submission.
+  @ResultCollector::fail: une raison (texte) ; l'échec explicite du sous-agent.
+  @ResultCollector::outcome: aucun argument ; le @SubagentOutcome courant si le collecteur est conclu, rien sinon.
+
+Returns:
+  @Submission: `Accepted` (la valeur validée), `Rejected` (les erreurs de validation et le nombre de corrections restantes, à renvoyer au sous-agent pour qu'il corrige dans le même run) ou `Exhausted` (la liste des erreurs de la dernière tentative : le run échoue).
+  @SubagentStatus: `Valid`, `Failed`, `Cancelled`, `Interrupted`. @SubagentOutcome: statut, résultat validé s'il existe, erreurs de validation, raison de l'échec explicite.
+
+Must:
+  La première tentative et chaque correction sont des résultats soumis : avec 3 corrections, quatre soumissions invalides au plus ; la quatrième invalide donne `Exhausted` et le run échoue avec la liste des erreurs (`agent-sessions/delegation#AC-8`).
+  Un résultat accepté conclut le collecteur : toute soumission suivante est refusée (le résultat est unique).
+  Les erreurs de validation nomment le chemin du champ et la règle violée du schéma, jamais la valeur soumise (un résultat peut porter un secret ; `agent-sessions#CON-3`) ; elles sont renvoyées au sous-agent telles quelles.
+  @ResultCollector::fail conclut le collecteur en `Failed` avec la raison fournie, masquée par l'appelant avant exposition ; il est aussi utilisable après des soumissions rejetées.
+  Le collecteur est `Send + Sync` (état derrière un verrou dont l'empoisonnement est rapporté, jamais de panique) et partagé entre le module Rhai `result` et le registre des runs.
+  Le schéma est compilé une fois ; aucun accès réseau ni fichier pendant la validation (un `$ref` distant est refusé à la compilation).
+
+Depends on:
+  ./error.sdd
+  jsonschema
+  serde_json
+
+Scenario: résultat valide du premier coup
+  Given un schéma exigeant un champ `answer` de type texte
+  When le sous-agent soumet `{"answer": "ok"}`
+  Then la soumission est acceptée et le statut final est Valid avec ce résultat
+
+Scenario: correction dans le même run
+  Given le même schéma
+  When le sous-agent soumet `{}` puis `{"answer": "ok"}`
+  Then la première soumission est rejetée avec une erreur qui nomme `answer`, la seconde est acceptée
+
+Scenario: quatre soumissions invalides font échouer le run
+  Given le même schéma avec trois corrections
+  When quatre soumissions invalides se suivent
+  Then la quatrième est `Exhausted`, avec les erreurs de validation, et le statut final est Failed
+
+Scenario: la valeur n'est pas dans l'erreur
+  Given un schéma qui exige un entier et la soumission `{"n": "s3cr3t"}`
+  When la soumission est rejetée
+  Then les erreurs nomment `n` et la règle mais ne contiennent pas `s3cr3t`
+
+Scenario: échec explicite
+  Given un collecteur après une soumission rejetée
+  When le sous-agent appelle fail avec une raison
+  Then le statut final est Failed et porte la raison
+
+Scenario: résultat unique
+  Given un résultat accepté
+  When une autre soumission arrive
+  Then elle est refusée et le résultat accepté est inchangé
+
+Scenario: nombre de corrections surchargeable
+  Given un collecteur configuré avec une seule correction
+  When deux soumissions invalides se suivent
+  Then la seconde est `Exhausted`
+
+Scenario: schéma invalide refusé
+  Given un schéma dont le type est un entier non reconnu
+  When le collecteur est créé
+  Then la création échoue par InvalidSchema
+
+Tasks:
+  [ ] #1 Tests puis implémentation (lot D5).
