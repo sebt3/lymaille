@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    FormatVersion, History, Labels, RunSignals, Segment, SessionError, SessionId, SessionResult, TaggedValue,
-    TurnId,
+    FormatVersion, History, Labels, Message, RunSignals, Segment, SessionError, SessionId, SessionResult,
+    TaggedValue, TurnId,
 };
 use crate::clock::Timestamp;
 
@@ -484,6 +484,49 @@ impl SessionState {
         self.inspection_target = target;
         Ok(())
     }
+
+    /// Appends a message to the history. Nothing already in the history is changed.
+    pub(crate) fn push_message(&mut self, message: Message) {
+        self.history.push(message);
+    }
+
+    /// Appends a user message received during a turn, refused while a tool call waits for its result.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError::PendingToolCall`] when some tool call has no result yet; the history is then unchanged.
+    pub(crate) fn push_user_during_turn<C: Into<String>>(&mut self, content: C) -> SessionResult<()> {
+        self.history.push_user_during_turn(content)
+    }
+
+    /// Appends a segment, which becomes the current one.
+    pub(crate) fn push_segment(&mut self, segment: Segment) {
+        self.segments.push(segment);
+    }
+
+    /// Replaces the scratchpad variables and the function sources with those of a pad snapshot.
+    pub(crate) fn set_pad(
+        &mut self,
+        variables: BTreeMap<String, TaggedValue>,
+        functions: BTreeMap<String, String>,
+    ) {
+        self.variables = variables;
+        self.functions = functions;
+    }
+
+    /// Adds `usage` to the token counters, saturating at the maximum.
+    pub(crate) const fn add_tokens(&mut self, usage: TokenCounters) {
+        self.tokens = TokenCounters {
+            prompt: self.tokens.prompt.saturating_add(usage.prompt),
+            completion: self.tokens.completion.saturating_add(usage.completion),
+            reasoning: self.tokens.reasoning.saturating_add(usage.reasoning),
+        };
+    }
+
+    /// Records the quality signals of `turn`, replacing those of an earlier record of the same turn.
+    pub(crate) fn record_signals(&mut self, turn: TurnId, signals: RunSignals) {
+        let _replaced = self.signals.insert(turn, signals);
+    }
 }
 
 /// The Debug of a state shows its identifier, its nature and the number of each of its elements. It never shows the
@@ -524,7 +567,7 @@ mod tests {
     use crate::clock::{ManualClock, Timestamp};
     use crate::session::{
         BoundaryKind, FormatVersion, LabelAuthor, LabelTarget, Message, ModelSnapshot, Outcome, RunSignals,
-        Segment, SegmentContext, SessionError, SessionId, TaggedValue, TurnId,
+        Segment, SegmentContext, SessionError, SessionId, TaggedValue, ToolCall, TurnId,
     };
 
     fn session_id(text: &str) -> SessionId {
@@ -1159,5 +1202,126 @@ mod tests {
                 "the Debug of a state shows {expected}: {rendered}"
             );
         }
+    }
+
+    #[test]
+    fn push_message_appends_in_order() {
+        let mut state = minimal();
+        state.push_message(Message::user("first"));
+        state.push_message(Message::assistant("second", None, Vec::new()));
+        assert_eq!(
+            state.history().messages(),
+            [
+                Message::user("first"),
+                Message::assistant("second", None, Vec::new())
+            ],
+            "messages must be appended in the order they were pushed"
+        );
+    }
+
+    #[test]
+    fn push_user_during_turn_waits_for_tool_results() {
+        let mut state = minimal();
+        state.push_message(Message::assistant(
+            "",
+            None,
+            vec![ToolCall::new("c1", "rhai_pad", json!({"script": "1"}))],
+        ));
+        let refused = state.push_user_during_turn("late");
+        assert!(
+            matches!(refused, Err(SessionError::PendingToolCall)),
+            "a user message must be refused while a call waits, got {refused:?}"
+        );
+        assert_eq!(
+            state.history().messages().len(),
+            1,
+            "a refused message must not be appended"
+        );
+        state.push_message(Message::tool_result("c1", "rhai_pad", "1", None));
+        state
+            .push_user_during_turn("late")
+            .expect("the message is accepted once the result is there");
+        assert_eq!(
+            state.history().messages().last(),
+            Some(&Message::user("late")),
+            "the accepted message must come after the result"
+        );
+    }
+
+    #[test]
+    fn push_segment_makes_the_new_segment_current() {
+        let mut state = minimal();
+        let context = SegmentContext::new("prompt", Vec::new(), ModelSnapshot::new("m", "none"));
+        state.push_segment(Segment::new(
+            BoundaryKind::Start,
+            context.clone(),
+            Timestamp::from_millis(1),
+        ));
+        state.push_segment(Segment::new(
+            BoundaryKind::Compaction,
+            context,
+            Timestamp::from_millis(2),
+        ));
+        let kinds: Vec<BoundaryKind> = state.segments().iter().map(Segment::boundary).collect();
+        assert_eq!(
+            kinds,
+            [BoundaryKind::Start, BoundaryKind::Compaction],
+            "segments must keep the order they started in"
+        );
+    }
+
+    #[test]
+    fn set_pad_replaces_variables_and_functions() {
+        let mut state = populated();
+        state.set_pad(
+            BTreeMap::from([("x".to_owned(), TaggedValue::Int(5))]),
+            BTreeMap::from([("f/1".to_owned(), "fn f(a) { a }".to_owned())]),
+        );
+        assert_eq!(
+            state.variables().keys().map(String::as_str).collect::<Vec<_>>(),
+            ["x"],
+            "the variables must be replaced, not merged"
+        );
+        assert_eq!(
+            state.functions().keys().map(String::as_str).collect::<Vec<_>>(),
+            ["f/1"],
+            "the functions must be replaced, not merged"
+        );
+    }
+
+    #[test]
+    fn add_tokens_accumulates_and_saturates() {
+        let mut state = minimal();
+        state.add_tokens(TokenCounters::new(10, 20, 5));
+        state.add_tokens(TokenCounters::new(1, 2, 3));
+        assert_eq!(
+            state.tokens(),
+            TokenCounters::new(11, 22, 8),
+            "counters must add up"
+        );
+        state.add_tokens(TokenCounters::new(u64::MAX, u64::MAX, u64::MAX));
+        assert_eq!(
+            state.tokens(),
+            TokenCounters::new(u64::MAX, u64::MAX, u64::MAX),
+            "counters must saturate instead of overflowing"
+        );
+    }
+
+    #[test]
+    fn record_signals_stores_by_turn_and_replaces() {
+        let mut state = minimal();
+        let mut first = RunSignals::new("a", "p", BTreeMap::new());
+        first.finish(Outcome::Failed);
+        state.record_signals(TurnId::new(1), first);
+        let mut second = RunSignals::new("a", "p", BTreeMap::new());
+        second.finish(Outcome::Valid);
+        state.record_signals(TurnId::new(1), second);
+        state.record_signals(TurnId::new(2), RunSignals::new("a", "p", BTreeMap::new()));
+        assert_eq!(state.signals().len(), 2, "one record per turn");
+        assert_eq!(
+            state.signals().get(&TurnId::new(1)).and_then(RunSignals::outcome),
+            Some(Outcome::Valid),
+            "a second record of the same turn replaces the first"
+        );
     }
 }

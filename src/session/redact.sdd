@@ -15,6 +15,7 @@ Accepts:
     caractères, pas en octets) est refusée.
   @Redactor::redact: un texte.
   @Redactor::redact_json: une valeur `serde_json::Value`.
+  @Redactor::longest_secret_len (`pub(crate)`, pour le report du masquage des fragments de la boucle de tour) : aucun argument ; rend le nombre de caractères du plus long secret déclaré, zéro s'il n'y en a aucun.
 
 Returns:
   @Redactor::add_secret: `Ok(())` si le secret est retenu ou ignoré (chaîne vide) ; sinon l'erreur ci-dessous.

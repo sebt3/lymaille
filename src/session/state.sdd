@@ -27,6 +27,7 @@ Accepts:
   @SessionState::with_kind: un @SessionKind (`Work`, `Config` ou `Sub`) ; rend l'état modifié. @SessionState::with_parent: l'@SessionId de la session parente ; rend `SessionResult<Self>` et refuse (@SessionError::NotSubSession) une session qui n'est pas de nature `Sub`. @SessionState::set_inspection_target: un @InspectionTargetRef optionnel (`Definition` : nom de l'agent et nom du ToolsetContext ; `Session` : un @SessionId) ; réservé à une session `Config`.
   @SessionState::to_json: produit le texte JSON.
   @SessionState::from_json: lit un texte JSON.
+  Mutateurs `pub(crate)` pour la boucle de tour (`../runtime/turn.sdd`) : @SessionState::push_message (un @Message ajouté à l'historique) ; @SessionState::push_user_during_turn (le texte d'un message reçu pendant un tour ; rend `SessionResult<()>`, @SessionError::PendingToolCall tant qu'un appel attend son résultat, historique inchangé) ; @SessionState::push_segment (un @Segment, qui devient le segment courant) ; @SessionState::set_pad (variables et sources de fonctions du scratchpad, qui remplacent celles de l'état) ; @SessionState::add_tokens (des @TokenCounters ajoutés aux compteurs, avec saturation) ; @SessionState::record_signals (un @TurnId et ses @RunSignals, qui remplacent l'éventuel enregistrement du même tour).
 
 Returns:
   @SessionState: identifiant, version de format (@FormatVersion), @History, segments (@Segment, dans l'ordre), variables (nom → @TaggedValue),

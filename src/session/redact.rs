@@ -72,6 +72,16 @@ impl Redactor {
         redacted
     }
 
+    /// Returns the length in characters of the longest declared secret, or zero when none is declared. The turn loop holds
+    /// back that many characters minus one of a streamed text, so that a secret cut between two fragments is masked.
+    pub(crate) fn longest_secret_len(&self) -> usize {
+        self.secrets
+            .iter()
+            .map(|secret| secret.chars().count())
+            .max()
+            .unwrap_or(0)
+    }
+
     /// Returns `value` where every string, object value and object key is masked as [`Redactor::redact`] does.
     /// Numbers, booleans and nulls are returned unchanged.
     #[must_use]
@@ -240,5 +250,31 @@ mod tests {
             "nothing to hide here",
             "a text without a secret must come back unchanged"
         );
+    }
+
+    #[test]
+    fn longest_secret_len_counts_characters_of_the_longest_secret() {
+        let mut redactor = Redactor::new();
+        assert_eq!(redactor.longest_secret_len(), 0, "no secret gives zero");
+        redactor
+            .add_secret("s3cr3t")
+            .expect("six characters are accepted");
+        assert_eq!(redactor.longest_secret_len(), 6, "one secret of six characters");
+        redactor
+            .add_secret("longer-secret")
+            .expect("thirteen characters are accepted");
+        redactor
+            .add_secret("\u{e9}".repeat(7))
+            .expect("seven multi-byte characters are accepted");
+        assert_eq!(
+            redactor.longest_secret_len(),
+            13,
+            "the longest is counted in characters, not in bytes"
+        );
+        let mut accents = Redactor::new();
+        accents
+            .add_secret("\u{e9}".repeat(8))
+            .expect("eight multi-byte characters are accepted");
+        assert_eq!(accents.longest_secret_len(), 8, "eight characters, sixteen bytes");
     }
 }

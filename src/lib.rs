@@ -7,6 +7,7 @@ mod agents;
 mod clock;
 mod context;
 mod modules;
+mod runtime;
 mod scratchpad;
 mod secret;
 mod session;
@@ -31,6 +32,7 @@ pub use modules::{
 };
 #[cfg(feature = "mcp-http")]
 pub use modules::{McpAuth, McpClientConfig, McpHeaders, RmcpConnector};
+pub use runtime::{RHAI_PAD_TOOL, TurnConfig, TurnOutput, TurnRunner, UserInbox};
 pub use scratchpad::{
     CandidateSet, Catalog, CoreGroup, EngineBuilder, FunctionDescriptor, FunctionEntry, FunctionSource,
     GrantedModule, GrantedSkill, GrantedToolset, Grants, InspectionPad, InspectionTarget,
