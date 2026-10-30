@@ -16,9 +16,12 @@ mod toolset_context;
 mod version;
 
 pub use assemble::{Assembled, assemble};
-pub use compat::{Gap, GapKind, check_context, check_creation_rule, delegable_subagents};
+pub use compat::{
+    Delegation, Gap, GapKind, RemovalReason, RemovedSubagent, check_context, check_creation_rule,
+    delegable_subagents,
+};
 pub use config::{
-    ConfigStores, InspectionSlot, ScriptError, SessionFilter, SessionIndex, SessionSummary,
+    ConfigEnv, ConfigStores, InspectionSlot, ScriptError, SessionFilter, SessionIndex, SessionSummary,
     config_registration,
 };
 pub use context_type::{ContextType, FlatContextType, RoleSpec};

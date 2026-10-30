@@ -31,12 +31,14 @@ Exposes:
   @ScriptError
   @ConfigStores
   @InspectionSlot
+  @ConfigEnv
   @config_registration
 
 Accepts:
   @SessionIndex::list: un @SessionFilter (agent et nature optionnels, limite) ; rend des identifiants de session. @SessionIndex::script_errors: un @SessionId ; rend les erreurs de script des runs de la session (numéro de tour, classe @ScriptErrorClass, texte), lues par l'hôte dans son journal d'audit puisque l'état de session ne les garde pas. Trait asynchrone de l'hôte, futurs `Send`, sans macro ni objet dynamique.
+  @ConfigEnv::new: le @Redactor de la session, un @EventSink partagé, une @Clock partagée et l'@SessionId de la session de configuration ; `Debug` opaque (jamais le @Redactor). Le nom d'une cible `definition` est `agent/contexte`.
   @InspectionSlot::new: aucun argument ; porte la cible courante (une seule, un @InspectionTargetRef de ../session/state.sdd ou rien), partagée entre le module `inspect` et le tool `rhai_prod_inspect` ; accesseurs `get` et `set`, `Send + Sync`.
-  @config_registration: les stockages (@AgentStore, @ToolsetStore, @ContextTypeStore, @ContextStore), un @SessionIndex, un @SessionStore, un @InspectionSlot et le @Redactor de la session ; rend une étape d'enregistrement (@EngineBuilder::with_registration).
+  @config_registration: les stockages (@AgentStore, @ToolsetStore, @ContextTypeStore, @ContextStore), un @SessionIndex, un @SessionStore, un @InspectionSlot et un @ConfigEnv ; rend une étape d'enregistrement (@EngineBuilder::with_registration).
 
 Returns:
   @SessionSummary: identifiant, agent, nature, nombre de tours portant des signaux, total des erreurs Rhai de ces signaux (`rhai_errors`), noms des fonctions définies par le LLM (sans arité, triés, sans doublon) ; jamais le texte des messages ni les valeurs. L'issue et l'erreur par classe ne sont pas dans l'état de session : elles viennent de l'hôte (`script_errors`).
@@ -109,4 +111,4 @@ Tasks:
   [x] #4 Un pad d'inspection ne rend pas l'avertissement « the functions of this script were not persisted » (il ne persiste jamais) : à corriger dans ../scratchpad/run.sdd/run.rs avant la validation de #1.
       Validé le 2026-10-29 (validator, 76 mutants, `scripts/check` complet vert).
   [x] #2 Décidé le 2026-10-30 par le développeur principal : `SessionIndex` est un trait d'hôte séparé de @SessionStore (qui ne sait que charger et enregistrer par identifiant) ; son filtre est une liste de critères optionnels, à figer au premier usage réel avec l'hôte.
-  [ ] #3 À réaliser (lot T14), décidé le 2026-10-30 par le développeur principal : le nom du module `sessions` est validé ; `inspect::open_context` et `inspect::open_session` émettent un @EventKind::TargetOpened (../session/event.sdd #9) daté par l'horloge injectée, une fois la cible posée (une ouverture refusée n'en émet pas). @config_registration reçoit pour cela un @EventSink partagé, une @Clock partagée et l'@SessionId de la session de configuration, regroupés avec le @Redactor dans une structure d'environnement (seuil de cinq arguments du harnais). La forme du résumé orienté échecs (`agent-sessions/toolsets#FR-19`) reste à poser.
+  [x] #3 Fait le 2026-10-30 (lot T14, validator, mutations manuelles), décidé le 2026-10-30 par le développeur principal : le nom du module `sessions` est validé ; `inspect::open_context` et `inspect::open_session` émettent un @EventKind::TargetOpened (../session/event.sdd #9) daté par l'horloge injectée, une fois la cible posée (une ouverture refusée n'en émet pas). @config_registration reçoit pour cela un @EventSink partagé, une @Clock partagée et l'@SessionId de la session de configuration, regroupés avec le @Redactor dans une structure d'environnement (seuil de cinq arguments du harnais). La forme du résumé orienté échecs (`agent-sessions/toolsets#FR-19`) reste à poser.

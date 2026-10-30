@@ -18,9 +18,11 @@ use super::{
     ToolsetsError, delegable_subagents,
 };
 use crate::agents::{AgentDefinition, AgentStore};
+use crate::clock::Clock;
 use crate::scratchpad::{ScratchpadResult, ScriptErrorClass};
 use crate::session::{
-    InspectionTargetRef, Redactor, SessionId, SessionKind, SessionResult, SessionState, SessionStore, TurnId,
+    Event, EventKind, EventSink, InspectionTargetRef, Redactor, SessionId, SessionKind, SessionResult,
+    SessionState, SessionStore, TurnId,
 };
 
 /// Filter of a listing of past sessions. An absent field does not filter.
@@ -259,6 +261,63 @@ impl<A, T, Y, C> ConfigStores<A, T, Y, C> {
     }
 }
 
+/// What the configuration modules share with the session they run in.
+///
+/// It groups the redactor that masks what they return, the sink that receives their events, the clock that dates them, and the identifier of the configuration session.
+#[non_exhaustive]
+pub struct ConfigEnv {
+    redactor: Redactor,
+    sink: Arc<dyn EventSink>,
+    clock: Arc<dyn Clock>,
+    session: SessionId,
+}
+
+impl fmt::Debug for ConfigEnv {
+    /// Opaque: the redactor holds the secrets to mask, so nothing is shown.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ConfigEnv").finish_non_exhaustive()
+    }
+}
+
+impl ConfigEnv {
+    /// Groups the redactor of the session, the event sink, the clock and the identifier of the configuration session.
+    #[must_use]
+    pub const fn new(
+        redactor: Redactor,
+        sink: Arc<dyn EventSink>,
+        clock: Arc<dyn Clock>,
+        session: SessionId,
+    ) -> Self {
+        Self {
+            redactor,
+            sink,
+            clock,
+            session,
+        }
+    }
+}
+
+/// Emits the events of the `inspect` module, dated by the injected clock, in the configuration session.
+struct TargetEvents {
+    sink: Arc<dyn EventSink>,
+    clock: Arc<dyn Clock>,
+    session: SessionId,
+}
+
+impl TargetEvents {
+    /// Reports that a target of nature `kind` named `name` was posed.
+    fn opened(&self, kind: &str, name: &str) {
+        self.sink.emit(Event::new(
+            self.session.clone(),
+            self.clock.now(),
+            EventKind::TargetOpened {
+                kind: kind.to_owned(),
+                name: name.to_owned(),
+            },
+        ));
+    }
+}
+
 /// The inspection target of a configuration session: one at a time, shared between the `inspect` module and the
 /// `rhai_prod_inspect` tool. Opening a new target replaces the previous one.
 #[derive(Debug, Default)]
@@ -439,10 +498,12 @@ fn functions_of<X: SessionStore>(
 fn open_session<X: SessionStore>(
     sessions: &X,
     slot: &InspectionSlot,
+    events: &TargetEvents,
     id: &str,
 ) -> Result<(), Box<EvalAltResult>> {
     let state = load_session(sessions, id)?;
     slot.set(Some(InspectionTargetRef::Session(state.id().clone())));
+    events.opened("session", state.id().as_str());
     Ok(())
 }
 
@@ -667,6 +728,7 @@ fn inspect_module<A, C, X>(
     contexts: Arc<C>,
     sessions: Arc<X>,
     slot: Arc<InspectionSlot>,
+    events: Arc<TargetEvents>,
 ) -> Module
 where
     A: AgentStore + 'static,
@@ -675,8 +737,14 @@ where
 {
     let mut module = Module::new();
     let open_slot = Arc::clone(&slot);
+    let open_events = Arc::clone(&events);
     let _open = module.set_native_fn("open_session", move |id: ImmutableString| {
-        open_session(sessions.as_ref(), open_slot.as_ref(), id.as_str())
+        open_session(
+            sessions.as_ref(),
+            open_slot.as_ref(),
+            open_events.as_ref(),
+            id.as_str(),
+        )
     });
     let context_slot = Arc::clone(&slot);
     let _open_context = module.set_native_fn(
@@ -688,6 +756,7 @@ where
                 agent: agent.as_str().to_owned(),
                 context: context.as_str().to_owned(),
             }));
+            events.opened("definition", &format!("{}/{}", agent.as_str(), context.as_str()));
             Ok(())
         },
     );
@@ -751,13 +820,14 @@ fn sessions_module<I: SessionIndex + 'static, X: SessionStore + 'static>(
 /// Registration step of the configuration modules, for `EngineBuilder::with_registration`.
 ///
 /// It registers the modules `contexts`, `inspect` and `sessions`. The stores are the host's, and the slot is shared with
-/// the `rhai_prod_inspect` tool.
+/// the `rhai_prod_inspect` tool. `env` carries the redactor, the event sink, the clock and the identifier of the
+/// configuration session; opening a target emits an [`EventKind::TargetOpened`] there.
 pub fn config_registration<A, T, Y, C, I, X>(
     stores: ConfigStores<A, T, Y, C>,
     index: I,
     sessions: X,
     slot: Arc<InspectionSlot>,
-    redactor: Redactor,
+    env: ConfigEnv,
 ) -> impl FnOnce(&mut RhaiEngine) -> ScratchpadResult<()> + 'static
 where
     A: AgentStore + 'static,
@@ -779,7 +849,14 @@ where
     let contexts = Arc::new(contexts);
     let index = Arc::new(index);
     let sessions = Arc::new(sessions);
+    let ConfigEnv {
+        redactor,
+        sink,
+        clock,
+        session,
+    } = env;
     let redactor = Arc::new(redactor);
+    let events = Arc::new(TargetEvents { sink, clock, session });
     move |engine: &mut RhaiEngine| {
         let _contexts = engine.register_static_module(
             "contexts",
@@ -792,7 +869,13 @@ where
         );
         let _inspect = engine.register_static_module(
             "inspect",
-            Shared::new(inspect_module(agents, contexts, Arc::clone(&sessions), slot)),
+            Shared::new(inspect_module(
+                agents,
+                contexts,
+                Arc::clone(&sessions),
+                slot,
+                events,
+            )),
         );
         let _sessions = engine.register_static_module(
             "sessions",
@@ -814,7 +897,8 @@ mod tests {
         Grants, RunEnv, RunOutcome, RunStatus, Scratchpad, ScratchpadEngine, ScratchpadLimits,
     };
     use crate::session::{
-        AgentRef, CancelHandle, History, InMemoryStore, Message, RunSignals, SessionError, TaggedValue,
+        AgentRef, CancelHandle, History, InMemoryStore, Message, RecordingSink, RunSignals, SessionError,
+        TaggedValue,
     };
     use crate::toolsets::{
         ContextLevel, InMemoryToolsets, ParamDecl, RoleSpec, ToolsetsResult, TypeRequirement,
@@ -831,6 +915,7 @@ mod tests {
         sessions: X,
         slot: Arc<InspectionSlot>,
         redactor: Redactor,
+        sink: Arc<RecordingSink>,
     }
 
     impl<I: SessionIndex + 'static, X: SessionStore + 'static> Host<I, X> {
@@ -845,13 +930,15 @@ mod tests {
                 sessions,
                 slot: Arc::new(InspectionSlot::new()),
                 redactor: Redactor::new(),
+                sink: Arc::new(RecordingSink::new()),
             }
         }
 
         /// The configuration pad of this host.
         fn pad(self) -> Scratchpad {
             let stores = ConfigStores::new(self.agents, self.toolsets, self.types, self.contexts);
-            build_pad(stores, self.index, self.sessions, self.slot, self.redactor)
+            let env = test_env(self.redactor, Arc::clone(&self.sink));
+            build_pad(stores, self.index, self.sessions, self.slot, env)
         }
     }
 
@@ -1279,6 +1366,238 @@ mod tests {
         );
     }
 
+    // Scenario (config.sdd #3): opening a definition emits TargetOpened once the target is posed.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn open_context_emits_target_opened() {
+        let host = Host::new(Index::listing(Vec::new()), InMemoryStore::new());
+        host.contexts
+            .put_context(&empty_context("ctx"))
+            .await
+            .expect("the context is stored");
+        host.agents
+            .put_agent(&work_agent("work-agent", &[]))
+            .await
+            .expect("the agent is stored");
+        let sink = Arc::clone(&host.sink);
+        let outcome = run(&host.pad(), r#"inspect::open_context("work-agent", "ctx")"#).await;
+        assert_eq!(
+            outcome.status(),
+            RunStatus::Ok,
+            "the run succeeds: {}",
+            outcome.text()
+        );
+        assert_eq!(
+            sink.events(),
+            vec![Event::new(
+                config_session(),
+                Timestamp::from_millis(42),
+                EventKind::TargetOpened {
+                    kind: "definition".to_owned(),
+                    name: "work-agent/ctx".to_owned(),
+                },
+            )],
+            "one event, dated by the injected clock, in the configuration session"
+        );
+    }
+
+    // Scenario (config.sdd #3): opening a session emits TargetOpened with its identifier.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn open_session_emits_target_opened() {
+        let sessions = store_with(vec![past_session("past-1", "work-agent")]).await;
+        let host = Host::new(Index::listing(Vec::new()), sessions);
+        let sink = Arc::clone(&host.sink);
+        let outcome = run(&host.pad(), r#"inspect::open_session("past-1")"#).await;
+        assert_eq!(
+            outcome.status(),
+            RunStatus::Ok,
+            "the run succeeds: {}",
+            outcome.text()
+        );
+        assert_eq!(
+            sink.events(),
+            vec![Event::new(
+                config_session(),
+                Timestamp::from_millis(42),
+                EventKind::TargetOpened {
+                    kind: "session".to_owned(),
+                    name: "past-1".to_owned(),
+                },
+            )],
+            "one event naming the session"
+        );
+    }
+
+    /// An event kind with the inspection target seen in the slot when it was emitted.
+    type Seen = (EventKind, Option<InspectionTargetRef>);
+
+    /// A sink that records, at each emission, the inspection target the shared slot holds at that moment.
+    struct SlotWatchingSink {
+        slot: Arc<InspectionSlot>,
+        seen: Mutex<Vec<Seen>>,
+    }
+
+    impl EventSink for SlotWatchingSink {
+        fn emit(&self, event: Event) {
+            let target = self.slot.get();
+            self.seen
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push((event.kind, target));
+        }
+    }
+
+    /// The configuration pad of `host`, whose events go to `sink` instead of the host's recording sink.
+    fn pad_with_sink<I: SessionIndex + 'static, X: SessionStore + 'static>(
+        host: Host<I, X>,
+        sink: Arc<dyn EventSink>,
+    ) -> Scratchpad {
+        let stores = ConfigStores::new(host.agents, host.toolsets, host.types, host.contexts);
+        let env = ConfigEnv::new(
+            host.redactor,
+            sink,
+            Arc::new(ManualClock::new(Timestamp::from_millis(42))),
+            config_session(),
+        );
+        build_pad(stores, host.index, host.sessions, host.slot, env)
+    }
+
+    // Scenario (config.sdd #3): the event is emitted once the target is posed, for both openings.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn target_opened_is_emitted_after_the_target_is_posed() {
+        let sessions = store_with(vec![past_session("past-1", "work-agent")]).await;
+        let host = Host::new(Index::listing(Vec::new()), sessions);
+        host.contexts
+            .put_context(&empty_context("ctx"))
+            .await
+            .expect("the context is stored");
+        host.agents
+            .put_agent(&work_agent("work-agent", &[]))
+            .await
+            .expect("the agent is stored");
+        let sink = Arc::new(SlotWatchingSink {
+            slot: Arc::clone(&host.slot),
+            seen: Mutex::new(Vec::new()),
+        });
+        let dyn_sink: Arc<dyn EventSink> = Arc::<SlotWatchingSink>::clone(&sink);
+        let pad = pad_with_sink(host, dyn_sink);
+        let context = run(&pad, r#"inspect::open_context("work-agent", "ctx")"#).await;
+        assert_eq!(context.status(), RunStatus::Ok, "{}", context.text());
+        let session = run(&pad, r#"inspect::open_session("past-1")"#).await;
+        assert_eq!(session.status(), RunStatus::Ok, "{}", session.text());
+        let seen = sink.seen.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        assert_eq!(
+            seen,
+            vec![
+                (
+                    EventKind::TargetOpened {
+                        kind: "definition".to_owned(),
+                        name: "work-agent/ctx".to_owned(),
+                    },
+                    Some(InspectionTargetRef::Definition {
+                        agent: "work-agent".to_owned(),
+                        context: "ctx".to_owned(),
+                    }),
+                ),
+                (
+                    EventKind::TargetOpened {
+                        kind: "session".to_owned(),
+                        name: "past-1".to_owned(),
+                    },
+                    Some(InspectionTargetRef::Session(
+                        SessionId::new("past-1").expect("a session id")
+                    )),
+                ),
+            ],
+            "each event sees the target already posed"
+        );
+    }
+
+    // Scenario (config.sdd #3): a definition then a session, in one script, emit in that order.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn definition_then_session_events_keep_their_order() {
+        let sessions = store_with(vec![past_session("past-1", "work-agent")]).await;
+        let host = Host::new(Index::listing(Vec::new()), sessions);
+        host.contexts
+            .put_context(&empty_context("ctx"))
+            .await
+            .expect("the context is stored");
+        host.agents
+            .put_agent(&work_agent("work-agent", &[]))
+            .await
+            .expect("the agent is stored");
+        let sink = Arc::clone(&host.sink);
+        let outcome = run(
+            &host.pad(),
+            r#"inspect::open_context("work-agent", "ctx"); inspect::open_session("past-1")"#,
+        )
+        .await;
+        assert_eq!(outcome.status(), RunStatus::Ok, "{}", outcome.text());
+        let kinds: Vec<EventKind> = sink.events().iter().map(|event| event.kind.clone()).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                EventKind::TargetOpened {
+                    kind: "definition".to_owned(),
+                    name: "work-agent/ctx".to_owned(),
+                },
+                EventKind::TargetOpened {
+                    kind: "session".to_owned(),
+                    name: "past-1".to_owned(),
+                },
+            ],
+            "definition first, then session"
+        );
+    }
+
+    // Scenario (config.sdd #3): a refused session opening names the identifier and emits nothing.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn refused_session_opening_names_the_identifier() {
+        let host = Host::new(Index::listing(Vec::new()), InMemoryStore::new());
+        let sink = Arc::clone(&host.sink);
+        let outcome = run(&host.pad(), r#"inspect::open_session("missing-session")"#).await;
+        assert_ne!(outcome.status(), RunStatus::Ok, "the unknown session is refused");
+        assert!(
+            outcome.text().contains("missing-session"),
+            "the error names the identifier: {}",
+            outcome.text()
+        );
+        assert!(sink.events().is_empty(), "no event: {:?}", sink.events());
+    }
+
+    // Scenario (config.sdd #3): a refused opening emits nothing.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn refused_openings_emit_nothing() {
+        let host = Host::new(Index::listing(Vec::new()), InMemoryStore::new());
+        host.agents
+            .put_agent(&work_agent("work-agent", &[]))
+            .await
+            .expect("the agent is stored");
+        let sink = Arc::clone(&host.sink);
+        let pad = host.pad();
+        let session = run(&pad, r#"inspect::open_session("missing-session")"#).await;
+        assert_ne!(session.status(), RunStatus::Ok, "the unknown session is refused");
+        let context = run(&pad, r#"inspect::open_context("work-agent", "missing")"#).await;
+        assert_ne!(context.status(), RunStatus::Ok, "the unknown context is refused");
+        let agent = run(&pad, r#"inspect::open_context("missing", "ctx")"#).await;
+        assert_ne!(agent.status(), RunStatus::Ok, "the unknown agent is refused");
+        assert!(
+            sink.events().is_empty(),
+            "no event for a refused opening: {:?}",
+            sink.events()
+        );
+    }
+
+    // Not a Scenario: `ConfigEnv` is opaque in `Debug`.
+    #[test]
+    fn config_env_debug_is_opaque() {
+        let mut redactor = Redactor::new();
+        redactor.add_secret("tok-123456").expect("the secret is accepted");
+        let env = test_env(redactor, Arc::new(RecordingSink::new()));
+        let text = format!("{env:?}");
+        assert!(!text.contains("tok-123456"), "no secret in Debug: {text}");
+        assert!(text.contains("ConfigEnv"), "{text}");
+    }
+
     // Not a Scenario: `inspect::open_context` names an unknown context and leaves the target alone.
     #[tokio::test(flavor = "multi_thread")]
     async fn open_context_names_the_unknown_context() {
@@ -1560,6 +1879,11 @@ mod tests {
             Arc::new(InMemoryToolsets::new(1_000)),
             Arc::new(InMemoryStore::new()),
             Arc::new(InspectionSlot::new()),
+            Arc::new(TargetEvents {
+                sink: Arc::new(RecordingSink::new()),
+                clock: Arc::new(ManualClock::new(Timestamp::from_millis(0))),
+                session: config_session(),
+            }),
         );
         let sessions = sessions_module(
             Arc::new(Index::listing(Vec::new())),
@@ -1709,13 +2033,33 @@ mod tests {
         assert_eq!(slot.get(), None, "the slot is empty");
     }
 
-    /// Builds the configuration pad over the given stores, index, sessions, slot and redactor.
+    /// The session in which the configuration pads under test run.
+    fn config_session() -> SessionId {
+        SessionId::new("config-session").expect("a session id")
+    }
+
+    /// The environment of a configuration pad under test: the clock stands at 42 ms.
+    fn test_env(redactor: Redactor, sink: Arc<RecordingSink>) -> ConfigEnv {
+        ConfigEnv::new(
+            redactor,
+            sink,
+            Arc::new(ManualClock::new(Timestamp::from_millis(42))),
+            config_session(),
+        )
+    }
+
+    /// The environment of a pad whose events are not read.
+    fn quiet_env() -> ConfigEnv {
+        test_env(Redactor::new(), Arc::new(RecordingSink::new()))
+    }
+
+    /// Builds the configuration pad over the given stores, index, sessions, slot and environment.
     fn build_pad<A, T, Y, C, I, X>(
         stores: ConfigStores<A, T, Y, C>,
         index: I,
         sessions: X,
         slot: Arc<InspectionSlot>,
-        redactor: Redactor,
+        env: ConfigEnv,
     ) -> Scratchpad
     where
         A: AgentStore + 'static,
@@ -1725,7 +2069,7 @@ mod tests {
         I: SessionIndex + 'static,
         X: SessionStore + 'static,
     {
-        let registration = config_registration(stores, index, sessions, slot, redactor);
+        let registration = config_registration(stores, index, sessions, slot, env);
         match ScratchpadEngine::builder(ScratchpadLimits::new(), Grants::new())
             .with_registration(registration)
             .build()
@@ -2211,7 +2555,7 @@ mod tests {
             .expect("the context is stored");
         let slot = Arc::new(InspectionSlot::new());
         let index = Recording::listing(vec![SessionId::new("past-1").expect("a session id")]);
-        let pad = build_pad(stores, index, sessions, Arc::clone(&slot), Redactor::new());
+        let pad = build_pad(stores, index, sessions, Arc::clone(&slot), quiet_env());
         for script in [
             r#"contexts::check("work-agent", "prod")"#,
             r#"contexts::resolve("work-agent", "prod")"#,
@@ -2264,7 +2608,7 @@ mod tests {
             Recording::listing(Vec::new()),
             sessions,
             Arc::clone(&slot),
-            Redactor::new(),
+            quiet_env(),
         );
         let opened = run(&pad, r#"inspect::open_session("past-1"); inspect::target()"#).await;
         assert_eq!(
@@ -2321,7 +2665,7 @@ mod tests {
             Recording::listing(Vec::new()),
             InMemoryStore::new(),
             Arc::new(InspectionSlot::new()),
-            Redactor::new(),
+            quiet_env(),
         );
         let outcome = run(&pad, r#"contexts::check("work-agent", "prod")"#).await;
         assert_eq!(
@@ -2375,7 +2719,7 @@ mod tests {
             Recording::listing(Vec::new()),
             InMemoryStore::new(),
             Arc::new(InspectionSlot::new()),
-            Redactor::new(),
+            quiet_env(),
         );
         let outcome = run(&pad, r#"contexts::check("work-agent", "prod")"#).await;
         assert_eq!(

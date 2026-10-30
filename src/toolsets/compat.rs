@@ -102,6 +102,63 @@ impl fmt::Display for Gap {
     }
 }
 
+/// Why a sub-agent was removed from the delegable list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RemovalReason {
+    /// The main agent lists the sub-agent, but no definition is found for it.
+    DefinitionMissing,
+    /// A toolset of the sub-agent is not available.
+    ToolsetMissing,
+    /// The toolsets of the sub-agent are not compatible with the context. The list holds the gaps; it is empty when the
+    /// check itself failed because a required context type is inconsistent (fail closed).
+    Incompatible(Vec<Gap>),
+}
+
+/// A sub-agent removed from the delegable list, with the reason.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct RemovedSubagent {
+    id: String,
+    reason: RemovalReason,
+}
+
+impl RemovedSubagent {
+    /// Returns the identifier of the removed sub-agent.
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// Returns why the sub-agent was removed.
+    #[must_use]
+    pub const fn reason(&self) -> &RemovalReason {
+        &self.reason
+    }
+}
+
+/// Result of [`delegable_subagents`]: the sub-agents that can be delegated to, and the ones that were removed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Delegation {
+    kept: Vec<String>,
+    removed: Vec<RemovedSubagent>,
+}
+
+impl Delegation {
+    /// Returns the identifiers of the compatible sub-agents, in the order of the main definition.
+    #[must_use]
+    pub fn kept(&self) -> &[String] {
+        &self.kept
+    }
+
+    /// Returns the removed sub-agents with their reason, in the order of the main definition.
+    #[must_use]
+    pub fn removed(&self) -> &[RemovedSubagent] {
+        &self.removed
+    }
+}
+
 /// Returns every gap of a toolset context against the types and roles that the toolsets require.
 ///
 /// The check is structural. The list is empty when the context is compatible.
@@ -218,7 +275,8 @@ fn select<'table>(names: &[String], table: &'table [Toolset]) -> (Vec<&'table To
 /// Computes the delegable sub-agents of a work agent (`Work`) in this session, in the order of its definition.
 ///
 /// A work agent whose toolsets have gaps against `context` fails with [`ToolsetsError::Incompatible`]. A sub-agent with a
-/// gap, a toolset that is not available, or no definition in `subagents`, is removed from the list without error.
+/// gap, a toolset that is not available, or no definition in `subagents`, is removed from the list without error and
+/// reported in [`Delegation::removed`] with its [`RemovalReason`].
 ///
 /// # Errors
 ///
@@ -229,7 +287,7 @@ pub fn delegable_subagents<F>(
     toolsets: &[Toolset],
     context: &ToolsetContext,
     lookup: &F,
-) -> ToolsetsResult<Vec<String>>
+) -> ToolsetsResult<Delegation>
 where
     F: Fn(&str) -> Option<ContextType>,
 {
@@ -248,21 +306,31 @@ where
             issues: issues.iter().map(ToString::to_string).collect(),
         });
     }
-    let mut delegable = Vec::new();
+    let mut kept = Vec::new();
+    let mut removed = Vec::new();
     for id in main.delegable() {
-        // A sub-agent with no definition, an unavailable toolset, or any gap is removed without error.
+        let removal = |reason: RemovalReason| RemovedSubagent {
+            id: id.clone(),
+            reason,
+        };
+        // A sub-agent with no definition, an unavailable toolset, or any gap is removed without error, with its reason.
         let Some(sub) = subagents.iter().find(|candidate| candidate.id() == id.as_str()) else {
+            removed.push(removal(RemovalReason::DefinitionMissing));
             continue;
         };
         let (sub_found, sub_missing) = select(sub.toolsets(), toolsets);
         if !sub_missing.is_empty() {
+            removed.push(removal(RemovalReason::ToolsetMissing));
             continue;
         }
-        if matches!(gaps_of(context, sub_found, lookup), Ok(gaps) if gaps.is_empty()) {
-            delegable.push(id.clone());
+        match gaps_of(context, sub_found, lookup) {
+            Ok(gaps) if gaps.is_empty() => kept.push(id.clone()),
+            Ok(gaps) => removed.push(removal(RemovalReason::Incompatible(gaps))),
+            // Fail closed: an inconsistent type removes the sub-agent, with no gap to name.
+            Err(_) => removed.push(removal(RemovalReason::Incompatible(Vec::new()))),
         }
     }
-    Ok(delegable)
+    Ok(Delegation { kept, removed })
 }
 
 /// Checks the rule of the toolset-creation module: only a configuration agent may hold it, among `agent` and `subagents`.
@@ -299,7 +367,7 @@ mod tests {
     use serde_json::{Value, json};
     use vynil_core::Semver;
 
-    use super::{GapKind, check_context, check_creation_rule, delegable_subagents};
+    use super::{GapKind, RemovalReason, check_context, check_creation_rule, delegable_subagents};
     use crate::agents::{AgentDefinition, AgentKind};
     use crate::toolsets::{
         ContextLevel, ContextType, RoleDecl, RoleSpec, Toolset, ToolsetContext, ToolsetsError,
@@ -383,6 +451,70 @@ mod tests {
         .with_toolsets(toolsets)
     }
 
+    // Scenario: un sous-agent retiré est signalé avec sa raison
+    #[test]
+    fn a_removed_sub_agent_is_reported_with_its_reason() {
+        let role_toolset = Toolset::new(
+            "k8s_tools".to_owned(),
+            "Kubernetes tools".to_owned(),
+            version("1.0.0"),
+            "fn pods() { 1 }".to_owned(),
+        )
+        .expect("the toolset builds")
+        .with_role(RoleDecl::new("k8s".to_owned(), true))
+        .expect("the role is declared");
+        let main = main_agent(vec![
+            "lost".to_owned(),
+            "ghost".to_owned(),
+            "needy".to_owned(),
+            "plain".to_owned(),
+        ]);
+        let subagents = vec![
+            sub_agent("ghost", vec!["not-a-toolset".to_owned()]),
+            sub_agent("needy", vec!["k8s_tools".to_owned()]),
+            sub_agent("plain", Vec::new()),
+        ];
+        let toolsets = vec![role_toolset];
+        let delegation = delegable_subagents(
+            &main,
+            &subagents,
+            &toolsets,
+            &empty_context(),
+            &lookup_of(Vec::new()),
+        )
+        .expect("a removed sub-agent raises no error");
+        assert_eq!(
+            delegation.kept(),
+            ["plain".to_owned()],
+            "the compatible sub-agent is kept"
+        );
+        let removed = delegation.removed();
+        assert_eq!(removed.len(), 3, "the three removals are listed: {removed:?}");
+        let reason_of = |id: &str| {
+            removed
+                .iter()
+                .find(|entry| entry.id() == id)
+                .map(|entry| entry.reason().clone())
+        };
+        assert_eq!(reason_of("lost"), Some(RemovalReason::DefinitionMissing));
+        assert_eq!(reason_of("ghost"), Some(RemovalReason::ToolsetMissing));
+        match reason_of("needy") {
+            Some(RemovalReason::Incompatible(gaps)) => assert!(
+                gaps.iter().any(|gap| gap.kind()
+                    == &GapKind::MissingRole {
+                        name: "k8s".to_owned()
+                    }),
+                "the gaps name the missing role: {gaps:?}"
+            ),
+            other => panic!("expected Incompatible, got {other:?}"),
+        }
+        assert_eq!(
+            removed.iter().map(super::RemovedSubagent::id).collect::<Vec<_>>(),
+            ["lost", "ghost", "needy"],
+            "the removals follow the order of the definition"
+        );
+    }
+
     // Scenario: missing role removes a sub-agent
     #[test]
     fn missing_role_removes_a_sub_agent() {
@@ -406,14 +538,14 @@ mod tests {
             .expect("the role is bound");
         let with_role_result = delegable_subagents(&main, &subagents, &toolsets, &with_role, &lookup);
         assert_eq!(
-            with_role_result.expect("the context has the role"),
-            vec!["worker".to_owned()],
+            with_role_result.expect("the context has the role").kept(),
+            ["worker".to_owned()],
             "the sub-agent is listed when the role is bound"
         );
 
         let without_role = delegable_subagents(&main, &subagents, &toolsets, &empty_context(), &lookup);
         assert_eq!(
-            without_role.expect("a sub-agent gap raises no error"),
+            without_role.expect("a sub-agent gap raises no error").kept(),
             Vec::<String>::new(),
             "without the role the sub-agent is absent and no error is raised"
         );
@@ -597,8 +729,8 @@ mod tests {
         let subagents = vec![sub_agent("alpha", Vec::new()), sub_agent("beta", Vec::new())];
         let delegable = delegable_subagents(&main, &subagents, &[], &empty_context(), &lookup_of(Vec::new()));
         assert_eq!(
-            delegable.expect("no gap"),
-            vec!["beta".to_owned(), "alpha".to_owned()],
+            delegable.expect("no gap").kept(),
+            ["beta".to_owned(), "alpha".to_owned()],
             "the sub-agents keep the order of the main definition"
         );
     }
@@ -612,8 +744,8 @@ mod tests {
         ];
         let delegable = delegable_subagents(&main, &subagents, &[], &empty_context(), &lookup_of(Vec::new()));
         assert_eq!(
-            delegable.expect("removal is silent"),
-            vec!["plain".to_owned()],
+            delegable.expect("removal is silent").kept(),
+            ["plain".to_owned()],
             "a sub-agent with an unknown toolset and a delegable id without definition are removed; a valid one stays"
         );
     }
@@ -644,9 +776,21 @@ mod tests {
         let subagents = vec![sub_agent("worker", vec!["grafana".to_owned()])];
         let result = delegable_subagents(&main, &subagents, &toolsets, &empty_context(), &lookup);
         assert_eq!(
-            result.expect("a sub-agent with a cyclic type raises no error"),
+            result
+                .as_ref()
+                .expect("a sub-agent with a cyclic type raises no error")
+                .kept(),
             Vec::<String>::new(),
             "the sub-agent with an inconsistent type is absent"
+        );
+        let delegation = result.expect("a sub-agent with a cyclic type raises no error");
+        let removed = delegation.removed();
+        assert_eq!(removed.len(), 1, "exactly one sub-agent is reported removed");
+        assert_eq!(removed.first().map(super::RemovedSubagent::id), Some("worker"));
+        assert_eq!(
+            removed.first().map(super::RemovedSubagent::reason),
+            Some(&RemovalReason::Incompatible(Vec::new())),
+            "the removal is signalled as incompatible, without gaps"
         );
     }
 

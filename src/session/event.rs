@@ -43,6 +43,14 @@ pub enum EventKind {
         /// Delay before the attempt, in milliseconds.
         delay_ms: u64,
     },
+    /// A configuration agent opened an inspection target. Carries the nature of the target and its name, never a content
+    /// of the session nor a value.
+    TargetOpened {
+        /// Nature of the target: `definition` or `session`.
+        kind: String,
+        /// Name of the target: the agent with its context for a definition, the identifier for a session.
+        name: String,
+    },
     /// A turn exceeded its configured delay. The turn is not interrupted.
     Overrun {
         /// Time elapsed since the start of the turn, in milliseconds.
@@ -171,14 +179,15 @@ mod tests {
     use crate::clock::Timestamp;
     use crate::session::{EventSink as _, Outcome, RunId, SessionId, TurnId};
 
-    /// Names of the twelve variants of [`EventKind`], in the order of [`one_of_each_kind`].
-    const ALL_VARIANTS: [&str; 12] = [
+    /// Names of the thirteen variants of [`EventKind`], in the order of [`one_of_each_kind`].
+    const ALL_VARIANTS: [&str; 13] = [
         "TokenUsage",
         "TodoChanged",
         "MemoryChanged",
         "Script",
         "McpCall",
         "McpReconnect",
+        "TargetOpened",
         "Overrun",
         "InferenceRetry",
         "TurnStarted",
@@ -197,6 +206,14 @@ mod tests {
             role: "monitoring".to_owned(),
             attempt: 1,
             delay_ms: 500,
+        }
+    }
+
+    /// A configuration agent opens the definition of `agent` read with the context `ctx`.
+    fn target_opened_sample() -> EventKind {
+        EventKind::TargetOpened {
+            kind: "definition".to_owned(),
+            name: "agent/ctx".to_owned(),
         }
     }
 
@@ -245,6 +262,7 @@ mod tests {
                 )),
             ),
             ("McpReconnect", reconnect_sample()),
+            ("TargetOpened", target_opened_sample()),
             ("Overrun", EventKind::Overrun { elapsed_ms: 90_000 }),
             (
                 "InferenceRetry",
@@ -289,6 +307,7 @@ mod tests {
             EventKind::Script(_) => "Script",
             EventKind::McpCall(_) => "McpCall",
             EventKind::McpReconnect { .. } => "McpReconnect",
+            EventKind::TargetOpened { .. } => "TargetOpened",
             EventKind::Overrun { .. } => "Overrun",
             EventKind::InferenceRetry { .. } => "InferenceRetry",
             EventKind::TurnStarted { .. } => "TurnStarted",
