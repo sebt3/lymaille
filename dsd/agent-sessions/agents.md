@@ -13,10 +13,13 @@ fournit l'abstraction des fournisseurs.
 
 ## Exigences fonctionnelles
 
-- **FR-1 - MUST:** Une définition d'agent comprend : identifiant, nature (principal ou sous-agent), prompt système
+- **FR-1 - MUST:** Une définition d'agent comprend : identifiant, nature (`Work`, `Config` ou `Sub`, voir `agent-sessions#BR-8`), prompt système
   templaté, modèle et paramètres, modules et toolsets accessibles, droits de la Memory par niveau, limites de sandbox,
-  stratégie de fenêtre de contexte et, pour un principal, ses sous-agents délégables ; pour un sous-agent, le schéma de
-  sa sortie.
+  stratégie de fenêtre de contexte et, pour un agent de travail, ses sous-agents délégables ; pour un sous-agent, le schéma de
+  sa sortie. La nature impose des règles de validation : un agent de travail n'a ni module de création de toolsets ni module
+  d'inspection ; un agent de configuration n'a aucun sous-agent délégable ni schéma de sortie, et n'ouvre aucune connexion MCP d'appel (règle du démarrage de session) ; seul lui
+  reçoit le module de création de toolsets, les modules d'inspection et de lecture de sessions ; un sous-agent n'a ni sous-agent
+  délégable, ni module de création, ni module d'inspection.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-1`
 
@@ -33,7 +36,7 @@ fournit l'abstraction des fournisseurs.
   ContextType et de définitions de ToolsetContext prédéterminés, stockés par trait.
     - **Source:** user instruction, 2026-10-24
 
-- **FR-5 - MUST:** Au démarrage, l'utilisateur choisit un agent principal et un ToolsetContext ; la session sait ainsi
+- **FR-5 - MUST:** Au démarrage, l'utilisateur choisit un agent principal (de travail ou de configuration) et un ToolsetContext ; la session sait ainsi
   quel environnement elle pilote.
     - **Source:** agent-sessions#BO-3
     - **Verified by:** `AC-1`

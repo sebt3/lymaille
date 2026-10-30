@@ -60,7 +60,9 @@ Source: user instruction, 2026-10-24
 
 - **Utilisateur humain :** choisit l'agent et l'environnement, converse en session interactive, suit la todo et les
   Memory.
-- **Agent principal (LLM) :** conduit une session, peut déléguer.
+- **Agent principal (LLM) :** conduit une session non déléguée ; deux types, l'**agent de travail** et l'**agent de configuration**.
+- **Agent de travail (`Work`) :** agent productif, interactif ou batch, qui peut déléguer.
+- **Agent de configuration (`Config`) :** agent interactif qui écrit des toolsets et des skills ; il ne délègue pas, n'appelle aucun serveur MCP, lit les sessions passées et inspecte un environnement de production sans pouvoir l'exécuter (BR-8).
 - **Sous-agent (LLM) :** exécute une tâche déléguée de façon autonome.
 - **Hôte :** application qui embarque la librairie (vanyline, miryad-core, application de réception d'alertes avec agent
   Matrix). Il implémente les traits de stockage, résout les références vers les connexions, alimente les événements.
@@ -87,7 +89,7 @@ Le mot « contexte » n'apparaît jamais seul dans les documents de ce domaine :
 - **Session :** unité de conversation et d'état : historique, scratchpad, todo, Memory de niveau session, référence à
   l'agent et au ToolsetContext utilisés.
 - **Agent :** définition (prompt système templaté, modèle et paramètres, modules et toolsets accessibles, sous-agents
-  délégables). *Agent principal* : interactif ou batch, peut déléguer. *Sous-agent* : batch autonome, ne délègue pas.
+  délégables). Trois natures : *Work* (interactif ou batch, peut déléguer), *Config* (interactif, écrit des toolsets, ne délègue pas, voir BR-8), *Sub* (sous-agent : batch autonome, ne délègue pas). *Agent principal* désigne indifféremment `Work` ou `Config`.
 - **Module :** module Rhai exposant des fonctions au LLM (todo, Memory, un MCP, un module fourni par l'hôte).
 - **Toolset :** ensemble nommé formé d'un module Rhai écrit en Rhai, de skills et d'une déclaration des paramètres et
   rôles MCP qu'il exige. Il est indépendant de l'environnement cible.
@@ -104,6 +106,7 @@ Le mot « contexte » n'apparaît jamais seul dans les documents de ce domaine :
 - **Projet :** niveau regroupant des Memory et un manifeste d'agents principaux, de sous-agents, de toolsets, de
   ContextType et de définitions de ToolsetContext prédéterminés. « Workspace » est synonyme.
 - **Scratchpad :** scope Rhai lié à la session et définitions de fonctions associées, conservés d'un appel à l'autre.
+- **Cible d'inspection :** ce que `rhai_prod_inspect` montre à l'agent de configuration : un agent avec un ToolsetContext, ou une session passée. Une seule à la fois.
 - **Watcher :** souscription déclarative à un événement ; sa seule action est l'injection d'une notification.
 - **Fenêtre de contexte, compaction :** contenu envoyé au LLM, et réduction de son volume par résumé ou autre stratégie.
 
@@ -141,12 +144,21 @@ Le mot « contexte » n'apparaît jamais seul dans les documents de ce domaine :
   les fonctions d'un toolset bornent le volume de données qu'elles ramènent.
     - **Source:** user instruction, 2026-10-24
 
+- **BR-8 - MUST:** Un agent de configuration (`Config`) n'appelle aucun serveur MCP, ne délègue pas et ne peut pas activer un
+  toolset (l'activation est une action de l'hôte). Il écrit des brouillons de toolsets et de skills, lit les sessions passées
+  et inspecte un environnement de production (agent et ToolsetContext, ou session passée) en lecture seule, par un
+  second pad d'inspection où rien ne s'exécute pour de bon. Une session de configuration est exclue des candidatures
+  d'amélioration continue (DEC-13).
+    - **Source:** user instruction, 2026-10-29
+    - **Verified by:** `AC-6bis`
+
 ## Exigences fonctionnelles transverses
 
 - **FR-1 - MUST:** Le LLM interagit avec la librairie par deux tools natifs : `rhai_pad`, qui exécute du Rhai, et `skill`,
-  qui liste et lit les skills sans passer par Rhai ; le contexte initial ne contient aucune autre définition de tool.
-    - **Source:** user instruction, 2026-10-24 ; tool `skill`, user instruction, 2026-10-25
-    - **Verified by:** `AC-6`
+  qui liste et lit les skills sans passer par Rhai ; le contexte initial ne contient aucune autre définition de tool. Seul un agent
+  de configuration reçoit un troisième tool, `rhai_prod_inspect` (BR-8).
+    - **Source:** user instruction, 2026-10-24 ; tool `skill`, user instruction, 2026-10-25 ; `rhai_prod_inspect`, user instruction, 2026-10-29
+    - **Verified by:** `AC-6`, `AC-6bis`
 
 - **FR-2 - MUST:** Le LLM découvre par introspection Rhai ce qui est disponible : variables du scope, modules, fonctions
   (signature et documentation), toolsets et skills, avec une recherche par mot-clé.
@@ -369,7 +381,7 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
       relecteur lirait les mêmes candidats issus de sessions exposées. Ce que l'agent de configuration enregistre est un
       brouillon ; l'activation d'une version pour des agents productifs est une action de l'hôte, jamais un outil du LLM
       (`agent-sessions/toolsets#FR-8`). Le relecteur reçoit le delta de capacités du diff (modules appelés, écritures) en
-      plus du texte. Les sessions de l'agent de configuration sont exclues des candidatures. Seules les sessions étiquetées
+      plus du texte. Les sessions de nature `Config` sont exclues des candidatures (propriété de leur nature, BR-8). Seules les sessions étiquetées
       positivement par un humain (`agent-sessions/session#FR-15`) sont candidates : l'étiquette est la qualification que
       les signaux automatiques ne donnent pas. Aucun outil de rapport n'est exigé avant qu'un volume de sessions le
       justifie : une requête au stockage suffit les premiers mois.
@@ -383,10 +395,14 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
   le taux de réussite.
 - **Injection de prompt.** Le contenu d'alertes et de logs est non fiable et atteint des agents pouvant agir. Mitigation :
   capacités étroites (BR-2, BR-7). Les toolsets d'écriture sont à concevoir en connaissance de ce risque. Le module de
-  création de toolsets n'est accordable qu'à un agent principal sans sous-agent (`toolsets` FR-8) : un agent productif ne
+  création de toolsets n'est accordable qu'à un agent de configuration (`toolsets` FR-8, BR-8) : un agent de travail ne
   peut pas, même par un sous-agent, réécrire le code qu'il fera exécuter. Les fonctions candidates de l'amélioration
   continue (DEC-13) viennent de sessions exposées et sont du contenu non fiable : leur réécriture par l'agent de
   configuration et la relecture du diff font foi.
+- **Contenu non fiable vers l'agent de configuration.** Les descriptions de tools d'un serveur MCP (modules d'inspection) et les sessions
+  passées lues par l'agent de configuration sont du contenu non fiable qui atteint un agent écrivant du code pour d'autres agents.
+  Mitigation : brouillons seulement, extraction de contrat, relecture humaine du diff (DEC-13), secrets déclarés masqués dans les
+  sessions lues ; des données sensibles non déclarées peuvent subsister dans les valeurs de variables.
 - **Dérive du vocabulaire du ToolsetContext.** Un nom de rôle ou de paramètre inventé sans déclaration casse la
   portabilité entre environnements. Mitigation : les ContextType nommés (DEC-11).
 - **Communication entre agents** (idée réservée, non décidée). Tout canal par lequel un sous-agent exposé à du contenu
@@ -406,7 +422,8 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
 - **AC-4:** Un run batch d'un sous-agent, lancé sans humain avec un fournisseur simulé, se termine par un résultat
   structuré.
 - **AC-5:** Une Memory de même identifiant existe aux niveaux utilisateur et projet ; chacune se lit indépendamment.
-- **AC-6:** La requête initiale envoyée au fournisseur contient exactement deux définitions de tool, `rhai_pad` et `skill`.
+- **AC-6:** La requête initiale envoyée au fournisseur pour un agent de travail ou un sous-agent contient exactement deux définitions de tool, `rhai_pad` et `skill`.
+- **AC-6bis:** Celle d'un agent de configuration en contient exactement trois, `rhai_pad`, `skill` et `rhai_prod_inspect` ; une fonction d'un module MCP appelée dans `rhai_prod_inspect` rend l'erreur d'inspection seule, sans connexion ni appel au serveur.
 - **AC-7:** Après une session utilisant un serveur MCP et un moteur d'inférence authentifiés, aucun secret n'apparaît
   dans l'état persisté, les événements, les journaux ni les messages renvoyés au LLM.
 - **AC-8:** Avec un fournisseur simulé qui échoue deux fois puis répond, le tour aboutit, la session reste intacte, et

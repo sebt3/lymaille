@@ -33,6 +33,7 @@ References:
   ./src/context/context.sdd
   ./src/agents/agents.sdd
   ./src/scratchpad/scratchpad.sdd
+  ./src/toolsets/toolsets.sdd
 
 Must:
   Rester une librairie pure : aucune E/S de stockage, de processus, d'environnement ni d'horloge système en direct
@@ -54,23 +55,31 @@ Forbids:
 
 Tasks:
   [x] #0 Poser le squelette du crate (harnais à la racine, toolchain, licence, README).
-  [?] #1 `deny.toml` (licences, avis, sources) et `scripts/mutants`, report du mécanisme de canaris de
+  [x] #1 `deny.toml` (licences, avis, sources) et `scripts/mutants`, report du mécanisme de canaris de
       ./spikes/lint-harness : à écrire quand les premières dépendances sont connues (TBD de `agent-sessions`, Open Issues).
-  [?] #2 Épingler dans ce manifeste les versions de `serde`, `serde_json`, `thiserror`, `tokio` et `tokio-util` posées
+      Report assumé le 2026-10-29 par le développeur principal : à traiter avant la publication de #3.
+      Fait le 2026-10-29 (accord du développeur principal) : `deny.toml` écrit (licences permissives, MPL-2.0 pour `smartstring` via `rhai`, deux avis `unmaintained` ignorés avec raison à réexaminer avant la publication) ; `cargo deny check` passe.
+  [x] #2 Épingler dans ce manifeste les versions de `serde`, `serde_json`, `thiserror`, `tokio` et `tokio-util` posées
       par les specs de `session` : l'implémenteur les ajoute avec `cargo add`, le développeur principal confirme les
       majeures retenues.
+      Fait : les versions sont épinglées dans `Cargo.toml`.
   [x] #4 Harnais (fait : `allow-invalid` sur les 4 entrées et contrôle des avertissements de configuration dans `scripts/check`, canari vu rouge puis vert ; décidé par le développeur principal : `allow-invalid = true` sur ces entrées ET contrôle dans `scripts/check`, à faire exécuter par une tâche de harnais explicite) : depuis que `tokio` est une dépendance, 4 entrées `disallowed-*` de ./clippy.toml (`tokio::fs::read`, `tokio::fs::read_to_string`,
       `tokio::fs::write`, `tokio::process::Command`) émettent un avertissement de configuration (« does not refer to a reachable function/type »)
       parce que les features `fs` et `process` de `tokio` sont désactivées. Propositions : `allow-invalid = true` sur ces entrées, et un
       contrôle dans `scripts/check` qui fait échouer la batterie sur tout avertissement de configuration clippy (aujourd'hui silencieux).
       Modification du harnais : décision du développeur principal.
-  [?] #5 `scripts/mutants` et `cargo deny` ne tournent pas encore : aucune validation de lot ne les couvre.
-  [?] #6 `base64` ajouté au manifeste par `cargo add` (dernière majeure stable, pour `session/tagged_value` : encodage du `blob`).
+  [x] #5 `scripts/mutants` et `cargo deny` ne tournent pas encore : aucune validation de lot ne les couvre.
+      Report assumé le 2026-10-29 par le développeur principal, avec #1 : à traiter avant la publication de #3.
+      Correction du 2026-10-29 : `cargo deny check` tourne bien dans `scripts/check` et échoue faute de `deny.toml` (licences refusées par défaut, avis `smartstring` et
+      `unsafe-libyaml` non maintenus). Le report de #1 bloque donc `scripts/check` complet : en attendant, les lots se valident par `SKIP=deny scripts/check`.
+      `cargo deny` tourne et passe (voir #1). `scripts/mutants` reste à écrire : tâche #11.
+  [x] #6 `base64` ajouté au manifeste par `cargo add` (dernière majeure stable, pour `session/tagged_value` : encodage du `blob`).
       Version épinglée dans `Cargo.toml` à confirmer par le développeur principal, puis à reporter ici avec les autres
       épinglages (#2).
+      Fait : `base64` est épinglé dans `Cargo.toml`.
   [x] #3 Décidé le 2026-10-27 par le développeur principal : `lymaille` est publié en 0.1 à la fin du DSD `agent-sessions`, une fois tous ses domaines
       livrés ; aucun cas d'usage n'est publié partiellement. Lever `publish = false` à ce moment.
-  [?] #7 Dépendance `rhai` ajoutée par le lot S1 du scratchpad. Décision du développeur principal, 2026-10-27 : version `1.27.0`
+  [x] #7 Dépendance `rhai` ajoutée par le lot S1 du scratchpad. Décision du développeur principal, 2026-10-27 : version `1.27.0`
       acceptée (manifeste `version = "1.27.0"`, requête caret), `default-features = false`, features `std`, `sync`, `serde`,
       `internals`, `metadata`. `std` est conservé par choix (mesuré : la crate compile aussi sans `std`, à confirmer par le
       développeur principal). Les faits DSD (`agent-sessions/scratchpad`, « Faits vérifiés ») sont mesurés en 1.25.1 ; la panique
@@ -80,7 +89,7 @@ Tasks:
   [x] #8 Harnais, décision du développeur principal du 2026-10-27 : `clippy.toml` reçoit `allowed-duplicate-crates = ["syn"]`
       (commentaire de raison au-dessus), seule exception au harnais autorisée ce jour-là ; `[workspace.lints]`, `rustfmt.toml`,
       `scripts/check` et le reste de `clippy.toml` sont inchangés. À valider par le développeur principal (diff de `clippy.toml`).
-  [?] #9 Dépendance `vynil-core` (lot E2 de scratchpad, ./src/scratchpad/engine.sdd) : `vynil-core = { version = "0.9.0",
+  [x] #9 Dépendance `vynil-core` (lot E2 de scratchpad, ./src/scratchpad/engine.sdd) : `vynil-core = { version = "0.9.0",
       default-features = false, features = ["rhai", "rt"] }`, avec `fs = ["vynil-core/fs"]` et `shell = ["vynil-core/shell"]`
       en `[features]`, désactivées par défaut. Ajoutée puis annulée : `cargo clippy` échoue sur `cargo::multiple_crate_versions`
       (`cpufeatures` 0.2.17 et 0.3.1 ; `getrandom` 0.2.17, 0.3.4 et 0.4.3 ; `r-efi` 5.3.0 et 6.0.0 ; liste complète par
@@ -88,3 +97,10 @@ Tasks:
       `serde_yaml`...), présentes même avec `default-features = false`. `clippy.toml` n'autorise que `syn`. Décision du
       développeur principal requise : autoriser ces doublons par une exception de harnais, accepter une version de
       `vynil-core` qui ne les tire pas, ou renoncer aux groupes de `vynil-core` pour le socle.
+      Résolu : `vynil-core` 0.9.0 est ajouté (features `rhai`, `rt`, `metadata`), les doublons `cpufeatures`, `getrandom` et `r-efi`
+      sont déclarés dans `clippy.toml` (issue vynil-core#36). Décidé le 2026-10-29 par le développeur principal : les features `fs` et `shell` ne sont pas relayées
+      (voir ./src/scratchpad/engine.sdd #3).
+  [ ] #10 Traduire en français le titre et les étapes des `Scenario` de toutes les specs (règle de `.specdd/bootstrap.project.md`, 2026-10-29) ; les noms de tests
+      restent en anglais, un commentaire de rattachement renvoie au `Scenario`. Lot mécanique, sans changement de comportement.
+  [ ] #11 `scripts/mutants` (report du mécanisme de canaris de ./spikes/lint-harness) : à écrire avant la publication de #3 ; les lots se valident entre-temps par mutations manuelles du validateur.
+  [x] #12 Décidé le 2026-10-29 par le développeur principal : dépendance `handlebars` (templates de `toolsets`), ajoutée par `cargo add` (6.4.4, épinglée dans `Cargo.toml`). `yaml_serde` et `jsonschema` ne sont pas ajoutés : `Skill::parse` et la validation complète de schéma restent hors périmètre.

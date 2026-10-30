@@ -1,0 +1,41 @@
+# cargo-deny policy for lymaille. Run by `scripts/check` (step "dependencies").
+# Permissive licences only; a new licence is a decision of the lead developer, not a line to add silently.
+
+[graph]
+all-features = true
+
+[advisories]
+# Unmaintained crates reached only through dependencies we do not control. Each exception names its path and is to be
+# reviewed before the 0.1 publication (lymaille.sdd #3).
+ignore = [
+  { id = "RUSTSEC-2026-0249", reason = "smartstring is unmaintained; pulled by rhai 1.27.0, no alternative short of replacing rhai" },
+  { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml is unmaintained; pulled by serde_yaml, itself pulled by vynil-core 0.9.0" },
+]
+
+[licenses]
+confidence-threshold = 0.93
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "0BSD",
+  "Zlib",
+  "CC0-1.0",
+  "Unlicense",
+  "BSL-1.0",
+  "Unicode-3.0",
+  # File-level weak copyleft, used as is (no modification) by smartstring, a dependency of rhai.
+  "MPL-2.0",
+]
+
+[bans]
+# Duplicate crates are already refused by clippy (`cargo::multiple_crate_versions`, allowed-duplicate-crates in clippy.toml).
+multiple-versions = "allow"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

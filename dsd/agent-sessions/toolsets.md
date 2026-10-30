@@ -61,9 +61,9 @@ uniquement) s'appliquent.
       https://agentskills.io/specification (consultée le 2026-10-24)
 
 - **FR-8 - MUST:** Un module permet à un LLM de créer et modifier des toolsets via un trait de stockage. Il n'est
-  accordable qu'à un agent principal sans sous-agent délégable : la librairie refuse, au chargement ou à l'enregistrement,
-  une définition d'agent qui l'accorde à un sous-agent ou qui l'associe à des sous-agents délégables. Les sessions des
-  agents de création de toolsets sont exclues des candidatures à l'amélioration continue (`agent-sessions#DEC-13`). Ce que
+  accordable qu'à un agent de configuration (`agent-sessions#BR-8`) : la librairie refuse, au chargement ou à l'enregistrement,
+  une définition d'agent qui l'accorde à un agent de travail ou à un sous-agent. Les sessions des
+  agents de configuration sont exclues des candidatures à l'amélioration continue (`agent-sessions#DEC-13`). Ce que
   le module enregistre est un brouillon, que le trait de stockage distingue des versions actives : l'activation est une
   opération de l'hôte, hors du module. Les
   agents de configuration sont ainsi séparés des agents productifs, et un agent exposé à du contenu non fiable ne peut pas
@@ -131,6 +131,16 @@ uniquement) s'appliquent.
     - **Source:** user instruction, 2026-10-25 ; agent-sessions#DEC-1
     - **Verified by:** `AC-11`
 
+- **FR-19 - MUST:** Un agent de configuration reçoit trois familles de modules, accordés par sa définition (`agent-sessions#BR-2`) :
+  `contexts` (`check(agent, contexte)` rend les écarts de compatibilité structurelle ; `resolve(agent, contexte)` rend les valeurs (défauts des toolsets de l'agent compris)
+  résolues et les noms des rôles liés, jamais de référence), `inspect` (`open_context(agent, contexte)`, `open_session(id)`,
+  `close()`, `target()` : une seule cible d'inspection à la fois, une nouvelle ouverture remplace la précédente) et la lecture
+  des sessions passées (liste, signaux de qualité par run, erreurs, fonctions définies par le LLM), dont les sorties sont
+  masquées par le Redactor. Aucun de ces modules n'écrit : les écritures de l'agent de configuration passent par le module
+  de création de toolsets (FR-8).
+    - **Source:** user instruction, 2026-10-29 ; agent-sessions#BR-8
+    - **Verified by:** `AC-14`
+
 ## Questions ouvertes
 
 
@@ -149,8 +159,7 @@ uniquement) s'appliquent.
   appelle une version mineure, en ajouter un requis une version majeure.
 - **AC-7:** Un toolset qui exige `cluster@1.2` est compatible avec un contexte de type en 1.3, et incompatible avec 1.1
   et avec 2.0.
-- **AC-8:** Une définition qui accorde le module de création de toolsets à un sous-agent, ou à un agent principal doté de
-  sous-agents délégables, est refusée au chargement avec un message qui nomme la règle.
+- **AC-8:** Une définition qui accorde le module de création de toolsets à un sous-agent ou à un agent de travail, est refusée au chargement avec un message qui nomme la règle.
 - **AC-9:** Un toolset de sous-agent modifié en stockage pendant un segment n'affecte pas les délégations suivantes du même
   segment ; après restauration, la délégation utilise la version modifiée et le message système de restauration la signale.
 - **AC-10:** Une fonction d'un module de toolset et un script du LLM lisent la même valeur par `session_context()` ; un script
@@ -161,6 +170,10 @@ uniquement) s'appliquent.
   corps ; une session peut donc lire un skill nommé au premier tour sans appeler `skill` en découverte.
 - **AC-13:** Un toolset enregistré par le module de création n'est visible d'aucune session tant que l'hôte ne l'a pas activé ;
   aucune fonction du module ne permet l'activation.
+
+- **AC-14:** Un agent de configuration ouvre un contexte qui lie le rôle `grafana`, puis `contexts::check` d'un agent de
+  travail contre ce contexte rend la liste des écarts sans exécuter de fonction ; la session de configuration lit les erreurs d'une
+  session passée sans que le texte ne contienne un secret déclaré.
 
 ## Réalisation SpecDD
 

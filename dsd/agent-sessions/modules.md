@@ -64,6 +64,15 @@ d'extension pour les modules fournis par l'hôte.
     - **Source:** user instruction, 2026-10-24 ; nommage, user instruction, 2026-10-25
     - **Verified by:** `AC-5`, `AC-6`
 
+- **FR-11 - MUST:** La génération du module d'un rôle MCP à partir de `tools/list` existe en deux modes : *réel* (les fonctions
+  appellent `tools/call`) et *coquille* (mêmes noms, signatures et documentation, mais tout appel rend l'erreur d'inspection
+  seule, `agent-sessions/scratchpad#FR-13`). Le connecteur MCP expose séparément `list_tools` et `call_tool` ; en mode
+  coquille la librairie ne reçoit que `list_tools`, si bien que l'impossibilité d'appeler tient au type. L'hôte résout les
+  références d'authentification du ToolsetContext cible pour le listage ; un serveur injoignable fait échouer l'ouverture de
+  cette cible avec une erreur explicite.
+    - **Source:** user instruction, 2026-10-29
+    - **Verified by:** `AC-7`
+
 ## Extension réservée : connaissance
 
 Hors du premier jalon et sans exigence, le besoin n'étant pas avéré. Principe consigné : un module Rhai optionnel de
@@ -89,6 +98,9 @@ Source: user instruction, 2026-10-24
   la documentation introspectée de la fonction contient le schéma.
 - **AC-6:** Un serveur MCP simulé exposant `loki.query` et `get-pods` sous le rôle `grafana` donne `grafana::loki_query` et
   `grafana::get_pods`, documentées avec leur nom d'origine ; un serveur exposant `a.b` et `a_b` fait échouer le chargement.
+
+- **AC-7:** Avec un serveur MCP simulé exposant deux tools et un connecteur qui n'offre que `list_tools`, le module coquille a deux
+  fonctions documentées et l'appel de l'une rend l'erreur d'inspection seule ; un serveur injoignable fait échouer l'ouverture de la cible.
 
 ## Réalisation SpecDD
 

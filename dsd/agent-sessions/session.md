@@ -22,7 +22,7 @@ non-interruption sur le temps.
 - **FR-2 - MUST:** L'état persisté d'une session comprend l'historique (raisonnement compris, avec l'émetteur qui seul peut le rejouer), les variables du scratchpad (sérialisation
   serde), le texte source des fonctions définies, la todo, les watchers, les handles des runs de sous-agents en cours (`agent-sessions/delegation#FR-14`), les compteurs de tokens, la
   référence à l'agent avec l'empreinte de sa définition et au ToolsetContext (jamais de secret, `agent-sessions#CON-3`), une version de format et la
-  version de chaque toolset utilisé.
+  version de chaque toolset utilisé, la nature de la session (`Work`, `Config` ou `Sub`, `agent-sessions#BR-8`) et, pour un sous-agent, l'identifiant de la session parente ; pour une session `Config`, la cible d'inspection courante, que la restauration retrouve.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-1`
 

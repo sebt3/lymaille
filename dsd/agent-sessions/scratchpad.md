@@ -88,6 +88,16 @@ et closures. `agent-sessions#CON-2` place le moteur dans `vynil-core`.
     - **Source:** agent-sessions#FR-4 ; Observed in: spikes/rhai-1-25 (`persistence`, S5)
     - **Verified by:** `AC-9`
 
+- **FR-13 - MUST:** L'agent de configuration (`agent-sessions#BR-8`) dispose d'un second tool, `rhai_prod_inspect`, qui exécute du Rhai
+  dans un moteur d'inspection de la cible courante (module `inspect`, `agent-sessions/toolsets#FR-19`). Les fonctions
+  d'introspection (variables, modules, fonctions, toolsets, skills, recherche) s'exécutent réellement. Les fonctions des modules
+  de toolsets projetés et des modules MCP de la cible ont les mêmes noms, signatures et documentation que les modules réels,
+  mais tout appel rend l'erreur « inspection seule » : ni connexion ni effet de bord. Pour une session passée, les variables
+  du scope sont lisibles en valeur et en lecture seule (toute écriture échoue) ; le texte source des fonctions que le LLM y
+  a définies est lisible, et ces fonctions ne sont pas appelables. Aucun script n'est rejoué pour ouvrir la cible (`DEC-1`).
+    - **Source:** user instruction, 2026-10-29
+    - **Verified by:** `AC-13`
+
 ## Décisions
 
 - **DEC-1 - Persistance par source des définitions, pas par rejeu**
@@ -190,6 +200,9 @@ Mesurés par les programmes de `spikes/rhai-1-25`, avec les features de `vynil-c
   erreur de syntaxe rendue au LLM, sans panique, et `let c = #{a: 1}; c.a = 2; c.a` rend `2`.
 - **AC-12:** Un script qui appelle `grafana::loki_queryy` rend une erreur qui nomme `grafana::loki_query` comme candidat le
   plus proche ; aucune suggestion ne nomme une fonction d'un module non accordé.
+
+- **AC-13:** Dans `rhai_prod_inspect`, `functions()` liste les fonctions d'un module MCP de la cible avec leur documentation et l'appel de l'une
+  d'elles rend l'erreur d'inspection seule sans appel réseau ; sur une session passée, la valeur d'une variable se lit et son écriture échoue.
 
 ## Réalisation SpecDD
 
