@@ -83,5 +83,5 @@ Scenario: inclusion cycle refused
 Tasks:
   [x] #1 Tests puis implémentation.
       Validé le 2026-10-29 (validator, mutations manuelles) sous `SKIP=deny scripts/check`.
-  [?] #3 Décisions posées le 2026-10-29 (à confirmer) : un champ ou un rôle qui passe d'optionnel à obligatoire est une rupture (majeure) ; l'inverse est mineur ; la valeur par défaut d'un paramètre est contrôlée par la même heuristique de secret que ./toolset_context.sdd ; `flatten` reçoit une fonction de recherche tant que le trait de ./store.sdd n'existe pas, sa signature sera reprise alors.
-  [?] #2 Posé : un schéma de paramètres est un objet JSON Schema dont la liste `required` et `properties` suffisent à la vérification structurelle (voir ./toolsets.sdd #3) ; le reste du schéma est conservé tel quel et n'est pas interprété.
+  [x] #3 Décidé le 2026-10-30 par le développeur principal : un champ ou un rôle qui passe d'optionnel à obligatoire est une rupture (majeure) ; l'inverse est mineur ; la valeur par défaut d'un paramètre est contrôlée par la même heuristique de secret que ./toolset_context.sdd ; `flatten` reçoit une fonction de recherche tant que le trait de ./store.sdd n'existe pas, sa signature sera reprise alors.
+  [ ] #2 Posé : un schéma de paramètres est un objet JSON Schema ; la vérification structurelle ne s'arrête plus à `required` et `properties` depuis la décision du 2026-10-30 (validation complète, voir ./toolsets.sdd #3) ; le schéma reste conservé tel quel.

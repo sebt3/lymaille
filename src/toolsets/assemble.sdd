@@ -52,4 +52,4 @@ Scenario: skills follow their toolset
 
 Tasks:
   [ ] #1 Tests puis implémentation.
-  [?] #2 Mécanisme du retrait des sous-modules d'import : à mesurer par un court spike avant l'implémentation (comme `scratchpad.sdd` #5) ; la dépendance à `Module::eval_ast_as_new` et à un résolveur de modules est à vérifier contre l'`import` fermé du scratchpad (`engine.sdd` #5).
+  [x] #2 Mécanisme du retrait des sous-modules d'import, mesuré le 2026-10-30 (Observed in: spikes/rhai-1-25, `strip_submodules`, rhai 1.25.1) : `Module` n'a pas de retrait public (`iter_script_fn` est `pub(crate)`) ; remplacer chaque sous-module par un `Module::new()` vide (`set_sub_module`) suffit : les fonctions publiques du toolset marchent toujours (leur environnement capture l'import), `d::secret()` appelé par le LLM échoue (« Module not found »), et le contenu de la dépendance disparaît des métadonnées. Reste dans l'export brut une entrée vide `"d": {}` (l'alias de l'`import`, non le nom du module) : @assemble ne peut pas la supprimer : l'introspection (../scratchpad/introspect.sdd) devra écarter les modules vides (à vérifier, non mesuré). À revérifier sur rhai 1.27.0.

@@ -98,5 +98,5 @@ Tasks:
       Validé le 2026-10-29 (validator, mutations manuelles) sous `scripts/check` complet. `[?]` #2 et #3 restent des décisions d'hôte.
   [x] #4 Un pad d'inspection ne rend pas l'avertissement « the functions of this script were not persisted » (il ne persiste jamais) : à corriger dans ../scratchpad/run.sdd/run.rs avant la validation de #1.
       Validé le 2026-10-29 (validator, 76 mutants, `scripts/check` complet vert).
-  [?] #2 Posé le 2026-10-29 : `SessionIndex` est un trait d'hôte séparé de @SessionStore (qui ne sait que charger et enregistrer par identifiant) ; son filtre exact est à fixer avec l'hôte. À confirmer.
-  [?] #3 Le nom du module `sessions` et la forme du résumé orienté échecs (`agent-sessions/toolsets#FR-19`) sont posés ici ; événement distinct à l'ouverture d'une cible (`agent-sessions#BR-5`) : à décider.
+  [x] #2 Décidé le 2026-10-30 par le développeur principal : `SessionIndex` est un trait d'hôte séparé de @SessionStore (qui ne sait que charger et enregistrer par identifiant) ; son filtre est une liste de critères optionnels, à figer au premier usage réel avec l'hôte.
+  [ ] #3 Décidé le 2026-10-30 par le développeur principal : le nom du module `sessions` est validé ; l'ouverture d'une cible produit un événement d'audit distinct (`agent-sessions#BR-5`, par ex. `TargetOpened`), à déclarer dans ../session/event.sdd. La forme du résumé orienté échecs (`agent-sessions/toolsets#FR-19`) reste à poser.

@@ -73,8 +73,8 @@ Scenario: rendering is deterministic
 Tasks:
   [x] #1 Tests puis implémentation.
       Validé le 2026-10-29 (validator, 58 mutants dont 55 tués) sous `scripts/check` complet.
-  [?] #2 Posé : mode strict (variable absente = erreur) plutôt que chaîne vide ; un auteur de toolset voit sa faute à l'enregistrement. À confirmer.
+  [x] #2 Décidé le 2026-10-30 par le développeur principal : mode strict (variable absente = erreur) plutôt que chaîne vide ; un auteur de toolset voit sa faute à l'enregistrement. Le message d'erreur au rendu nomme la variable.
   [x] #4 Passer le nom du toolset à @render_skill et recouvrir `context.params` des paramètres de ce toolset (décision du 2026-10-29), avec un Scenario « skill sees its toolset parameters ».
       Validé le 2026-10-29 (validator, 58 mutants dont 55 tués) sous `scripts/check` complet.
-  [?] #5 Posé par l'implémentation : @check_template ne vérifie que la syntaxe ; une variable absente n'est détectée qu'au rendu (mode strict). L'enregistrement d'un brouillon ne la voit donc pas ; un contrôle à blanc avec des données d'essai est une évolution. À confirmer.
+  [x] #5 Décidé le 2026-10-30 par le développeur principal : @check_template ne vérifie que la syntaxe ; une variable absente n'est détectée qu'au rendu (mode strict). Un contrôle à blanc avec des données d'essai est une évolution, hors 0.1.
   [?] #3 Posé : la date de début est un texte fourni par l'hôte (`SessionMeta`), non lue ici (`agent-sessions#NFR-1`).

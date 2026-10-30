@@ -80,8 +80,8 @@ Tasks:
       Validé le 2026-10-29 (validator, mutations manuelles) sous `SKIP=deny scripts/check`.
   [x] #4 @check_declared_version signale aussi une version sous-déclarée : toute version dont le niveau de changement déclaré est inférieur à celui du contrat (rupture majeure déclarée mineure, ajout déclaré en correctif, ou version identique) : avertissement, jamais un refus ; Scenario à ajouter.
       Validé le 2026-10-29 (validator, 12 mutants tués) sous `SKIP=deny scripts/check`.
-  [?] #5 Posé par l'implémentation : une méthode Rhai `fn Type.nom()` est une fonction publique ordinaire de clé `nom/arité`.
-  [?] #2 Posé : un paramètre renommé sans changement de nombre est une rupture (majeure) puisque Rhai ne type pas statiquement ; à confirmer.
-  [?] #3 Posé : deux fonctions de même nom et d'arités différentes (surcharge Rhai) sont deux entrées du contrat ; la clé est `nom/arité` comme dans ../scratchpad/persist.sdd #4.
+  [x] #5 Décidé le 2026-10-30 par le développeur principal : une méthode Rhai `fn Type.nom()` est une fonction publique ordinaire de clé `nom/arité`.
+  [x] #2 Décidé le 2026-10-30 par le développeur principal : un paramètre renommé sans changement de nombre est une rupture (majeure) puisque Rhai ne type pas statiquement.
+  [x] #3 Décidé le 2026-10-30 par le développeur principal : deux fonctions de même nom et d'arités différentes (surcharge Rhai) sont deux entrées du contrat ; la clé est `nom/arité` comme dans ../scratchpad/persist.sdd #4.
   [x] #6 Un correctif (1.0.0 vers 1.0.1) sans changement de contrat n'avertit plus (il avertissait) ; test de non-avertissement, test de la sur-déclaration (majeur déclaré pour un changement mineur : pas d'avertissement). Le test `version_change_without_signature_change_is_warned` est à réécrire en mineure.
       Validé le 2026-10-29 (validator, 58 mutants dont 55 tués) sous `scripts/check` complet.
