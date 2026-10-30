@@ -404,6 +404,97 @@ mod tests {
         );
     }
 
+    /// Hint of a not-found error, which must be one.
+    fn hint_of(error: &ScratchpadError) -> Option<String> {
+        let ScratchpadError::NotFound { hint, .. } = error else {
+            panic!("expected a not-found error");
+        };
+        hint.clone()
+    }
+
+    // Scenario: a candidate is near when its distance is at most a third of the name length
+    #[test]
+    fn threshold_is_a_third_of_the_name_length() {
+        assert_eq!(
+            nearest("abcdefghi", &["abcdef".to_owned()], 3),
+            vec!["abcdef".to_owned()],
+            "nine characters: a distance of three is near"
+        );
+        assert!(
+            nearest("abcdefgh", &["abcde".to_owned()], 3).is_empty(),
+            "eight characters: a distance of three is too far"
+        );
+        assert!(
+            nearest("abcde", &["abcxy".to_owned()], 3).is_empty(),
+            "five characters: a distance of two is too far"
+        );
+        assert_eq!(
+            nearest("ab", &["ax".to_owned()], 3),
+            vec!["ax".to_owned()],
+            "a short name keeps a threshold of one"
+        );
+    }
+
+    // Scenario: names are compared on their first 128 characters
+    #[test]
+    fn names_are_compared_on_their_first_128_characters() {
+        let prefix_124 = "a".repeat(124);
+        let first_requested = format!("{prefix_124}xyzqTTTT");
+        let first_candidate = format!("{prefix_124}abcrTTTT");
+        assert!(
+            nearest(&first_requested, std::slice::from_ref(&first_candidate), 3).is_empty(),
+            "four differences within the first 128 characters: too far"
+        );
+        let prefix_125 = "a".repeat(125);
+        let second_requested = format!("{prefix_125}xyzQTTT");
+        let second_candidate = format!("{prefix_125}abcWTTT");
+        assert_eq!(
+            nearest(&second_requested, std::slice::from_ref(&second_candidate), 3),
+            vec![second_candidate.clone()],
+            "three differences within the first 128 characters, a fourth one beyond them: near"
+        );
+    }
+
+    // Scenario: a hint explains only a scope variable read inside a function
+    #[test]
+    fn hint_only_for_a_scope_variable_read_in_a_function() {
+        let unknown = suggest_for(not_found(NotFoundKind::Variable, "zzz", Some("f")), &grafana());
+        assert_eq!(
+            hint_of(&unknown),
+            None,
+            "a name that is not a scope variable gets no hint"
+        );
+        let top_level = suggest_for(not_found(NotFoundKind::Variable, "pods", None), &grafana());
+        assert_eq!(hint_of(&top_level), None, "outside a function there is no hint");
+        let function = suggest_for(not_found(NotFoundKind::Function, "pods", Some("f")), &grafana());
+        assert_eq!(hint_of(&function), None, "a function name is not a variable");
+    }
+
+    // Scenario: the modules of visible functions are named once each
+    #[test]
+    fn module_fallback_names_each_module_once() {
+        let candidates = CandidateSet::new(
+            vec![
+                (
+                    "grafana::loki_query".to_owned(),
+                    "grafana::loki_query() -> map".to_owned(),
+                ),
+                (
+                    "grafana::prom_query".to_owned(),
+                    "grafana::prom_query() -> map".to_owned(),
+                ),
+            ],
+            Vec::new(),
+            Vec::new(),
+        );
+        let error = suggest_for(not_found(NotFoundKind::Module, "grafan", None), &candidates);
+        assert_eq!(
+            suggestions(error),
+            vec!["grafana".to_owned()],
+            "one module, though two visible functions live in it"
+        );
+    }
+
     #[test]
     fn other_errors_are_unchanged() {
         let error = ScratchpadError::Cancelled;

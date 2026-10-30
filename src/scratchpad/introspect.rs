@@ -1079,6 +1079,57 @@ mod tests {
         );
     }
 
+    // Scenario: the memory limits are stated in their own place in the rules
+    #[test]
+    fn rules_state_each_memory_limit_in_its_place() {
+        let limits = ScratchpadLimits::new()
+            .with_max_array_len(7)
+            .and_then(|limits| limits.with_max_map_len(9))
+            .expect("the limits are not zero");
+        let text = limits_notice(&limits);
+        assert!(
+            text.contains("strings up to 16777216 bytes, arrays up to 7 elements, maps up to 9 entries"),
+            "the memory limits, in order: {text}"
+        );
+    }
+
+    // Scenario: the documentation of a function keeps one line per comment
+    #[test]
+    fn documentation_keeps_one_line_per_comment() {
+        let mut engine = Engine::new();
+        let mut module = Module::new();
+        let _hash = FuncRegistration::new("two_lines")
+            .with_comments(["/// First line.", "/// Second line."])
+            .set_into_module(&mut module, || 0i64);
+        let _registered = engine.register_static_module("docs", Shared::new(module));
+        let grants = Grants::new()
+            .with_module(GrantedModule::new("docs", Shared::new(Module::new())).expect("valid name"))
+            .expect("the module is granted");
+        let catalog = Catalog::build(&engine, &grants, &[]).expect("the catalog builds");
+        let entry = catalog
+            .functions()
+            .iter()
+            .find(|entry| entry.path() == "docs::two_lines");
+        assert_eq!(
+            entry.and_then(FunctionEntry::doc),
+            Some("First line.\nSecond line."),
+            "one line per comment, joined by a newline"
+        );
+    }
+
+    // Scenario: find searches the description of a toolset
+    #[test]
+    fn search_reads_the_description_of_a_toolset() {
+        let (engine, _source) = fixture();
+        let found = rows(&engine, "find(\"queries\")");
+        assert!(
+            found
+                .iter()
+                .any(|row| field(row, "kind") == "toolset" && field(row, "name") == "grafana"),
+            "the toolset is found by its description \"Grafana queries\""
+        );
+    }
+
     #[test]
     fn introspection_reads_a_poisoned_lock() {
         let (engine, source) = fixture();

@@ -133,8 +133,23 @@ Scenario: introspection is independent of the shared state lock
   When any introspection function is evaluated
   Then it returns its result and nothing panics
 
+Scenario: rules state each memory limit in its place
+  Given limits with an array limit of 7 and a map limit of 9
+  When the rules are read
+  Then the text says `strings up to 16777216 bytes, arrays up to 7 elements, maps up to 9 entries`
+
+Scenario: documentation keeps one line per comment
+  Given a granted module function documented by two `///` comments
+  When the catalog is built
+  Then its documentation is the two lines joined by a newline
+
+Scenario: find searches the description of a toolset
+  Given a toolset `grafana` described as `Grafana queries`
+  When `find("queries")` is evaluated
+  Then the toolset `grafana` of kind `toolset` is among the results
+
 Tasks:
-  [ ] #1 Tests puis implémentation : @Catalog (filtrage et attribution) d'abord, puis les fonctions Rhai.
+  [x] #1 Tests puis implémentation : @Catalog (filtrage et attribution) d'abord, puis les fonctions Rhai.
   [x] #2 Les noms des fonctions d'introspection (`vars`, `modules`, `functions`, `toolsets`, `skills`, `find`, `rules`) sont posés ; seul `find` est nommé par le DSD (`agent-sessions/scratchpad#AC-2`). Ils sont à confirmer avec l'auteur du skill intégré (`agent-sessions/toolsets#FR-18`) : le skill enseigne ces noms, ils sont un contrat avec les modèles.
       Décidé le 2026-10-29 par le développeur principal : noms validés.
   [x] #3 Posé : l'instantané des variables date du début du run. Une fonction native de Rhai ne lit pas le scope ; le rendre dynamique exigerait un crochet `on_var` plus lourd. À rouvrir si le LLM s'en plaint.

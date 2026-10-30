@@ -637,6 +637,119 @@ mod tests {
         }
     }
 
+    // Scenario: fmt_truncate counts characters, not bytes
+    #[test]
+    fn truncate_counts_characters_not_bytes() {
+        let cut = engine().eval::<String>("fmt_truncate(\"\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\", 3)");
+        assert_eq!(
+            cut.ok(),
+            Some(format!("{}... [2 more characters]", "\u{e9}".repeat(3))),
+            "five accented characters, ten bytes: three characters kept, two left out"
+        );
+        let whole = engine().eval::<String>("fmt_truncate(\"\u{e9}\u{e9}\u{e9}\", 3)");
+        assert_eq!(
+            whole.ok().as_deref(),
+            Some("\u{e9}\u{e9}\u{e9}"),
+            "three accented characters, six bytes: unchanged at three characters"
+        );
+    }
+
+    // Scenario: fmt_text gives the text of a value
+    #[test]
+    fn text_of_a_value() {
+        let cases = [
+            ("fmt_text(\"abc\")", "abc"),
+            ("fmt_text([1, 2])", "[1,2]"),
+            ("fmt_text(#{a: 1})", "{\"a\":1}"),
+            ("fmt_text(5)", "5"),
+            ("fmt_text(())", "()"),
+        ];
+        for (script, expected) in cases {
+            assert_eq!(
+                engine().eval::<String>(script).ok().as_deref(),
+                Some(expected),
+                "`{script}`"
+            );
+        }
+    }
+
+    // Scenario: fmt_pluck gives the unit where a row has no such key
+    #[test]
+    fn pluck_gives_the_unit_for_a_missing_key() {
+        let values = match engine().eval::<rhai::Array>("fmt_pluck([#{k: 1}, #{}, 5], \"k\")") {
+            Ok(values) => values,
+            Err(error) => panic!("the pluck must succeed: {error}"),
+        };
+        assert_eq!(
+            values.len(),
+            3,
+            "one value per row, the rows without the key included"
+        );
+        assert_eq!(
+            values.first().map(ToString::to_string).as_deref(),
+            Some("1"),
+            "the value of the first row"
+        );
+        assert!(
+            values.get(1).is_some_and(Dynamic::is_unit),
+            "a row without the key gives the unit"
+        );
+        assert!(
+            values.get(2).is_some_and(Dynamic::is_unit),
+            "a row that is not a map gives the unit"
+        );
+    }
+
+    // Scenario: a text of exactly the kept length is untouched
+    #[test]
+    fn exact_length_is_untouched() {
+        assert_eq!(
+            engine()
+                .eval::<String>("fmt_truncate_ends(\"abcde\", 2, 3)")
+                .ok()
+                .as_deref(),
+            Some("abcde"),
+            "head and tail make the whole text: nothing is omitted"
+        );
+        assert_eq!(
+            engine()
+                .eval::<String>("fmt_truncate(\"abc\", 3)")
+                .ok()
+                .as_deref(),
+            Some("abc"),
+            "a text of exactly the maximum is unchanged"
+        );
+    }
+
+    // Scenario: a column is as wide as its longest cell, in characters
+    #[test]
+    fn column_width_follows_the_characters_of_its_cells() {
+        let script = "fmt_table([#{c: \"\u{e9}\u{e9}\u{e9}\u{e9}\", d: 1}, #{c: \"abcd\", d: 2}])";
+        let result = engine().eval::<String>(script);
+        assert_eq!(
+            result.ok().as_deref(),
+            Some("c    | d\n-----+--\n\u{e9}\u{e9}\u{e9}\u{e9} | 1\nabcd | 2"),
+            "four accented characters fill a column of four, eight bytes do not widen it"
+        );
+    }
+
+    // Scenario: fmt_grep is case sensitive
+    #[test]
+    fn grep_is_case_sensitive() {
+        let upper_in_text = engine().eval::<String>("fmt_grep(\"ERR one\\nerr two\\nErr three\", \"err\")");
+        assert_eq!(
+            upper_in_text.ok().as_deref(),
+            Some("err two"),
+            "only the line with the same case"
+        );
+        let upper_needle = engine().eval::<String>("fmt_grep(\"ERR one\\nerr two\", \"ERR\")");
+        assert_eq!(
+            upper_needle.ok().as_deref(),
+            Some("ERR one"),
+            "an upper case needle matches upper case only"
+        );
+    }
+
     #[test]
     fn format_functions_do_not_panic() {
         let engine = engine();

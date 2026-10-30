@@ -77,6 +77,12 @@ Scenario: no operation or time limit
   Then it completes without an operation-limit error
   And the engine reports no maximum of operations
 
+Scenario: no time limit over two real minutes
+  Given an engine configured by apply_to and a native function `nap(ms)` that really blocks its thread
+  When a script calls `nap(25000)` five times in a loop
+  Then it returns 5 after at least 120 seconds, with no operation limit reported
+  And this test is marked ignored: it runs with `cargo test -- --ignored`
+
 Scenario: string over the limit stops the script
   Given an engine with a string limit of 1000 bytes
   When a script builds a string of 2000 characters
@@ -99,7 +105,7 @@ Scenario: limits are per engine
 
 Tasks:
   [x] #1 Tests puis implémentation.
-  [ ] #2 Test de l'AC-3 (« un script de plus de deux minutes n'est pas interrompu ») : durée réelle trop longue pour la batterie. Il se vérifie par l'absence de limite d'opérations et par les deux Scenarios « no operation or time limit » ci-dessus ; un test marqué long (`#[ignore]`, lancé hors CI) peut jouer les deux minutes réelles avec une fonction native qui attend.
+  [x] #2 Test de l'AC-3 (« un script de plus de deux minutes n'est pas interrompu ») : durée réelle trop longue pour la batterie. Il se vérifie par l'absence de limite d'opérations et par les deux Scenarios « no operation or time limit » ci-dessus ; un test marqué long (`#[ignore]`, lancé hors CI) peut jouer les deux minutes réelles avec une fonction native qui attend.
   [x] #3 Décidé le 2026-10-27 : @SandboxLimits gagne trois champs `Option` (chaîne, tableau, table), absents = défauts. Surcharge « par définition d'agent » (`agent-sessions/scratchpad#FR-4`) : @SandboxLimits (domaine `agents`, ../agents/definition.sdd) ne porte aujourd'hui que le délai de script et le plafond de rendu. Pour surcharger les trois plafonds de mémoire, @SandboxLimits doit gagner trois champs optionnels (chaîne, tableau, table), avec montée de l'empreinte de définition (`fingerprint`). Livraison côté `agents` : tâche #7 de ../agents/definition.sdd ; branchement ici avec `run`.
   [x] #4 Posé : « 16 Mio » est lu comme 16 mébioctets (`16 * 1024 * 1024`) d'octets UTF-8, la taille de chaîne de Rhai étant comptée en octets ; un LLM qui construit une chaîne multi-octets atteint donc le plafond avant 16 millions de caractères. Écart sans conséquence pour le garde-fou.
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).

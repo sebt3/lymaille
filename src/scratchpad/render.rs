@@ -213,6 +213,23 @@ mod tests {
         assert_eq!(full_text(&value), "[blob: 3 bytes]", "blob description");
     }
 
+    // Scenario: a blob nested in a map or an array is described by its size
+    #[test]
+    fn nested_blob_is_described_by_its_size() {
+        let in_map = map_of(&[("b", Dynamic::from_blob(vec![1, 2, 3]))]);
+        assert_eq!(
+            full_text(&in_map),
+            r#"{"b":"[blob: 3 bytes]"}"#,
+            "a blob inside a map"
+        );
+        let in_array = Dynamic::from(vec![Dynamic::from_blob(vec![9])]);
+        assert_eq!(
+            full_text(&in_array),
+            r#"["[blob: 1 bytes]"]"#,
+            "a blob inside an array"
+        );
+    }
+
     #[test]
     fn a_non_serializable_value_falls_back_to_its_display() {
         let engine = Engine::new();

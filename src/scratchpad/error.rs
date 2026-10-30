@@ -854,6 +854,80 @@ mod tests {
         assert_eq!(*kind, LimitKind::ArraySize, "the kind");
     }
 
+    // Scenario: a module wrapper names the module in front of the message
+    #[test]
+    fn module_wrapper_names_the_module_in_its_message() {
+        let cause = EvalAltResult::ErrorRuntime(Dynamic::from("inside"), Position::new(4, 7));
+        let wrapped =
+            EvalAltResult::ErrorInModule("grafana".to_owned(), Box::new(cause), Position::new(1, 1));
+        let classified = ScratchpadError::from_rhai(&wrapped);
+        let ScratchpadError::Runtime { message, .. } = &classified else {
+            panic!("expected the runtime cause of the module, got {classified:?}");
+        };
+        assert_eq!(
+            message, "in module grafana: inside",
+            "the module prefix, then the cause"
+        );
+    }
+
+    // Scenario: the innermost function of a nested call is kept
+    #[test]
+    fn innermost_function_of_two_nested_levels_is_kept() {
+        let script = "fn g() {\n    missing_fn()\n}\nfn f() {\n    g()\n}\nf()";
+        let error = failure(script);
+        let classified = ScratchpadError::from_rhai(&error);
+        let ScratchpadError::NotFound {
+            function: Some(function),
+            position: Some(position),
+            ..
+        } = &classified
+        else {
+            panic!("expected a function not found error in a function, got {classified:?}");
+        };
+        assert_eq!(function, "g", "the innermost function, not the outer one");
+        assert_eq!(position.line(), 2, "the position of the inner call");
+    }
+
+    // Scenario: the message does not repeat the position of the error
+    #[test]
+    fn runtime_message_does_not_repeat_the_position() {
+        let error = failure("let a = 1 / 0; a");
+        let classified = ScratchpadError::from_rhai(&error);
+        let ScratchpadError::Runtime { message, position } = &classified else {
+            panic!("expected a runtime error for the division, got {classified:?}");
+        };
+        assert_eq!(
+            message, "Division by zero: 1 / 0",
+            "the message of Rhai, without the position it appends to its text"
+        );
+        assert!(
+            !message.contains("position"),
+            "no position in the message: {message}"
+        );
+        assert!(position.is_some(), "the position is kept apart from the message");
+    }
+
+    // Scenario: each limit kind has its own text
+    #[test]
+    fn each_limit_kind_has_its_text() {
+        let cases = [
+            (LimitKind::CallDepth, "limit exceeded (call depth): m"),
+            (LimitKind::ExpressionDepth, "limit exceeded (expression depth): m"),
+            (LimitKind::StringSize, "limit exceeded (string size): m"),
+            (LimitKind::ArraySize, "limit exceeded (array size): m"),
+            (LimitKind::MapSize, "limit exceeded (map size): m"),
+            (LimitKind::Other, "limit exceeded (other): m"),
+        ];
+        for (kind, expected) in cases {
+            let error = ScratchpadError::Limit {
+                kind,
+                message: "m".to_owned(),
+                position: None,
+            };
+            assert_eq!(error.to_string(), expected, "the text of {kind:?}");
+        }
+    }
+
     #[test]
     fn non_not_found_errors_in_a_function_name_the_function() {
         let error = failure("fn f() { throw \"boom\" } f()");

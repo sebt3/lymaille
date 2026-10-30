@@ -106,8 +106,28 @@ Scenario: the order of candidates does not matter
   When suggestions are computed
   Then the results are equal
 
+Scenario: a candidate is near when its distance is at most a third of the name length
+  Given names of nine, eight and five characters, at distances three, three and two from their candidates
+  When `nearest` is evaluated
+  Then the first candidate is kept and the two others are not, and a name of two characters keeps a threshold of one
+
+Scenario: names are compared on their first 128 characters
+  Given names longer than 128 characters whose differences fall within or beyond the first 128 characters
+  When `nearest` is evaluated
+  Then only the differences within the first 128 characters count
+
+Scenario: a hint explains only a scope variable read inside a function
+  Given a variable not found inside a function, outside a function, and a function not found
+  When the suggestions are attached
+  Then only the scope variable read inside a function gets the hint
+
+Scenario: the modules of visible functions are named once each
+  Given two visible functions of module `grafana` and no granted module
+  When `grafan` is not found
+  Then `grafana` is suggested once
+
 Tasks:
-  [ ] #1 Tests puis implémentation.
+  [x] #1 Tests puis implémentation, vérifié le 2026-10-30.
   [x] #2 Posé : seuil, plafond de trois suggestions et distance de Levenshtein. Réglages à ajuster à la mesure sur le jeu de tâches de référence (`agent-sessions#Risques`) ; ils n'affectent aucune règle de sécurité (le périmètre des candidats ne change pas).
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
   [x] #3 Posé : les fonctions que le LLM a définies lui-même sont des candidats (elles sont dans le scope de session et n'élargissent rien, `agent-sessions#BR-2`).

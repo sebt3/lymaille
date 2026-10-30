@@ -126,6 +126,12 @@ Scenario: no handle installed, no interruption
   When the engine evaluates a short loop
   Then it completes normally
 
+Scenario: try/catch does not survive the cancellation of a native call
+  Given a run scope holding a handle, and a native function `cancelled_native` that cancels the handle then fails
+  When a script evaluates `try { cancelled_native(); } catch (e) { mark(); } mark(); 7`, `mark` counting its calls
+  Then the evaluation is a cancellation, and neither the catch block nor the next statement ran
+  And as a control, without a run scope, `try { throw "x"; } catch (e) { mark(); } mark(); 7` returns `7` after two marks
+
 Scenario: scopes do not cross threads
   Given a run scope open on thread A holding a cancelled handle
   When thread B evaluates a script on the same engine
@@ -161,7 +167,7 @@ Tasks:
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
   [x] #7 Le texte de `print` et de `debug` est capté, plafonné et rendu devant la valeur (voir ./run.sdd) : comportement qui n'est pas dans le DSD (`FR-5` ne parle que de la valeur finale). Sans cette décision, le texte est jeté silencieusement, ce qui déroute un LLM qui débogue par `print`. À confirmer par le développeur principal. Recommandation : capter et rendre.
       Décidé le 2026-10-29 par le développeur principal : confirmé. À remonter au DSD `agent-sessions/scratchpad` (`FR-5`).
-  [ ] #8 Un script qui attrape par `try/catch` l'erreur d'annulation d'un appel natif continue jusqu'à l'opération Rhai suivante, où `on_progress` l'arrête (l'arrêt demandé par ce crochet n'est pas rattrapable par `catch`) : à vérifier par un test sur la version de Rhai épinglée.
+  [x] #8 Un script qui attrape par `try/catch` l'erreur d'annulation d'un appel natif continue jusqu'à l'opération Rhai suivante, où `on_progress` l'arrête (l'arrêt demandé par ce crochet n'est pas rattrapable par `catch`) : à vérifier par un test sur la version de Rhai épinglée.
       Aucun test n'attrape l'arrêt de `on_progress` par `try/catch` : test à écrire (relevé le 2026-10-29).
   [x] #9 Lot E2 : ./engine.rs n'est pas écrit. Bloqué par ../../lymaille.sdd #9 : `vynil-core` 0.9.0 (features `rhai` et `rt`)
       fait échouer `cargo::multiple_crate_versions`, et la dépendance a été annulée. Les recommandations #3 (features `fs` et

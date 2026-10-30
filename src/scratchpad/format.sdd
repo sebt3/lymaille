@@ -128,8 +128,38 @@ Scenario: format functions do not panic
   When evaluated
   Then each returns a value or a script error and none panics
 
+Scenario: fmt_truncate counts characters, not bytes
+  Given five accented characters, ten bytes long
+  When `fmt_truncate` keeps three characters of it, and of three accented characters
+  Then the first gives the three characters and `... [2 more characters]`, the second is unchanged
+
+Scenario: fmt_text gives the text of a value
+  Given a string, an array, a map, an integer and the unit
+  When each goes through `fmt_text`
+  Then the texts are the string, `[1,2]`, `{"a":1}`, `5` and `()`
+
+Scenario: fmt_pluck gives the unit where a row has no such key
+  Given rows `#{k: 1}`, `#{}` and `5`
+  When `fmt_pluck` takes `k`
+  Then three values come back: 1, then the unit twice
+
+Scenario: a text of exactly the kept length is untouched
+  Given the text `abcde`
+  When `fmt_truncate_ends` keeps 2 and 3 characters, and `fmt_truncate` keeps 3 of `abc`
+  Then each text is returned unchanged
+
+Scenario: a column is as wide as its longest cell, in characters
+  Given a column whose cells are four accented characters (eight bytes) and `abcd`
+  When the table is formatted
+  Then the column is four characters wide
+
+Scenario: fmt_grep is case sensitive
+  Given lines that differ by case only
+  When `fmt_grep` looks for `err`, then for `ERR`
+  Then only the lines with the same case are kept
+
 Tasks:
-  [ ] #1 Tests puis implémentation.
+  [x] #1 Tests puis implémentation, vérifié le 2026-10-30.
   [x] #2 Posé : liste des fonctions et noms (`fmt_text`, `fmt_json`, `fmt_json_pretty`, `fmt_table`, `fmt_pluck`, `fmt_path`, `fmt_grep`, `fmt_head`, `fmt_tail`, `fmt_truncate`, `fmt_truncate_ends`), préfixe `fmt_` décidé le 2026-10-27. `agent-sessions/scratchpad#FR-8` en donne le genre (texte, JSON, tableau aligné, extraction, troncature début et fin) sans noms : la liste reste à confirmer avec l'auteur du skill intégré (`toolsets`).
   [x] #3 Posé : pas de format YAML ni Markdown : `vynil-core` offre `yaml_encode` dans ses modules toujours disponibles, mais ce module n'est pas accordé par le scratchpad (seuls le groupe pur et les groupes accordés le sont). À rouvrir si un besoin de YAML apparaît.
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).

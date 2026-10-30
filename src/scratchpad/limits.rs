@@ -121,6 +121,8 @@ impl ScratchpadLimits {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::{MAX_CALL_LEVELS, MAX_EXPR_DEPTH, MAX_FUNCTION_EXPR_DEPTH, ScratchpadLimits};
     use crate::scratchpad::{LimitKind, ScratchpadError, ScriptErrorClass};
     use rhai::{Dynamic, Engine};
@@ -293,5 +295,35 @@ mod tests {
             "the refusal is the string size limit, got {refused:?}"
         );
         assert_eq!(second.ok(), Some(100_000), "the large engine accepts the string");
+    }
+
+    /// Blocks the thread for `ms` milliseconds, as a native function waiting on the outside world does.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test only: a native call that really blocks its thread, to check that no duration limit stops a script"
+    )]
+    fn block_the_thread(ms: u64) {
+        std::thread::sleep(Duration::from_millis(ms));
+    }
+
+    // Scenario: no time limit over two real minutes
+    #[test]
+    #[ignore = "two real minutes: run with cargo test -- --ignored"]
+    fn no_time_limit_over_two_real_minutes() {
+        let mut engine = engine_with(&ScratchpadLimits::new());
+        let _nap = engine.register_fn("nap", |ms: i64| block_the_thread(u64::try_from(ms).unwrap_or(0)));
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "test only: measures the real duration of the script, which no limit of duration may cut"
+        )]
+        let started = std::time::Instant::now();
+        let result = engine.eval::<i64>("let i = 0; while i < 5 { nap(25000); i += 1; } i");
+        let elapsed = started.elapsed();
+        assert_eq!(result.ok(), Some(5), "five naps of 25 seconds complete");
+        assert_eq!(engine.max_operations(), 0, "no maximum of operations is reported");
+        assert!(
+            elapsed >= Duration::from_secs(120),
+            "the script ran for two real minutes, it took {elapsed:?}"
+        );
     }
 }

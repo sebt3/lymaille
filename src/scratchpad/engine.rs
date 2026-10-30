@@ -757,6 +757,64 @@ mod tests {
         drop(timer_keep_alive);
     }
 
+    // Scenario: try/catch does not survive the cancellation of a native call
+    #[test]
+    fn try_catch_does_not_survive_the_cancellation_of_a_native_call() {
+        let handle = CancelHandle::new();
+        let marks = Arc::new(AtomicUsize::new(0));
+        let (native_handle, native_marks) = (handle.clone(), Arc::clone(&marks));
+        let engine = match ScratchpadEngine::builder(ScratchpadLimits::new(), Grants::new())
+            .with_registration(move |engine| {
+                let cancelling = native_handle.clone();
+                let _hash = engine.register_fn(
+                    "cancelled_native",
+                    move || -> Result<i64, Box<rhai::EvalAltResult>> {
+                        cancelling.cancel();
+                        Err("native call cancelled".into())
+                    },
+                );
+                let counter = Arc::clone(&native_marks);
+                let _mark = engine.register_fn("mark", move || {
+                    i64::try_from(counter.fetch_add(1, Ordering::SeqCst)).unwrap_or(-1)
+                });
+                Ok(())
+            })
+            .build()
+        {
+            Ok(engine) => engine,
+            Err(error) => panic!("the engine must build: {error}"),
+        };
+        // Control: without a run scope nothing stops the script, so the catch block and the next call both run.
+        assert_eq!(
+            value(&engine, "try { throw \"x\"; } catch (e) { mark(); } mark(); 7")
+                .as_int()
+                .ok(),
+            Some(7),
+            "control: the catch swallows an ordinary error and the script goes on"
+        );
+        assert_eq!(marks.load(Ordering::SeqCst), 2, "control: both marks ran");
+        let _reset = marks.swap(0, Ordering::SeqCst);
+        let result = {
+            let _scope = RunScope::enter(&handle, 100);
+            engine
+                .rhai()
+                .eval::<Dynamic>("try { cancelled_native(); } catch (e) { mark(); } mark(); 7")
+        };
+        let Err(error) = result else {
+            panic!("the script must be stopped, it returned a value");
+        };
+        assert_eq!(
+            ScratchpadError::from_rhai(&error),
+            ScratchpadError::Cancelled,
+            "the stop of on_progress is not caught: {error:?}"
+        );
+        assert_eq!(
+            marks.load(Ordering::SeqCst),
+            0,
+            "neither the catch block nor the next statement ran after the cancelled native call"
+        );
+    }
+
     #[test]
     fn without_a_run_no_interruption() {
         let engine = built(Grants::new());

@@ -96,7 +96,7 @@ Scenario: no filesystem or shell group
 Tasks:
   [x] #1 Tests puis implémentation.
       Validé le 2026-10-29 (validator, mutations manuelles) sous `scripts/check` complet.
-  [ ] #2 Variante `InspectionOnly` (./error.sdd) : implémentée par T7, en attente de validation.
+  [x] #2 Variante `InspectionOnly` (./error.sdd) : implémentée par T7, en attente de validation.
   [x] #3 Posé le 2026-10-29 : le pad d'inspection réutilise @Scratchpad::run (même rendu, mêmes plafonds, même masquage) sur un moteur de la même fabrique, avec des modules coquilles ; l'instantané qu'il calcule est jeté. À confirmer à l'implémentation si ./run.sdd doit s'ouvrir à un mode « sans persistance ».
   [x] #5 `source(nom)` dans le pad d'inspection, @descriptors_from_catalog et leurs tests ; tests des déclarations en double (coquille, toolset, skill) dont les branches ne sont pas couvertes (T7 : 87 % de lignes).
       Validé le 2026-10-29 (validator : 40 mutations manuelles, `scripts/check` complet vert).

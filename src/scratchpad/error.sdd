@@ -111,8 +111,28 @@ Scenario: zero position refused
   When a position is built
   Then nothing is produced
 
+Scenario: a module wrapper names the module in front of the message
+  Given an error of module `grafana` wrapping the runtime error `inside`
+  When it is classified
+  Then the message is `in module grafana: inside`
+
+Scenario: the innermost function of a nested call is kept
+  Given a function `g` calling a missing function, itself called by `f`
+  When the error is classified
+  Then the not-found error names `g`, at the position of the inner call
+
+Scenario: the message does not repeat the position of the error
+  Given a division by zero
+  When the error is classified
+  Then the message is Rhai's text without the position appended to it
+
+Scenario: each limit kind has its own text
+  Given the six kinds of limit
+  When each error is displayed
+  Then each text is `limit exceeded (kind): message`, with the kinds `call depth`, `expression depth`, `string size`, `array size`, `map size` and `other`
+
 Tasks:
-  [ ] #1 Tests des textes `Display`, des classements de `from_rhai` (un test par variante de Rhai listée) et du dépliage des erreurs enveloppées, puis l'énumération.
+  [x] #1 Tests des textes `Display`, des classements de `from_rhai` (un test par variante de Rhai listée) et du dépliage des erreurs enveloppées, puis l'énumération.
   [x] #2 Posé : @ScratchpadError::class et @ScriptErrorClass existent pour que le signal de qualité « nombre d'erreurs Rhai » (`agent-sessions/session#FR-13`) et l'audit comptent par classe sans retenir de texte ; la boucle de tour (domaine `session`) les consomme.
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
   [x] #3 Posé : le genre « profondeur d'expression » vient d'une erreur d'analyse de Rhai (profondeur maximale d'expression) et non d'une erreur d'exécution : à vérifier par un test dès l'implémentation, le classement de `Syntax` ou de `Limit` découlant de la variante réellement produite.

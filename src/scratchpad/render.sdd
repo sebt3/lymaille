@@ -117,8 +117,13 @@ Scenario: rendering is deterministic
   When both are rendered
   Then the texts are equal
 
+Scenario: a blob nested in a map or an array is described by its size
+  Given a map and an array holding blobs of three and one bytes
+  When the full text is computed
+  Then each blob is the JSON string `[blob: N bytes]`
+
 Tasks:
-  [ ] #1 Tests puis implémentation.
+  [x] #1 Tests puis implémentation, vérifié le 2026-10-30.
   [!] #2 Posé : @full_text construit le texte entier puis @truncate_middle le coupe. La mémoire est bornée par les plafonds de ./limits.sdd pour chaque collection, mais pas pour leur imbrication (un tableau de 1 000 000 de tableaux de 1 000 000 d'éléments dépasserait). Un écrivain qui ne retient que le début et la fin pendant la sérialisation est possible ; il n'est pas posé tant qu'un besoin n'est pas établi.
       Risque relevé le 2026-10-29 : l'imbrication de collections n'est pas bornée au rendu (les plafonds de ./limits.sdd valent par collection) ; à traiter avec un écrivain tronqué si un script peut y mener, sinon laissé tel quel.
   [x] #3 Posé : l'unité se rend `()` (pas vide, pas `null`) pour qu'un script sans valeur finale soit lisible par le LLM ; un `blob` se rend en description (le LLM l'encode lui-même avec `base64_encode`).
