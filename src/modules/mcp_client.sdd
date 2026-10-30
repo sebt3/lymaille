@@ -38,6 +38,8 @@ Must:
   Les @McpHeaders ne se montrent jamais : leur `Debug` ne contient que les noms d'en-têtes et la présence d'un jeton, jamais une valeur ; aucune erreur, aucun événement ni aucun journal ne porte un jeton ou une valeur d'en-tête (`agent-sessions#CON-3`). Les erreurs de transport rendues ne citent pas les en-têtes.
   La connexion est paresseuse et partagée entre les appels concurrents du même connecteur (une seule session à la fois) ; `reconnect` ne se connecte pas lui-même.
   Chaque requête est bornée par le délai de requête, la connexion par le délai de connexion (`tokio::time::timeout`) ; un dépassement est @McpError::Unreachable.
+  Sans fournisseur TLS installé, `rmcp` panique à la construction de son client HTTP, et le connecteur ne peut pas l'éviter : la rustdoc de @RmcpConnector::new dit que l'hôte DOIT avoir installé un fournisseur rustls avant (les tests installent `ring`).
+  Classification des erreurs de `rmcp` : par type quand il est nommable (`HttpStatusError`, `AuthRequiredError`, `InsufficientScopeError`), en repli par le texte `Display` (les types transportant `reqwest::Error` ne sont pas nommables sans dépendre de `reqwest`) ; un test par cas (401, 403, 5xx, coupure du flux, délai) alerte si `rmcp` change ses messages.
   Les futurs sont `Send` ; le connecteur est `Send + Sync` et se partage derrière un `Arc`.
   La version de `rmcp` est épinglée exactement dans `/Cargo.toml` (l'API change à chaque majeure) ; le connecteur reste le seul point d'adaptation.
 
@@ -45,13 +47,15 @@ Depends on:
   ./mcp.sdd
   ./error.sdd
   rmcp
+  http
   tokio
   serde_json
 
 Can modify:
   /Cargo.toml: ajout de `rmcp` (version exacte, `default-features = false`, features ci-dessus) en dépendance optionnelle, et de la feature `mcp-http = ["dep:rmcp"]` activée par défaut, par `cargo add` ; `tokio` reçoit la feature `net` en dev-dependency pour le faux serveur des tests.
-  /deny.toml: ajout de la licence `ISC` à `allow` (décision du 2026-10-30).
-  /clippy.toml: seulement si `cargo clippy` signale un doublon de crate nouveau, un `allowed-duplicate-crates` avec raison ; sinon rapporter.
+  /deny.toml: ajout des licences `ISC` et `CDLA-Permissive-2.0` (données de certificats racine de `webpki-root-certs`) à `allow`, chacune avec un commentaire d'une ligne (décisions du 2026-10-30).
+  /clippy.toml: `windows-sys` ajouté à `allowed-duplicate-crates` avec sa raison (0.52 via `ring`, 0.61 via `mio` et `rustix`) ; tout autre doublon nouveau : rapporter sans modifier (décision du 2026-10-30).
+  /Cargo.toml (dev-dependencies): `rustls` avec la feature `ring`, pour installer un fournisseur dans les tests ; `http` en dépendance de la feature `mcp-http` (types d'en-têtes de `rmcp`).
 
 Scenario: listage des tools
   Given un faux serveur MCP HTTP qui expose deux tools
@@ -105,6 +109,6 @@ Scenario: aucune connexion à la construction
 
 Tasks:
   [ ] #1 Instruire et épingler `rmcp` (cargo add, version exacte à jour, vérification `cargo tree -e features -p rmcp` : ni `schemars`, ni `server`, ni processus ; `cargo tree -d` ; `cargo deny check` avec `ISC`), puis tests et implémentation. Le faux serveur des tests est un serveur HTTP minimal écrit sur `tokio::net::TcpListener` (JSON-RPC `initialize`, `notifications/initialized`, `tools/list`, `tools/call` ; réponses `application/json`), car aucune dépendance de serveur HTTP n'est admise.
-  [?] #2 Décidé le 2026-10-30 : `rmcp` derrière la feature `mcp-http` activée par défaut ; l'hôte choisit le fournisseur TLS ; `ISC` autorisée. Reste à confirmer : la valeur par défaut des délais (30 s de requête, 10 s de connexion).
+  [x] #2 Décidé le 2026-10-30 par le développeur principal : `rmcp` derrière la feature `mcp-http` activée par défaut ; l'hôte choisit le fournisseur TLS ; `ISC` et `CDLA-Permissive-2.0` autorisées ; `windows-sys` déclaré en doublon ; `http` ajoutée ; `rustls` (`ring`) en dev-dependency ; classification d'erreurs par type puis par texte. Reste à confirmer : la valeur par défaut des délais (30 s de requête, 10 s de connexion).
   [?] #3 Les lectures de certificats racine du système (`rustls-platform-verifier`) sont un accès fichier indirect par une dépendance, hors de portée des `disallowed-*` de ../../clippy.toml : à confirmer comme acceptable.
   [?] #4 Posé : `call_tool` rend le contenu structuré (`structuredContent`) s'il existe, sinon les contenus textuels concaténés ; les contenus non textuels (image, ressource) sont ignorés. À confirmer.
