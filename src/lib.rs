@@ -25,7 +25,10 @@ pub use context::{
     Budget, CompactionStrategy, ContextError, ContextResult, DefaultStrategy, Digest, ReplayMode, Summarizer,
     UsageTracker, estimate_tokens, replayed_reasoning,
 };
-pub use delegation::{DelegationError, DelegationResult};
+pub use delegation::{
+    DelegationError, DelegationResult, InferenceLimiter, LocalCounter, Permit, RequestCounter,
+    announced_capacity,
+};
 pub use modules::{
     InMemoryMemoryStore, McpConnector, McpEnv, McpError, McpLister, McpRetryPolicy, McpTool, Memory,
     MemoryLevel, MemoryScope, MemoryScopes, MemoryStore, MemorySummary, ModulesError, ModulesResult,

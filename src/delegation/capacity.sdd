@@ -66,4 +66,5 @@ Scenario: ordre d'arrivée
   Then A, B puis C obtiennent leur permis dans cet ordre
 
 Tasks:
-  [ ] #1 Tests puis implémentation (lot D2).
+  [x] #1 Tests puis implémentation (lot D2), validé le 2026-10-30.
+  [?] #2 Posé : le décompte partagé de l'hôte peut baisser sans passer par le limiteur (autre processus) ; sans notification de l'hôte ni minuterie, une attente en file n'est réveillée que par un relâchement local. À confirmer, ou à spécifier (par exemple un point d'appel `tick` de l'hôte, comme pour les watchers).
