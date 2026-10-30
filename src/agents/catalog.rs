@@ -193,6 +193,18 @@ impl<Top, Base> Layered<Top, Base> {
     pub const fn new(top: Top, base: Base) -> Self {
         Self { top, base }
     }
+
+    /// Returns the top layer, the nearer level, which every `put_*` writes to.
+    #[must_use]
+    pub const fn top(&self) -> &Top {
+        &self.top
+    }
+
+    /// Returns the base layer, the farther level, which answers when the top layer has no entry.
+    #[must_use]
+    pub const fn base(&self) -> &Base {
+        &self.base
+    }
 }
 
 impl<Top: AgentStore, Base: AgentStore> AgentStore for Layered<Top, Base> {
@@ -247,7 +259,7 @@ mod tests {
     fn agent() -> AgentDefinition {
         AgentDefinition::new(
             "main".to_owned(),
-            AgentKind::Main,
+            AgentKind::Work,
             "You are the assistant.".to_owned(),
             "strix-qwen".to_owned(),
         )
@@ -655,6 +667,38 @@ mod tests {
                 .expect("the lookup must succeed"),
             Some(provider()),
             "the deepest layer must keep its own provider"
+        );
+    }
+
+    // Scenario: layers are readable
+    #[tokio::test]
+    async fn layers_are_readable() {
+        let top = InMemoryCatalog::new();
+        top.put_provider(&project_provider())
+            .await
+            .expect("the provider must be stored in the top layer");
+        let base = InMemoryCatalog::new();
+        base.put_provider(&provider())
+            .await
+            .expect("the provider must be stored in the base layer");
+        let layered = Layered::new(top, base);
+        assert_eq!(
+            layered
+                .top()
+                .get_provider("vllm-strix")
+                .await
+                .expect("the lookup must succeed"),
+            Some(project_provider()),
+            "top() must give the top layer that was given"
+        );
+        assert_eq!(
+            layered
+                .base()
+                .get_provider("vllm-strix")
+                .await
+                .expect("the lookup must succeed"),
+            Some(provider()),
+            "base() must give the base layer that was given"
         );
     }
 }

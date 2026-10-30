@@ -1,8 +1,8 @@
 Spec: definition
 
 Purpose:
-  Définition d'un agent, principal ou sous-agent : identifiant, nature, prompt système templaté, nom du profil de modèle et paramètres, modules et toolsets accessibles,
-    limites de sandbox, stratégie de fenêtre de contexte, sous-agents délégables (principal) ou schéma de sortie (sous-agent), et son empreinte
+  Définition d'un agent, de travail (`Work`), de configuration (`Config`) ou sous-agent (`Sub`, `agent-sessions#BR-8`) : identifiant, nature, prompt système templaté, nom du profil de modèle et paramètres, modules et toolsets accessibles,
+    limites de sandbox, stratégie de fenêtre de contexte, sous-agents délégables (`Work`) ou schéma de sortie (`Sub`), et son empreinte
     (`agent-sessions/agents#FR-1`, `FR-2`, `FR-8`, `agent-sessions/session#FR-2`).
 
 Owns:
@@ -21,7 +21,7 @@ Exposes:
   @AgentDefinition::fingerprint
 
 Accepts:
-  @AgentDefinition::new: l'identifiant, la nature (@AgentKind : `Main` ou `Sub`), le prompt système (gabarit texte) et le nom du profil de modèle, puis des constructeurs chaînés : paramètres d'échantillonnage, modules, toolsets, @SandboxLimits (délai de script, plafond de rendu en caractères, et trois plafonds de mémoire optionnels), nom de la stratégie de contexte, sous-agents délégables (principal), schéma JSON de sortie (sous-agent).
+  @AgentDefinition::new: l'identifiant, la nature (@AgentKind : `Work`, `Config` ou `Sub`), le prompt système (gabarit texte) et le nom du profil de modèle, puis des constructeurs chaînés : paramètres d'échantillonnage, modules, toolsets, @SandboxLimits (délai de script, plafond de rendu en caractères, et trois plafonds de mémoire optionnels), nom de la stratégie de contexte, sous-agents délégables (agent de travail), schéma JSON de sortie (sous-agent).
   @AgentDefinition::validate: aucun argument.
   @SandboxLimits::with_max_string_bytes, @SandboxLimits::with_max_array_len, @SandboxLimits::with_max_map_len: un entier non signé (`u64`) par plafond de mémoire (octets pour la chaîne, éléments pour le tableau, entrées pour la table) ; zéro est accepté par le constructeur et refusé par @AgentDefinition::validate.
 
@@ -31,13 +31,13 @@ Returns:
   @SandboxLimits::max_string_bytes, @SandboxLimits::max_array_len, @SandboxLimits::max_map_len: `None` quand le plafond est absent (le défaut de `scratchpad/limits` s'applique alors), sinon la valeur posée.
 
 Raises:
-  @AgentsError::InvalidDefinition: un sous-agent qui déclare des sous-agents délégables ; un principal qui déclare un schéma de sortie ; un identifiant, un prompt ou un nom de profil vide ; un sous-agent délégable égal à l'agent lui-même ; une liste de toolsets ou de modules qui contient un doublon ; un plafond de mémoire du sandbox posé à zéro.
+  @AgentsError::InvalidDefinition: un sous-agent ou un agent de configuration qui déclare des sous-agents délégables ; un agent de travail ou de configuration qui déclare un schéma de sortie ; un module réservé à la configuration (`toolset_creator`, `inspect`, `contexts`, `sessions`) accordé à un agent de travail ou à un sous-agent ; un identifiant, un prompt ou un nom de profil vide ; un sous-agent délégable égal à l'agent lui-même ou en double ; une liste de toolsets ou de modules qui contient un doublon ; un plafond de mémoire du sandbox posé à zéro.
 
 Must:
   Le modèle se désigne par un nom de profil : la définition n'a aucun champ de fournisseur.
   L'empreinte est déterministe et indépendante de la plate-forme : même définition, même empreinte, y compris après un aller-retour de sérialisation ; elle change dès qu'un champ de la définition change (prompt, profil, toolsets, modules, limites, plafonds de mémoire du sandbox, sous-agents, schéma). Calculée par FNV-1a 64 bits sur la sérialisation JSON canonique (clés triées), sans dépendance externe.
   Les trois plafonds de mémoire du sandbox sont optionnels : absents, ils ne sont pas sérialisés (aucune clé dans le JSON) et le JSON ancien qui ne les porte pas se lit sans eux. Posés, chacun entre dans l'empreinte et sa valeur se relit à l'identique. Un zéro est refusé par @AgentDefinition::validate, jamais silencieusement ramené au défaut. Les plafonds ne sont branchés au moteur de `scratchpad` qu'avec `run` : ce module ne dépend pas du scratchpad.
-  Un sous-agent ne délègue pas (`agent-sessions#BR-6`) ; seul un principal a des sous-agents délégables.
+  Un sous-agent ne délègue pas (`agent-sessions#BR-6`) ; seul un agent de travail a des sous-agents délégables. Un agent de configuration ne délègue pas et reçoit seul les modules réservés à la configuration (`agent-sessions#BR-8`).
   Les capacités sont exactement celles de la définition (`agent-sessions#BR-2`) : aucune valeur par défaut n'accorde un module ou un toolset ; les listes absentes sont vides. La définition ne porte aucun droit de Memory : l'accès à un niveau se décide par les toolsets (`agent-sessions/modules#FR-4`).
   Se sérialise et se désérialise à l'identique ; aucun champ ne porte de secret.
 
@@ -46,6 +46,35 @@ Depends on:
   ./profile.sdd
   serde
   serde_json
+
+Tasks:
+  [x] #6 Tests manquants : l'empreinte change pour chaque champ de la liste du Must (prompt, profil, toolsets, modules, délai et plafond de sandbox, sous-agents délégables, schéma de sortie, aussi id, nature, paramètres, stratégie de contexte) ;
+      vecteurs connus du FNV-1a 64 bits sur des chaînes (`""` → `cbf29ce484222325`, `"a"` → `af63dc4c8601ec8c`, `"foobar"` → `85944171f73967e8`) pour la fonction de hachage, afin que « indépendante de la plate-forme » soit vérifié ; `validate()` Ok sur une définition valide et sur un sous-agent avec schéma ;
+      identifiant, prompt et profil vides refusés ; doublon de modules refusé.
+  [x] #1 Tests puis implémentation.
+  [!] #2 Rendu du prompt templaté (variables du ToolsetContext) : relève de `toolsets` (templating) ; ici le prompt est du texte brut.
+  [!] #3 La stratégie de contexte est un nom ; le choix de la stratégie par nom (fabrique) se branche avec la boucle de tour.
+  [x] #5 Posé à l'implémentation : `sandbox` absent = aucune limite ; les doublons de sous-agents délégables ne sont pas refusés ; un identifiant, un prompt ou un nom de profil blanc est refusé.
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #4 Décidé le 2026-10-27 : pas de droits de Memory dans la définition ; trois modules Memory (un par niveau) et l'accès se décide par les toolsets (`agent-sessions/modules#FR-4`).
+  [x] #8 Champ inconnu : un JSON ancien portant `memory` (ou tout autre champ inconnu) se lit comme avant, le champ est ignoré (comportement serde par défaut, sans `deny_unknown_fields`) ; la définition ne le réécrit pas. Maintenu tel quel, à confirmer par le développeur principal.
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #7 Supprimer @MemoryRights (type, constructeur `with_memory`, accesseur, réexports de ../lib.rs et ./mod.rs), l'empreinte et les tests correspondants, puis retirer des tâches #5 et #6 les droits de Memory.
+  [x] #9 Ajouter à @SandboxLimits trois plafonds de mémoire optionnels (chaîne, tableau, table ; absents = défauts de ../scratchpad/limits.sdd), décidé le 2026-10-27 (`agent-sessions/scratchpad#FR-4`) : constructeurs, accesseurs, sérialisation, empreinte (@AgentDefinition::fingerprint), Scenarios et tests ; zéro refusé comme dans ../scratchpad/limits.sdd.
+  [x] #10 Posé à l'implémentation de #9 : les champs absents sont omis de la sérialisation, donc une définition sans plafonds de mémoire garde la même empreinte qu'avant #9 (et le sandbox sans ces champs garde le même JSON). La spec ne le dit pas explicitement (elle ne garantit que « change dès qu'un champ change ») ; c'est la conséquence retenue, à confirmer par le développeur principal, car elle évite de changer l'empreinte des définitions existantes.
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #11 Posé à l'implémentation de #9 : les Scenarios de cette spec sont en anglais (style existant), les autres sections en français (convention du projet) ; la consigne de la tâche demandait l'anglais pour l'ensemble, à trancher.
+      Décidé le 2026-10-29 par le développeur principal : les specs sont en français, Scenarios compris (`.specdd/bootstrap.project.md`) ; traduction : lymaille.sdd #10.
+  [x] #12 Nature `Work`, `Config`, `Sub` (DSD du 2026-10-29, `agent-sessions#BR-8`) : remplacer `Main` par `Work`, ajouter `Config` et les règles de validation de `Raises`, avec un Scenario par règle (déclaré ci-dessous) ; migrer les appelants (`./catalog.sdd`, `../toolsets/compat.sdd`).
+      Validé le 2026-10-29 (validator, 58 mutants dont 55 tués) sous `scripts/check` complet.
+  [?] #13 Posé le 2026-10-29 : les noms réservés des modules de configuration sont `toolset_creator`, `inspect`, `contexts`, `sessions` ; l'hôte ne peut pas les réutiliser pour un autre module. À confirmer.
+  [x] #14 Refuser les doublons de sous-agents délégables (recommandation du 2026-10-29 sur #5 : peu coûteux, plus sûr), avec un Scenario.
+      Validé le 2026-10-29 (validator, 58 mutants dont 55 tués) sous `scripts/check` complet.
+  [!] #15 Un agent de configuration n'appelle aucun serveur MCP (`agent-sessions#BR-8`) : une définition ne porte pas de module MCP (les modules MCP viennent des rôles liés par le ToolsetContext, `agent-sessions/modules#FR-6`), cette règle ne se valide donc pas ici. Elle relève du démarrage de session de nature `Config` (domaine `session`), qui n'ouvre aucune connexion `tools/call` et génère des coquilles seules (`../scratchpad/inspect.sdd`). À spécifier avec la boucle de tour.
+  [x] #16 Décidé le 2026-10-29 : l'empreinte d'une définition change avec la nature (`main` devient `work`) ; acceptable tant que la crate n'est pas publiée (aucune session de production n'existe). Le JSON ancien `main` se relit comme `work`.
+  [x] #17 Prose en retard sur la nature : `Accepts` (« sous-agents délégables (principal) »), rustdoc de `with_delegable` et de `delegable()` dans definition.rs, rustdoc de `delegable_subagents` dans ../toolsets/compat.rs (« main agent »).
+      Validé le 2026-10-29 (implémentation vérifiée par mutations de l'auteur), validation par le validator groupée avec T6.
+      Prose corrigée (Accepts, rustdocs) le 2026-10-29 ; validé.
 
 Scenario: model by profile name only
   Given a definition built with profile `strix-qwen`
@@ -71,6 +100,11 @@ Scenario: main agent has no output schema
   Given a main agent declaring an output schema
   When validated
   Then it fails with InvalidDefinition
+
+Scenario: duplicate delegable sub-agent refused
+  Given une définition de nature Work qui déclare deux fois le même sous-agent délégable
+  When elle est validée
+  Then elle échoue avec InvalidDefinition
 
 Scenario: self delegation and duplicates refused
   Given a main agent listing itself as delegable, and a definition with a duplicated toolset
@@ -112,17 +146,22 @@ Scenario: fingerprint sensitive to memory limits
   When one limit changes value, or is removed
   Then the fingerprint differs for each change
 
-Tasks:
-  [x] #6 Tests manquants : l'empreinte change pour chaque champ de la liste du Must (prompt, profil, toolsets, modules, délai et plafond de sandbox, sous-agents délégables, schéma de sortie, aussi id, nature, paramètres, stratégie de contexte) ;
-      vecteurs connus du FNV-1a 64 bits sur des chaînes (`""` → `cbf29ce484222325`, `"a"` → `af63dc4c8601ec8c`, `"foobar"` → `85944171f73967e8`) pour la fonction de hachage, afin que « indépendante de la plate-forme » soit vérifié ; `validate()` Ok sur une définition valide et sur un sous-agent avec schéma ;
-      identifiant, prompt et profil vides refusés ; doublon de modules refusé.
-  [x] #1 Tests puis implémentation.
-  [?] #2 Rendu du prompt templaté (variables du ToolsetContext) : relève de `toolsets` (templating) ; ici le prompt est du texte brut.
-  [?] #3 La stratégie de contexte est un nom ; le choix de la stratégie par nom (fabrique) se branche avec la boucle de tour.
-  [?] #5 Posé à l'implémentation : `sandbox` absent = aucune limite ; les doublons de sous-agents délégables ne sont pas refusés ; un identifiant, un prompt ou un nom de profil blanc est refusé.
-  [x] #4 Décidé le 2026-10-27 : pas de droits de Memory dans la définition ; trois modules Memory (un par niveau) et l'accès se décide par les toolsets (`agent-sessions/modules#FR-4`).
-  [?] #8 Champ inconnu : un JSON ancien portant `memory` (ou tout autre champ inconnu) se lit comme avant, le champ est ignoré (comportement serde par défaut, sans `deny_unknown_fields`) ; la définition ne le réécrit pas. Maintenu tel quel, à confirmer par le développeur principal.
-  [x] #7 Supprimer @MemoryRights (type, constructeur `with_memory`, accesseur, réexports de ../lib.rs et ./mod.rs), l'empreinte et les tests correspondants, puis retirer des tâches #5 et #6 les droits de Memory.
-  [x] #9 Ajouter à @SandboxLimits trois plafonds de mémoire optionnels (chaîne, tableau, table ; absents = défauts de ../scratchpad/limits.sdd), décidé le 2026-10-27 (`agent-sessions/scratchpad#FR-4`) : constructeurs, accesseurs, sérialisation, empreinte (@AgentDefinition::fingerprint), Scenarios et tests ; zéro refusé comme dans ../scratchpad/limits.sdd.
-  [?] #10 Posé à l'implémentation de #9 : les champs absents sont omis de la sérialisation, donc une définition sans plafonds de mémoire garde la même empreinte qu'avant #9 (et le sandbox sans ces champs garde le même JSON). La spec ne le dit pas explicitement (elle ne garantit que « change dès qu'un champ change ») ; c'est la conséquence retenue, à confirmer par le développeur principal, car elle évite de changer l'empreinte des définitions existantes.
-  [?] #11 Posé à l'implémentation de #9 : les Scenarios de cette spec sont en anglais (style existant), les autres sections en français (convention du projet) ; la consigne de la tâche demandait l'anglais pour l'ensemble, à trancher.
+Scenario: configuration agent cannot delegate
+  Given une définition de nature Config qui déclare un sous-agent délégable
+  When elle est validée
+  Then elle échoue avec InvalidDefinition
+
+Scenario: work agent cannot receive the creation module
+  Given une définition de nature Work qui accorde le module `toolset_creator`
+  When elle est validée
+  Then elle échoue avec InvalidDefinition
+
+Scenario: sub-agent cannot receive an inspection module
+  Given une définition de nature Sub qui accorde le module `inspect`
+  When elle est validée
+  Then elle échoue avec InvalidDefinition
+
+Scenario: configuration agent with its modules is valid
+  Given une définition de nature Config qui accorde `toolset_creator`, `inspect`, `contexts` et `sessions`
+  When elle est validée
+  Then elle réussit

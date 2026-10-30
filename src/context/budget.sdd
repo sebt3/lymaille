@@ -83,6 +83,8 @@ Tasks:
   [x] #1 Tests puis implémentation.
   [x] #4 Tests manquants : `MAX < PROMPT + 3R + T` sans débordement (borne rapportée 0) ; place disponible saturée à 0 dans @ContextError::MessageTooLarge ; remplacer
       `worst_case_always_fits` par un test qui appelle @Budget::needs_compaction aux deux bornes (SESSION maximal sans compaction, puis ajout de R et de T, puis PROMPT et R).
-  [?] #3 Posé à l'implémentation : si `MAX < PROMPT + 3R + T`, @Budget::check_startup refuse toute valeur de `SYS` en rapportant une borne de 0 ; la place disponible de
+  [x] #3 Posé à l'implémentation : si `MAX < PROMPT + 3R + T`, @Budget::check_startup refuse toute valeur de `SYS` en rapportant une borne de 0 ; la place disponible de
       @ContextError::MessageTooLarge vaut `MAX - PROMPT - 2R - T - SYS`.
-  [?] #2 Les tailles `MAX`, `PROMPT` et `R` viennent du profil de modèle (domaine `agents`) ; ce fichier les reçoit en nombres.
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #2 Les tailles `MAX`, `PROMPT` et `R` viennent du profil de modèle (domaine `agents`) ; ce fichier les reçoit en nombres.
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).

@@ -39,6 +39,6 @@ Tasks:
   [x] #1 Déclarer les sous-modules dans ./mod.rs au fil des specs enfants livrées.
   [x] #2 Décidé le 2026-10-27 : l'adaptateur `rig` (clients, `list_models`, décodage de `reasoning` / `reasoning_content`, `chat_template_kwargs` par `additional_params`) est un module de la crate
       derrière une feature Cargo `rig`, activée par défaut, qui implémente @InferenceProvider ; la crate reste testable sans la feature. À spécifier dans une spec fille.
-  [?] #3 Projet (FR-4 : manifeste d'agents, de toolsets, de ContextType et de ToolsetContext) : dépend de `toolsets` ; non spécifié ici.
+  [!] #3 Projet (FR-4 : manifeste d'agents, de toolsets, de ContextType et de ToolsetContext) : dépend de `toolsets` ; non spécifié ici.
   [x] #4 Décidé le 2026-10-27 : FR-3 est maintenu ; la sérialisation frontmatter + corps utilise `yaml_serde` (`serde_yaml` est archivé). ./definition.sdd livre la sérialisation JSON.
   [ ] #5 Spécifier et livrer la sérialisation frontmatter + corps d'une définition d'agent (`yaml_serde`).

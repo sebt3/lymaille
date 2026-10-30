@@ -1,4 +1,4 @@
-//! Agent definition, main or sub-agent: identifier, kind, templated system prompt, model profile name and parameters,
+//! Agent definition, work, configuration or sub-agent: identifier, kind, templated system prompt, model profile name and parameters,
 //! reachable modules and toolsets, sandbox limits, context strategy, delegable sub-agents or output schema, and its
 //! fingerprint (`agent-sessions/agents#FR-1`, `FR-2`, `FR-8`, `agent-sessions/session#FR-2`). The definition carries no
 //! Memory right: access to a Memory level is decided by the toolsets (`agent-sessions/modules#FR-4`).
@@ -11,14 +11,18 @@ use serde_json::Value;
 
 use super::{AgentsError, AgentsResult, SamplingParams};
 
-/// Nature of an agent: a main agent starts a session, a sub-agent is delegated to.
+/// Nature of an agent: a work agent does the work of a session, a configuration agent configures the host, and a
+/// sub-agent is delegated to by a work agent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum AgentKind {
-    /// A main agent, chosen at the start of a session. It may delegate to sub-agents.
-    Main,
-    /// A sub-agent, delegated to by a main agent. It returns an output schema and does not delegate.
+    /// A work agent, chosen at the start of a session. It may delegate to sub-agents and returns no output schema.
+    #[serde(alias = "main")]
+    Work,
+    /// A configuration agent. It does not delegate, has no MCP module and receives the modules reserved to configuration.
+    Config,
+    /// A sub-agent, delegated to by a work agent. It returns an output schema and does not delegate.
     Sub,
 }
 
@@ -185,7 +189,8 @@ impl AgentDefinition {
         self
     }
 
-    /// Sets the sub-agents a main agent may delegate to.
+    /// Sets the delegable sub-agents. Only a work agent (`Work`) may delegate: a sub-agent or a configuration agent that
+    /// declares any is refused by [`AgentDefinition::validate`].
     #[must_use]
     pub fn with_delegable(mut self, delegable: Vec<String>) -> Self {
         self.delegable = delegable;
@@ -253,7 +258,7 @@ impl AgentDefinition {
         self.context_strategy.as_deref()
     }
 
-    /// Returns the sub-agents a main agent may delegate to.
+    /// Returns the delegable sub-agents, in the order of the definition. Empty for any nature but `Work`.
     #[must_use]
     pub fn delegable(&self) -> &[String] {
         &self.delegable
@@ -270,9 +275,10 @@ impl AgentDefinition {
     /// # Errors
     ///
     /// Returns [`AgentsError::InvalidDefinition`] when the identifier, the prompt or the profile name is empty, when a
-    /// sub-agent declares delegable sub-agents, when a main agent declares an output schema, when a delegable sub-agent
-    /// is the agent itself, when the toolsets or the modules contain a duplicate, or when a memory limit of the sandbox
-    /// is zero.
+    /// sub-agent or a configuration agent declares delegable sub-agents, when a work or configuration agent declares an
+    /// output schema, when a configuration module is granted to a work agent or a sub-agent, when a delegable sub-agent
+    /// is the agent itself or is listed twice, when the toolsets or the modules contain a duplicate, or when a memory
+    /// limit of the sandbox is zero.
     pub fn validate(&self) -> AgentsResult<()> {
         if self.id.trim().is_empty() {
             return self.refuse("identifier is empty");
@@ -283,20 +289,31 @@ impl AgentDefinition {
         if self.profile.trim().is_empty() {
             return self.refuse("profile name is empty");
         }
-        if self.kind == AgentKind::Sub && !self.delegable.is_empty() {
-            return self.refuse("a sub-agent cannot declare delegable sub-agents");
+        if matches!(self.kind, AgentKind::Sub | AgentKind::Config) && !self.delegable.is_empty() {
+            return self.refuse("a sub-agent or a configuration agent cannot declare delegable sub-agents");
         }
-        if self.kind == AgentKind::Main && self.output_schema.is_some() {
-            return self.refuse("a main agent cannot declare an output schema");
+        if matches!(self.kind, AgentKind::Work | AgentKind::Config) && self.output_schema.is_some() {
+            return self.refuse("a work or configuration agent cannot declare an output schema");
         }
         if self.delegable.contains(&self.id) {
             return self.refuse("a delegable sub-agent is the agent itself");
+        }
+        if has_duplicate(&self.delegable) {
+            return self.refuse("duplicate delegable sub-agent");
         }
         if has_duplicate(&self.toolsets) {
             return self.refuse("duplicate toolset");
         }
         if has_duplicate(&self.modules) {
             return self.refuse("duplicate module");
+        }
+        if matches!(self.kind, AgentKind::Work | AgentKind::Sub)
+            && self
+                .modules
+                .iter()
+                .any(|module| CONFIGURATION_MODULES.contains(&module.as_str()))
+        {
+            return self.refuse("a configuration module is granted to a work agent or a sub-agent");
         }
         if self
             .sandbox
@@ -326,6 +343,9 @@ impl AgentDefinition {
         })
     }
 }
+
+/// Modules reserved to a configuration agent: a work agent and a sub-agent never receive them (`agent-sessions#BR-8`).
+const CONFIGURATION_MODULES: [&str; 4] = ["toolset_creator", "inspect", "contexts", "sessions"];
 
 /// Tells whether two entries of `items` are equal.
 fn has_duplicate(items: &[String]) -> bool {
@@ -376,7 +396,7 @@ mod tests {
     fn main_agent() -> AgentDefinition {
         AgentDefinition::new(
             "main".to_owned(),
-            AgentKind::Main,
+            AgentKind::Work,
             "You are the assistant of {{project}}.".to_owned(),
             "strix-qwen".to_owned(),
         )
@@ -430,7 +450,7 @@ mod tests {
     }
 
     fn full_main_agent() -> AgentDefinition {
-        full_definition("main", AgentKind::Main, PROMPT, PROFILE)
+        full_definition("main", AgentKind::Work, PROMPT, PROFILE)
     }
 
     fn assert_invalid(definition: &AgentDefinition, case: &str) {
@@ -567,16 +587,16 @@ mod tests {
         let cases = [
             (
                 "identifier",
-                full_definition("other", AgentKind::Main, PROMPT, PROFILE),
+                full_definition("other", AgentKind::Work, PROMPT, PROFILE),
             ),
             ("kind", full_definition("main", AgentKind::Sub, PROMPT, PROFILE)),
             (
                 "prompt",
-                full_definition("main", AgentKind::Main, "Another prompt.", PROFILE),
+                full_definition("main", AgentKind::Work, "Another prompt.", PROFILE),
             ),
             (
                 "profile",
-                full_definition("main", AgentKind::Main, PROMPT, "other-profile"),
+                full_definition("main", AgentKind::Work, PROMPT, "other-profile"),
             ),
             ("sampling", full_main_agent().with_sampling(sampling)),
             (
@@ -675,27 +695,27 @@ mod tests {
         let cases = [
             (
                 "an empty identifier",
-                full_definition("", AgentKind::Main, PROMPT, PROFILE),
+                full_definition("", AgentKind::Work, PROMPT, PROFILE),
             ),
             (
                 "a blank identifier",
-                full_definition("  ", AgentKind::Main, PROMPT, PROFILE),
+                full_definition("  ", AgentKind::Work, PROMPT, PROFILE),
             ),
             (
                 "an empty prompt",
-                full_definition("main", AgentKind::Main, "", PROFILE),
+                full_definition("main", AgentKind::Work, "", PROFILE),
             ),
             (
                 "a blank prompt",
-                full_definition("main", AgentKind::Main, " \n\t ", PROFILE),
+                full_definition("main", AgentKind::Work, " \n\t ", PROFILE),
             ),
             (
                 "an empty profile name",
-                full_definition("main", AgentKind::Main, PROMPT, ""),
+                full_definition("main", AgentKind::Work, PROMPT, ""),
             ),
             (
                 "a blank profile name",
-                full_definition("main", AgentKind::Main, PROMPT, "   "),
+                full_definition("main", AgentKind::Work, PROMPT, "   "),
             ),
         ];
         for (case, definition) in cases {
@@ -806,6 +826,111 @@ mod tests {
         assert!(
             matches!(valid, Ok(())),
             "a sandbox with positive memory limits must be valid, got {valid:?}"
+        );
+    }
+
+    /// Builds a definition of nature `kind` that grants the modules `modules`.
+    fn with_modules_of(kind: AgentKind, modules: &[&str]) -> AgentDefinition {
+        AgentDefinition::new(
+            "agent".to_owned(),
+            kind,
+            "You are an agent.".to_owned(),
+            "strix-qwen".to_owned(),
+        )
+        .with_modules(modules.iter().map(|module| (*module).to_owned()).collect())
+    }
+
+    // Scenario: configuration agent cannot delegate
+    #[test]
+    fn configuration_agent_cannot_delegate() {
+        let config = AgentDefinition::new(
+            "setup".to_owned(),
+            AgentKind::Config,
+            "You configure the host.".to_owned(),
+            "strix-qwen".to_owned(),
+        )
+        .with_delegable(vec!["worker".to_owned()]);
+        assert_invalid(&config, "a configuration agent declaring a delegable sub-agent");
+    }
+
+    // Scenario: configuration agent with its modules is valid
+    #[test]
+    fn configuration_agent_with_its_modules_is_valid() {
+        let config = with_modules_of(
+            AgentKind::Config,
+            &["toolset_creator", "inspect", "contexts", "sessions"],
+        );
+        let valid = config.validate();
+        assert!(
+            matches!(valid, Ok(())),
+            "a configuration agent granted the configuration modules must be valid, got {valid:?}"
+        );
+    }
+
+    // Scenario: work agent cannot receive the creation module
+    #[test]
+    fn work_agent_cannot_receive_the_creation_module() {
+        let work = with_modules_of(AgentKind::Work, &["toolset_creator"]);
+        assert_invalid(&work, "a work agent granted the toolset-creation module");
+    }
+
+    // Scenario: sub-agent cannot receive an inspection module
+    #[test]
+    fn sub_agent_cannot_receive_an_inspection_module() {
+        let sub = with_modules_of(AgentKind::Sub, &["inspect"]);
+        assert_invalid(&sub, "a sub-agent granted the inspection module");
+    }
+
+    /// Every reserved module refused for a work agent and for a sub-agent: the list is that of the definition.
+    #[test]
+    fn every_reserved_module_refused_for_work_and_sub_agents() {
+        for module in ["toolset_creator", "inspect", "contexts", "sessions"] {
+            assert_invalid(
+                &with_modules_of(AgentKind::Work, &[module]),
+                &format!("a work agent granted `{module}`"),
+            );
+            assert_invalid(
+                &with_modules_of(AgentKind::Sub, &[module]),
+                &format!("a sub-agent granted `{module}`"),
+            );
+        }
+    }
+
+    #[test]
+    fn configuration_agent_with_output_schema_is_refused() {
+        let config = AgentDefinition::new(
+            "setup".to_owned(),
+            AgentKind::Config,
+            "You configure the host.".to_owned(),
+            "strix-qwen".to_owned(),
+        )
+        .with_output_schema(serde_json::json!({"type": "object"}));
+        assert_invalid(&config, "a configuration agent declaring an output schema");
+    }
+
+    #[test]
+    fn legacy_main_kind_reads_as_work() {
+        let text = r#"{"id":"main","kind":"main","prompt":"hello","profile":"strix-qwen"}"#;
+        let definition: AgentDefinition = serde_json::from_str(text).expect("the legacy kind still reads");
+        assert_eq!(
+            definition.kind(),
+            AgentKind::Work,
+            "the legacy `main` kind must read as `work`"
+        );
+        let value = serde_json::to_value(&definition).expect("a definition serializes");
+        assert_eq!(
+            value.get("kind").and_then(serde_json::Value::as_str),
+            Some("work"),
+            "a work agent serializes as `work`"
+        );
+    }
+
+    #[test]
+    fn duplicate_delegable_sub_agent_refused() {
+        let duplicated = main_agent().with_delegable(vec!["worker".to_owned(), "worker".to_owned()]);
+        assert_invalid(
+            &duplicated,
+            "a work agent listing the same delegable sub-agent twice",
         );
     }
 }

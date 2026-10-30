@@ -14,6 +14,8 @@ Exposes:
   @ProviderStore
   @InMemoryCatalog
   @Layered
+  @Layered::top
+  @Layered::base
 
 Accepts:
   @AgentStore::get_agent / put_agent: un identifiant d'agent / une @AgentDefinition.
@@ -52,6 +54,25 @@ Depends on:
   ./profile.sdd
   ./provider.sdd
   ./error.sdd
+
+Tasks:
+  [ ] #5 Test manquant : le catalogue stocke bien la forme JSON (JSON invalide injecté dans le stockage rend @AgentsError::Store au `get`).
+  [x] #1 Tests (tokio de test) puis implémentation.
+  [x] #3 Posé à l'implémentation : @resolve_profile est une méthode fournie de @ProfileStore ; `get_*` rend `AgentsResult<Option<T>>` ; l'échec de sérialisation devient @AgentsError::Store ; un verrou empoisonné est récupéré.
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #4 Décidé : la validation d'une définition à l'écriture est faite par @InMemoryCatalog ; un hôte qui implémente @AgentStore doit appeler @AgentDefinition::validate (à documenter dans le trait). Une méthode fournie qui impose la validation est écartée : @AgentStore::put_agent resterait contournable de toute façon.
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #2 Décidé le 2026-10-27 : le niveau (utilisateur, projet) n'est pas dans la clé de stockage ; un nom est unique par catalogue, un catalogue par niveau, que l'hôte empile.
+  [x] #6 Spécifier et livrer la résolution en cascade au-dessus de plusieurs catalogues (le niveau projet l'emporte, `agent-sessions/agents#FR-6` et `FR-7`) si elle n'existe pas encore.
+  [ ] #10 Compléments relevés à la validation de H3 : assertions de `put_agent` et `put_profile` écrivant dans le haut seulement dans le test du Scenario « put writes to the top layer only ».
+  [x] #7 Forme choisie : `Layered<Top, Base>` dans ./catalog.rs, même spec que les traits (la composition est du stockage, et le fichier reste court). Alternative non retenue : un couple layered.sdd / layered.rs séparé, à prendre si ce fichier grossit ou si la cascade gagne un comportement propre.
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #8 Fusion champ par champ écartée : un profil du niveau projet remplace entièrement celui du niveau utilisateur (`agent-sessions/agents#FR-7`, « la surcharge l'emporte »). Une fusion partielle serait une décision à part, à prendre si un profil partiel s'avère nécessaire.
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #9 La validation d'une définition à l'écriture reste celle de la couche qui stocke : `put_agent` de @Layered délègue à la couche haute, qui doit être une @InMemoryCatalog ou un hôte qui valide (voir #4).
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #11 Accesseurs en lecture `top()` et `base()` de @Layered (décidé le 2026-10-29) : le domaine `toolsets` implémente ses propres traits de stockage pour @Layered et doit lire ses deux couches (un `agents` qui dépendrait de `toolsets` inverserait la dépendance). Scenario : « layers are readable ».
+      Validé le 2026-10-29 (validator, 58 mutants dont 55 tués) sous `scripts/check` complet.
 
 Scenario: put then get restores each entity
   Given an in-memory catalog and an agent, a profile and a provider
@@ -109,14 +130,7 @@ Scenario: layers nest for more than two levels
   When the provider is fetched through the stack, then put through the stack
   Then it is found through the stack, and the put lands in A only
 
-Tasks:
-  [ ] #5 Test manquant : le catalogue stocke bien la forme JSON (JSON invalide injecté dans le stockage rend @AgentsError::Store au `get`).
-  [x] #1 Tests (tokio de test) puis implémentation.
-  [?] #3 Posé à l'implémentation : @resolve_profile est une méthode fournie de @ProfileStore ; `get_*` rend `AgentsResult<Option<T>>` ; l'échec de sérialisation devient @AgentsError::Store ; un verrou empoisonné est récupéré.
-  [?] #4 Décidé : la validation d'une définition à l'écriture est faite par @InMemoryCatalog ; un hôte qui implémente @AgentStore doit appeler @AgentDefinition::validate (à documenter dans le trait). Une méthode fournie qui impose la validation est écartée : @AgentStore::put_agent resterait contournable de toute façon.
-  [x] #2 Décidé le 2026-10-27 : le niveau (utilisateur, projet) n'est pas dans la clé de stockage ; un nom est unique par catalogue, un catalogue par niveau, que l'hôte empile.
-  [x] #6 Spécifier et livrer la résolution en cascade au-dessus de plusieurs catalogues (le niveau projet l'emporte, `agent-sessions/agents#FR-6` et `FR-7`) si elle n'existe pas encore.
-  [ ] #10 Compléments relevés à la validation de H3 : assertions de `put_agent` et `put_profile` écrivant dans le haut seulement dans le test du Scenario « put writes to the top layer only ».
-  [?] #7 Forme choisie : `Layered<Top, Base>` dans ./catalog.rs, même spec que les traits (la composition est du stockage, et le fichier reste court). Alternative non retenue : un couple layered.sdd / layered.rs séparé, à prendre si ce fichier grossit ou si la cascade gagne un comportement propre.
-  [?] #8 Fusion champ par champ écartée : un profil du niveau projet remplace entièrement celui du niveau utilisateur (`agent-sessions/agents#FR-7`, « la surcharge l'emporte »). Une fusion partielle serait une décision à part, à prendre si un profil partiel s'avère nécessaire.
-  [?] #9 La validation d'une définition à l'écriture reste celle de la couche qui stocke : `put_agent` de @Layered délègue à la couche haute, qui doit être une @InMemoryCatalog ou un hôte qui valide (voir #4).
+Scenario: layers are readable
+  Given un @Layered construit avec une couche haute et une couche basse
+  When top() et base() sont lus
+  Then ils rendent les deux couches reçues
