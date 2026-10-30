@@ -24,12 +24,13 @@ const MAX_DATA_DEPTH: usize = 60;
 const SATURATED_POSITION: usize = 65_535;
 
 /// Names that Rhai handles on its own: a call to one of them is never reported at restore.
-const RHAI_KEYWORDS: [&str; 9] = [
+const RHAI_KEYWORDS: [&str; 10] = [
     "print",
     "debug",
     "type_of",
     "is_def_fn",
     "is_def_var",
+    "is_shared",
     "eval",
     "call",
     "curry",
@@ -790,7 +791,7 @@ fn is_doc_comment(text: &str) -> bool {
 }
 
 /// The key of a function: its name and its number of parameters, such as `scale/2`.
-fn key_of(name: &str, arity: usize) -> String {
+pub(in crate::scratchpad) fn key_of(name: &str, arity: usize) -> String {
     format!("{name}/{arity}")
 }
 
@@ -1330,6 +1331,19 @@ mod tests {
         assert!(
             recompiled.warnings().is_empty(),
             "operators, methods, print, to_string and closures are not reported, got {:?}",
+            recompiled.warnings()
+        );
+    }
+
+    #[test]
+    fn is_shared_is_a_keyword_and_not_reported_at_restore() {
+        let engine = engine();
+        let source = "fn f(v) { if is_shared(v) { 1 } else { 2 } }";
+        let recompiled = recompile_functions(&engine, &sources(&[("f/1", source)]));
+        assert!(recompiled.broken().is_empty(), "the source is not broken");
+        assert!(
+            recompiled.warnings().is_empty(),
+            "is_shared is handled by Rhai itself, got {:?}",
             recompiled.warnings()
         );
     }

@@ -119,9 +119,14 @@ Scenario: rendering is deterministic
 
 Tasks:
   [ ] #1 Tests puis implémentation.
-  [?] #2 Posé : @full_text construit le texte entier puis @truncate_middle le coupe. La mémoire est bornée par les plafonds de ./limits.sdd pour chaque collection, mais pas pour leur imbrication (un tableau de 1 000 000 de tableaux de 1 000 000 d'éléments dépasserait). Un écrivain qui ne retient que le début et la fin pendant la sérialisation est possible ; il n'est pas posé tant qu'un besoin n'est pas établi.
-  [?] #3 Posé : l'unité se rend `()` (pas vide, pas `null`) pour qu'un script sans valeur finale soit lisible par le LLM ; un `blob` se rend en description (le LLM l'encode lui-même avec `base64_encode`).
-  [?] #4 Posé : le texte de l'avis est en anglais, constant, et ne dépend d'aucun nom de fonction du toolset ; il renvoie à « a variable » de façon générique (le LLM connaît les fonctions de ./format.sdd par l'introspection).
-  [?] #5 Un `blob` imbriqué dans un tableau ou une table est décrit comme la chaîne `[blob: N bytes]` (et non comme un tableau
+  [!] #2 Posé : @full_text construit le texte entier puis @truncate_middle le coupe. La mémoire est bornée par les plafonds de ./limits.sdd pour chaque collection, mais pas pour leur imbrication (un tableau de 1 000 000 de tableaux de 1 000 000 d'éléments dépasserait). Un écrivain qui ne retient que le début et la fin pendant la sérialisation est possible ; il n'est pas posé tant qu'un besoin n'est pas établi.
+      Risque relevé le 2026-10-29 : l'imbrication de collections n'est pas bornée au rendu (les plafonds de ./limits.sdd valent par collection) ; à traiter avec un écrivain tronqué si un script peut y mener, sinon laissé tel quel.
+  [x] #3 Posé : l'unité se rend `()` (pas vide, pas `null`) pour qu'un script sans valeur finale soit lisible par le LLM ; un `blob` se rend en description (le LLM l'encode lui-même avec `base64_encode`).
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #4 Posé : le texte de l'avis est en anglais, constant, et ne dépend d'aucun nom de fonction du toolset ; il renvoie à « a variable » de façon générique (le LLM connaît les fonctions de ./format.sdd par l'introspection).
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #5 Un `blob` imbriqué dans un tableau ou une table est décrit comme la chaîne `[blob: N bytes]` (et non comme un tableau
       d'octets). Un flottant non fini imbriqué fait refuser le JSON : la valeur entière retombe sur son texte Rhai, jamais `null`.
-  [?] #6 `json_value` (visibilité `pub(in crate::scratchpad)`) n'est pas dans `Exposes` : c'est la forme JSON partagée avec ./format.sdd.
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #6 `json_value` (visibilité `pub(in crate::scratchpad)`) n'est pas dans `Exposes` : c'est la forme JSON partagée avec ./format.sdd.
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).

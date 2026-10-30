@@ -1,0 +1,103 @@
+Spec: inspect
+
+Purpose:
+  Moteur d'inspection du tool `rhai_prod_inspect` de l'agent de configuration : les fonctions d'introspection s'exécutent, les fonctions des modules de la cible (toolsets projetés, modules MCP)
+    sont des coquilles de même nom, signature et documentation dont tout appel échoue, les variables d'une session passée se lisent en lecture seule
+    (`agent-sessions/scratchpad#FR-13`, `agent-sessions#BR-8`, `agent-sessions/modules#FR-11`).
+
+Owns:
+  ./inspect.rs
+
+References:
+  ./engine.sdd
+  ./introspect.sdd
+  ./run.sdd
+  ./grant.sdd
+  ./error.sdd
+
+Depends on:
+  ./engine.sdd
+  ./error.sdd
+  ./grant.sdd
+  ./introspect.sdd
+  ./persist.sdd
+  ./run.sdd
+  rhai
+
+Exposes:
+  @ModuleDescriptor
+  @FunctionDescriptor
+  @shell_module
+  @InspectionPad
+  @InspectionTarget
+  @descriptors_from_catalog
+
+Accepts:
+  @FunctionDescriptor::new: un nom, les noms des paramètres et une documentation optionnelle.
+  @ModuleDescriptor::new: un nom de module (identifiant Rhai valide) ; constructeur chaîné : une @FunctionDescriptor ; rend `None` si le nom est invalide.
+  @shell_module: un @ModuleDescriptor ; rend un @rhai::Module dont chaque fonction rend l'erreur d'inspection seule.
+  @InspectionPad::new: un @ScratchpadEngine de base (groupe pur et format), les @Grants de la cible, les @ModuleDescriptor des modules projetés et un @InspectionTarget.
+  @InspectionTarget: `Definition` (un agent avec son ToolsetContext : rien de plus que les descriptions) ou `Session` (un @PadSnapshot restauré : variables en valeur, sources de fonctions).
+  @descriptors_from_catalog: un @Catalog (./introspect.sdd) et les noms des modules à projeter ; rend les @ModuleDescriptor correspondants (noms, paramètres et documentation des fonctions publiques du niveau direct de chaque module).
+  @InspectionPad::run: le texte du script, le @CancelHandle du run et un @RunEnv ; fonction asynchrone.
+
+Returns:
+  @InspectionPad::run: un @RunOutcome comme ./run.sdd, sans instantané de persistance exploitable : le pad d'inspection ne se persiste jamais.
+
+Raises:
+  @ScratchpadError::InspectionOnly: l'appel d'une fonction de coquille ; le message nomme la fonction et dit que l'inspection ne s'exécute pas. Écrire une variable d'une cible `Session` échoue par l'erreur de constante de Rhai (classe `Runtime`) ; appeler une fonction définie par le LLM dans la session échoue par `NotFound`, la fonction n'étant pas dans l'arbre appelable (décidé le 2026-10-29).
+
+Must:
+  Les fonctions d'introspection de ./introspect.sdd s'exécutent réellement ; `modules()` et `functions()` listent les coquilles comme les modules réels, avec leurs signatures et leur documentation (`agent-sessions/scratchpad#AC-13`).
+  Aucune coquille n'appelle quoi que ce soit : pas d'E/S, pas de connexion, pas d'appel au serveur MCP, pas d'effet sur la cible ; l'erreur est la même pour toutes (`InspectionOnly`).
+  Les variables d'une cible `Session` sont posées dans le scope comme des constantes : les lire rend leur valeur, les écrire échoue ; la restauration ne rejoue aucun script (`agent-sessions/scratchpad#DEC-1`). Les fonctions définies par le LLM dans la session se listent (`functions("script")`), leur texte source se lit par `source(nom)` (fonction du seul pad d'inspection, qui rend le texte ou une erreur nommant les fonctions connues) et elles ne sont pas appelables.
+  Le groupe pur et les fonctions de format sont accordés pour que l'agent de configuration puisse manipuler les valeurs lues ; aucun groupe `Fs`, `Shell`, `Sleep` ni `Host` (`get_env` lirait l'environnement du processus).
+  Une cible `Definition` n'a aucune variable ; son catalogue est celui qu'un agent de la définition verrait.
+  Les valeurs lues viennent de l'état persisté, déjà masqué des secrets déclarés (run.sdd #10) ; le texte rendu est masqué de nouveau par le @Redactor du run.
+  L'ouverture d'une cible n'exécute aucune fonction de toolset, aucune initialisation de module.
+
+Must not:
+  Rendre un module ou une fonction qui n'est pas dans la cible.
+  Persister quoi que ce soit : l'état d'inspection n'entre jamais dans un @SessionState de production.
+  [x] #6 Décisions du 2026-10-29 sur les choix de T8 : `source` n'est pas listée par `functions()` (enregistrement hors catalogue) ; elle lit aussi les fonctions privées de la session (ce sont celles du LLM) ; erreurs de classe `Runtime` qui nomment les fonctions connues ; un module de la cible sans fonction directe n'a pas de descripteur ; noms de paramètres génériques `arg1..argN` quand la signature n'en donne pas ; les doublons de toolset et de skill dans @InspectionPad::new sont refusés en amont par @Grants (branche défensive non testable depuis ce module).
+  [x] #7 Décision : `timestamp()` accepté comme sur le pad ordinaire (engine.sdd #6), sans test. Validation du 2026-10-29 : le @RunOutcome d'un pad d'inspection porte un instantané vide (ni les variables de la cible ni celles du script), avec test ; Debug manuel de @PadSnapshot (noms des variables et des clés de fonctions, nombre d'avertissements ; jamais les valeurs ni les sources) ; test que `source` n'est pas listée par `functions()` .
+      Validé le 2026-10-29 (validator, 76 mutants, `scripts/check` complet vert).
+
+Scenario: shell function lists with its documentation
+  Given un module MCP décrit avec la fonction `query(expr)` documentée
+  When `functions("grafana")` est exécuté dans le pad d'inspection
+  Then le chemin, la signature et la documentation de `grafana::query` sont listés
+
+Scenario: shell call fails without side effect
+  Given le même module
+  When `grafana::query("up")` est exécuté
+  Then le statut est Failed et le texte dit que l'inspection ne s'exécute pas, et aucun appel n'a eu lieu
+
+Scenario: session variables are read-only
+  Given une cible Session dont le scope contient `n = 3`
+  When `n` est lu, puis `n = 4` est exécuté
+  Then la lecture rend 3 et l'écriture échoue
+
+Scenario: session functions are listed but not callable
+  Given une cible Session qui a défini `fn f(x) { x + 1 }`
+  When `functions("script")`, `source("f")` puis `f(1)` sont exécutés
+  Then la première liste `f`, `source("f")` rend son texte source et la seconde échoue
+
+Scenario: definition target has no variables
+  Given une cible Definition
+  When `vars()` est exécuté
+  Then le tableau est vide
+
+Scenario: no filesystem or shell group
+  Given un pad d'inspection
+  When `modules()` est exécuté
+  Then ni `fs` ni `shell` ne figurent parmi les modules
+
+Tasks:
+  [x] #1 Tests puis implémentation.
+      Validé le 2026-10-29 (validator, mutations manuelles) sous `scripts/check` complet.
+  [ ] #2 Variante `InspectionOnly` (./error.sdd) : implémentée par T7, en attente de validation.
+  [x] #3 Posé le 2026-10-29 : le pad d'inspection réutilise @Scratchpad::run (même rendu, mêmes plafonds, même masquage) sur un moteur de la même fabrique, avec des modules coquilles ; l'instantané qu'il calcule est jeté. À confirmer à l'implémentation si ./run.sdd doit s'ouvrir à un mode « sans persistance ».
+  [x] #5 `source(nom)` dans le pad d'inspection, @descriptors_from_catalog et leurs tests ; tests des déclarations en double (coquille, toolset, skill) dont les branches ne sont pas couvertes (T7 : 87 % de lignes).
+      Validé le 2026-10-29 (validator : 40 mutations manuelles, `scripts/check` complet vert).
+  [?] #4 Posé : les descripteurs de modules de toolset projetés viennent du @Catalog d'un moteur réel construit pour la cible (./introspect.sdd), non d'un nouveau format ; les descripteurs MCP viennent du `tools/list` du connecteur (`agent-sessions/modules#FR-11`, domaine `modules`).

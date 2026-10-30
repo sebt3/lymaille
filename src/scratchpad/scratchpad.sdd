@@ -17,6 +17,7 @@ Structure:
   ./introspect.rs: catalogue et fonctions d'introspection
   ./suggest.rs: candidats les plus proches parmi les éléments accordés
   ./run.rs: le pad et l'exécution d'un appel de `rhai_pad`
+  ./inspect.rs: pad d'inspection de l'agent de configuration (`rhai_prod_inspect`), modules coquilles
 
 Owns:
   ./mod.rs
@@ -36,6 +37,7 @@ References:
   ./introspect.sdd
   ./suggest.sdd
   ./run.sdd
+  ./inspect.sdd
 
 Must:
   Ne réaliser aucune E/S : ni fichier, ni processus, ni environnement, ni sortie standard ; le moteur n'a pas de résolveur de modules par fichier et capte `print` et `debug` (`agent-sessions#CON-1`, `agent-sessions#CON-3`).
@@ -50,7 +52,10 @@ Must:
 
 Tasks:
   [ ] #1 Déclarer les sous-modules dans ./mod.rs au fil des specs enfants livrées.
-  [?] #2 Dépendances à épingler dans `/Cargo.toml` (hors de cette spec) et features : `rhai` avec `sync`, `serde`, `internals`, `metadata` ; `vynil-core` avec les features `rhai` et `rt` (et, selon ./engine.sdd #3, `fs` et `shell` relayées) ; `serde`, `serde_json`, `thiserror`, `tokio` (`rt`, `rt-multi-thread`, `sync`, `time`, `macros`) et `tokio-util` pour @CancelHandle. À consigner par le développeur principal dans `/lymaille.sdd` (tâche #2) ; ce répertoire ne les épingle pas.
-  [?] #3 Déclarations à faire hors de ce répertoire : `/src/lib.sdd` (module `scratchpad` et ré-exports) et `/lymaille.sdd` (`References`). Non faites ici.
-  [?] #4 Dépendances d'autres domaines, posées par ce domaine et non encore spécifiées : `toolsets` (enregistre `session_context()` par @EngineBuilder::with_registration, construit ses modules avec @base_engine, fournit @GrantedModule, @GrantedToolset, @GrantedSkill, embarque @limits_notice dans le skill intégré) ; `modules` (modules MCP en @GrantedModule) ; `session` (la boucle de tour appelle @Scratchpad::run et range @PadSnapshot dans l'état) ; `agents` (plafonds de mémoire dans @SandboxLimits, voir ./limits.sdd #3).
-  [?] #5 Mesures préalables (spikes courts, avant l'implémentation de ./persist.sdd et ./introspect.sdd) : délimitation du texte d'une fonction par `Engine::lex`, parcours des appels qualifiés par `AST::walk`, champs du JSON de métadonnées de Rhai, attrapage de l'arrêt de `on_progress` par `try/catch`. Les résultats alimentent `Observed in:` des specs concernées.
+  [x] #2 Dépendances à épingler dans `/Cargo.toml` (hors de cette spec) et features : `rhai` avec `sync`, `serde`, `internals`, `metadata` ; `vynil-core` avec les features `rhai` et `rt` (et, selon ./engine.sdd #3, `fs` et `shell` relayées) ; `serde`, `serde_json`, `thiserror`, `tokio` (`rt`, `rt-multi-thread`, `sync`, `time`, `macros`) et `tokio-util` pour @CancelHandle. À consigner par le développeur principal dans `/lymaille.sdd` (tâche #2) ; ce répertoire ne les épingle pas.
+      Fait : voir lymaille.sdd #2, #7, #9.
+  [x] #3 Déclarations à faire hors de ce répertoire : `/src/lib.sdd` (module `scratchpad` et ré-exports) et `/lymaille.sdd` (`References`). Non faites ici.
+      Fait (lymaille.sdd References, lib.sdd).
+  [!] #4 Dépendances d'autres domaines, posées par ce domaine et non encore spécifiées : `toolsets` (enregistre `session_context()` par @EngineBuilder::with_registration, construit ses modules avec @base_engine, fournit @GrantedModule, @GrantedToolset, @GrantedSkill, embarque @limits_notice dans le skill intégré) ; `modules` (modules MCP en @GrantedModule) ; `session` (la boucle de tour appelle @Scratchpad::run et range @PadSnapshot dans l'état) ; `agents` (plafonds de mémoire dans @SandboxLimits, voir ./limits.sdd #3).
+  [x] #5 Mesures préalables (spikes courts, avant l'implémentation de ./persist.sdd et ./introspect.sdd) : délimitation du texte d'une fonction par `Engine::lex`, parcours des appels qualifiés par `AST::walk`, champs du JSON de métadonnées de Rhai, attrapage de l'arrêt de `on_progress` par `try/catch`. Les résultats alimentent `Observed in:` des specs concernées.
+      Fait : spikes A et B (persist.sdd) et mesures de l'introspection.

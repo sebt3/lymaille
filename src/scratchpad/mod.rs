@@ -6,10 +6,12 @@ mod engine;
 mod error;
 mod format;
 mod grant;
+mod inspect;
 mod introspect;
 mod limits;
 mod persist;
 mod render;
+mod run;
 mod suggest;
 
 pub use engine::{EngineBuilder, ScratchpadEngine};
@@ -18,6 +20,10 @@ pub use error::{
 };
 pub use format::register_format_functions;
 pub use grant::{CoreGroup, GrantedModule, GrantedSkill, GrantedToolset, Grants};
+pub use inspect::{
+    FunctionDescriptor, InspectionPad, InspectionTarget, ModuleDescriptor, descriptors_from_catalog,
+    shell_module,
+};
 pub use introspect::{
     Catalog, FunctionEntry, IntrospectionSource, Origin, ScriptFunction, VariableInfo, limits_notice,
 };
@@ -27,4 +33,5 @@ pub use persist::{
     extract_function_sources, recompile_functions, restore_scope, snapshot_scope, to_dynamic, to_tagged,
 };
 pub use render::{Rendered, full_text, render_value, truncate_middle};
+pub use run::{PadSnapshot, Restored, RunEnv, RunOutcome, RunStatus, Scratchpad};
 pub use suggest::{CandidateSet, nearest, suggest_for};

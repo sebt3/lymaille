@@ -130,12 +130,15 @@ Scenario: format functions do not panic
 
 Tasks:
   [ ] #1 Tests puis implémentation.
-  [?] #2 Posé : liste des fonctions et noms (`fmt_text`, `fmt_json`, `fmt_json_pretty`, `fmt_table`, `fmt_pluck`, `fmt_path`, `fmt_grep`, `fmt_head`, `fmt_tail`, `fmt_truncate`, `fmt_truncate_ends`), préfixe `fmt_` décidé le 2026-10-27. `agent-sessions/scratchpad#FR-8` en donne le genre (texte, JSON, tableau aligné, extraction, troncature début et fin) sans noms : la liste reste à confirmer avec l'auteur du skill intégré (`toolsets`).
-  [?] #3 Posé : pas de format YAML ni Markdown : `vynil-core` offre `yaml_encode` dans ses modules toujours disponibles, mais ce module n'est pas accordé par le scratchpad (seuls le groupe pur et les groupes accordés le sont). À rouvrir si un besoin de YAML apparaît.
-  [?] #4 Posé : la largeur d'une cellule se compte en caractères, pas en cellules d'affichage (écritures asiatiques, emoji) ; le tableau est destiné à un LLM, non à un terminal.
+  [x] #2 Posé : liste des fonctions et noms (`fmt_text`, `fmt_json`, `fmt_json_pretty`, `fmt_table`, `fmt_pluck`, `fmt_path`, `fmt_grep`, `fmt_head`, `fmt_tail`, `fmt_truncate`, `fmt_truncate_ends`), préfixe `fmt_` décidé le 2026-10-27. `agent-sessions/scratchpad#FR-8` en donne le genre (texte, JSON, tableau aligné, extraction, troncature début et fin) sans noms : la liste reste à confirmer avec l'auteur du skill intégré (`toolsets`).
+  [x] #3 Posé : pas de format YAML ni Markdown : `vynil-core` offre `yaml_encode` dans ses modules toujours disponibles, mais ce module n'est pas accordé par le scratchpad (seuls le groupe pur et les groupes accordés le sont). À rouvrir si un besoin de YAML apparaît.
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #4 Posé : la largeur d'une cellule se compte en caractères, pas en cellules d'affichage (écritures asiatiques, emoji) ; le tableau est destiné à un LLM, non à un terminal.
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
   [x] #5 Renommage `fmt_*` (décision du développeur principal, 2026-10-27) : collision avec `to_json`, méthode du paquet standard de
       Rhai sur les tables (présente dans `Engine::new()`), levée en préfixant toutes les fonctions de ce module par `fmt_`. Le test
       `structured_object_as_json` devient discriminant. Aucune fonction `fmt_*` n'existe dans Rhai 1.27.0 ni dans `vynil-core` 0.9.0.
-  [?] #6 `fmt_table` : sans clé, ou avec `columns` vide, la chaîne est vide (et non l'en-tête seul) ; une colonne qui n'est pas une chaîne
+  [x] #6 `fmt_table` : sans clé, ou avec `columns` vide, la chaîne est vide (et non l'en-tête seul) ; une colonne qui n'est pas une chaîne
       est refusée (message nommant l'indice) ; une cellule non chaîne passe par le texte de `full_text` (le `()` et le blob ne sont pas
       du JSON strict).
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).

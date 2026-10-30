@@ -163,6 +163,13 @@ pub enum ScratchpadError {
     /// The run was interrupted by the cancellation of the host.
     #[error("script cancelled")]
     Cancelled,
+    /// The inspection pad does not run what it reads: a function of a shell module, or a write to a variable of its
+    /// target. Carries the name of the function. Its class is `Runtime`. See `inspect.rs`.
+    #[error("{name} is not executed: the inspection does not run it")]
+    InspectionOnly {
+        /// Name of the function, `module::function`.
+        name: String,
+    },
     /// The engine cannot be built: a group that cannot be granted, a registration that fails.
     #[error("scratchpad engine failed: {message}")]
     Engine {
@@ -213,7 +220,7 @@ impl ScratchpadError {
     pub const fn class(&self) -> ScriptErrorClass {
         match self {
             Self::Syntax { .. } => ScriptErrorClass::Syntax,
-            Self::Runtime { .. } => ScriptErrorClass::Runtime,
+            Self::Runtime { .. } | Self::InspectionOnly { .. } => ScriptErrorClass::Runtime,
             Self::NotFound { .. } => ScriptErrorClass::NotFound,
             Self::Limit { .. } => ScriptErrorClass::Limit,
             Self::Cancelled => ScriptErrorClass::Cancelled,
@@ -320,10 +327,15 @@ fn classify(error: &EvalAltResult) -> ScratchpadError {
         | EvalAltResult::ErrorTooManyVariables(position)
         | EvalAltResult::ErrorTooManyModules(position) => limit(LimitKind::Other, error, *position),
         EvalAltResult::ErrorTerminated(..) => ScratchpadError::Cancelled,
-        EvalAltResult::ErrorRuntime(value, position) => ScratchpadError::Runtime {
-            message: runtime_message(value),
-            position: script_position(*position),
-        },
+        // An inspection shell raises its refusal as a runtime error whose value is the refusal itself: the value is the
+        // only way to tell it from a `throw` of the script, which cannot build one.
+        EvalAltResult::ErrorRuntime(value, position) => value
+            .clone()
+            .try_cast::<ScratchpadError>()
+            .unwrap_or_else(|| ScratchpadError::Runtime {
+                message: runtime_message(value),
+                position: script_position(*position),
+            }),
         // `EvalAltResult` is `#[non_exhaustive]`: the wildcard arm is the `Runtime` fallback of the spec.
         _ => ScratchpadError::Runtime {
             message: leaf_message(error),
@@ -414,6 +426,36 @@ fn leaf_message(error: &EvalAltResult) -> String {
 mod tests {
     use super::{LimitKind, NotFoundKind, ScratchpadError, ScriptErrorClass, ScriptPosition};
     use rhai::{Dynamic, Engine, EvalAltResult, FuncRegistration, Module, ParseErrorType, Position};
+
+    #[test]
+    fn inspection_only_is_a_runtime_error_naming_its_function() {
+        let error = ScratchpadError::InspectionOnly {
+            name: "grafana::query".to_owned(),
+        };
+        assert_eq!(
+            error.class(),
+            ScriptErrorClass::Runtime,
+            "an inspection refusal is a runtime error"
+        );
+        assert_eq!(
+            error.to_string(),
+            "grafana::query is not executed: the inspection does not run it",
+            "the text names the function and says that the inspection does not run it"
+        );
+    }
+
+    #[test]
+    fn inspection_marker_travels_through_rhai_as_its_error() {
+        let marker = ScratchpadError::InspectionOnly {
+            name: "grafana::query".to_owned(),
+        };
+        let raised = EvalAltResult::ErrorRuntime(Dynamic::from(marker.clone()), Position::NONE);
+        assert_eq!(
+            ScratchpadError::from_rhai(&raised),
+            marker,
+            "a refusal raised by an inspection shell is classified back to its own error"
+        );
+    }
 
     fn position() -> Option<ScriptPosition> {
         ScriptPosition::new(3, 5)

@@ -38,6 +38,7 @@ Raises:
   @ScratchpadError::NotFound: fonction, module ou variable introuvable ; porte le genre (@NotFoundKind), le nom demandé sans les types d'arguments, la position, le nom de la fonction du script où l'erreur est survenue si elle y est survenue, et les suggestions (vides par défaut).
   @ScratchpadError::Limit: dépassement d'un plafond ; porte le genre (@LimitKind : profondeur d'appel, profondeur d'expression, taille de chaîne, de tableau ou de table, autre), le message et la position.
   @ScratchpadError::Cancelled: exécution interrompue par l'annulation du run.
+  @ScratchpadError::InspectionOnly: appel d'une fonction de coquille dans le pad d'inspection (`./inspect.sdd`) ; porte le nom de la fonction (l'écriture d'une variable de la cible échoue par l'erreur de constante de Rhai, classe `Runtime`). Sa @ScriptErrorClass est `Runtime`. Texte `Display` : « {name} is not executed: the inspection does not run it ». Elle traverse Rhai comme valeur d'un `ErrorRuntime` et @ScratchpadError::from_rhai la restitue telle quelle (exception à la table du `Must`, qui range sinon toute erreur de fonction native en `Runtime`).
   @ScratchpadError::Engine: construction du moteur impossible (groupe non accordable, enregistrement refusé), message texte.
   @ScratchpadError::Internal: défaut interne (tâche bloquante interrompue par une panique, verrou empoisonné irrécupérable), message texte.
 
@@ -112,16 +113,22 @@ Scenario: zero position refused
 
 Tasks:
   [ ] #1 Tests des textes `Display`, des classements de `from_rhai` (un test par variante de Rhai listée) et du dépliage des erreurs enveloppées, puis l'énumération.
-  [?] #2 Posé : @ScratchpadError::class et @ScriptErrorClass existent pour que le signal de qualité « nombre d'erreurs Rhai » (`agent-sessions/session#FR-13`) et l'audit comptent par classe sans retenir de texte ; la boucle de tour (domaine `session`) les consomme.
-  [?] #3 Posé : le genre « profondeur d'expression » vient d'une erreur d'analyse de Rhai (profondeur maximale d'expression) et non d'une erreur d'exécution : à vérifier par un test dès l'implémentation, le classement de `Syntax` ou de `Limit` découlant de la variante réellement produite.
-  [?] #4 Posé : `ErrorClass` d'`agents` reste à la racine ; le type d'erreur du scratchpad se nomme `ScriptErrorClass` et est réexporté sous ce nom, sans alias (décision du 2026-10-27, voir ../lib.sdd, Must).
-  [?] #5 Dépliage des wrappers : la fonction retenue pour un `NotFound` est la plus interne ; un wrapper de module (`ErrorInModule`)
+  [x] #2 Posé : @ScratchpadError::class et @ScriptErrorClass existent pour que le signal de qualité « nombre d'erreurs Rhai » (`agent-sessions/session#FR-13`) et l'audit comptent par classe sans retenir de texte ; la boucle de tour (domaine `session`) les consomme.
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #3 Posé : le genre « profondeur d'expression » vient d'une erreur d'analyse de Rhai (profondeur maximale d'expression) et non d'une erreur d'exécution : à vérifier par un test dès l'implémentation, le classement de `Syntax` ou de `Limit` découlant de la variante réellement produite.
+      Un test existe (`ExprTooDeep` classé `Limit`). Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #4 Posé : `ErrorClass` d'`agents` reste à la racine ; le type d'erreur du scratchpad se nomme `ScriptErrorClass` et est réexporté sous ce nom, sans alias (décision du 2026-10-27, voir ../lib.sdd, Must).
+  [x] #5 Dépliage des wrappers : la fonction retenue pour un `NotFound` est la plus interne ; un wrapper de module (`ErrorInModule`)
       préfixe le message par `in module {name}: ` (la spec ne dit que `in function`). Un `NotFound` sous un module n'a pas de fonction.
-  [?] #6 `EvalAltResult` est `#[non_exhaustive]` dans Rhai : rustc exige un bras `_` dans `classify`, qui est aussi le repli `Runtime`
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #6 `EvalAltResult` est `#[non_exhaustive]` dans Rhai : rustc exige un bras `_` dans `classify`, qui est aussi le repli `Runtime`
       de la spec. `clippy::wildcard_enum_match_arm` est levé à la fonction `classify` par un `#[expect]` motivé. Décision de harnais à
       confirmer.
-  [?] #7 Une `ErrorRuntime` sans message (`throw` sans valeur) rend « no message was given » : la spec ne dit rien de ce cas.
-  [?] #8 Posé (lot E2, suggestions) : @ScratchpadError::NotFound porte un champ `hint: Option<String>`, absent par défaut,
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #7 Une `ErrorRuntime` sans message (`throw` sans valeur) rend « no message was given » : la spec ne dit rien de ce cas.
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #8 Posé (lot E2, suggestions) : @ScratchpadError::NotFound porte un champ `hint: Option<String>`, absent par défaut,
       rendu après les suggestions sous la forme `. {hint}`, et la méthode `with_hint`. L'indication « functions cannot see
       scope variables » de ./suggest.sdd passe par ce champ plutôt que par les suggestions, pour que « Closest candidates »
       ne liste que des candidats. `with_hint` n'est pas dans `Exposes` : à ajouter si un appelant hors du module en a besoin.
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).

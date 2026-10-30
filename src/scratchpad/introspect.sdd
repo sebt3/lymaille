@@ -135,24 +135,33 @@ Scenario: introspection is independent of the shared state lock
 
 Tasks:
   [ ] #1 Tests puis implémentation : @Catalog (filtrage et attribution) d'abord, puis les fonctions Rhai.
-  [?] #2 Les noms des fonctions d'introspection (`vars`, `modules`, `functions`, `toolsets`, `skills`, `find`, `rules`) sont posés ; seul `find` est nommé par le DSD (`agent-sessions/scratchpad#AC-2`). Ils sont à confirmer avec l'auteur du skill intégré (`agent-sessions/toolsets#FR-18`) : le skill enseigne ces noms, ils sont un contrat avec les modèles.
-  [?] #3 Posé : l'instantané des variables date du début du run. Une fonction native de Rhai ne lit pas le scope ; le rendre dynamique exigerait un crochet `on_var` plus lourd. À rouvrir si le LLM s'en plaint.
-  [?] #4 Posé : la recherche `find` ne porte pas sur les variables ni sur les corps de skill (jamais préchargés dans la fenêtre, `agent-sessions/toolsets#FR-7`) ; elle porte sur nom, description, titre et documentation (`agent-sessions/scratchpad#FR-3`).
-  [?] #5 Les champs lus dans le JSON de métadonnées de Rhai (`name`, `signature`, `numParams`, `docComments`) sont ceux que le spike a observés de façon partielle (`spikes/rhai-1-25`, S6 ne lit que la présence des noms et des commentaires). À confirmer par un test dès l'implémentation ; la structure des modules imbriqués (`modules` par nom) aussi.
-  [?] #6 Le texte exact du skill intégré sur `rhai_pad` (`agent-sessions/scratchpad#FR-9`) relève de `toolsets` ; ce fichier fournit le bloc @limits_notice qu'il peut embarquer ou citer. À valider quand `toolsets` sera spécifié.
-  [?] #7 Lot E2 : @Origin::Host désigne les fermetures d'enregistrement (genre `host`). Le groupe `host` de `vynil-core`
+  [x] #2 Les noms des fonctions d'introspection (`vars`, `modules`, `functions`, `toolsets`, `skills`, `find`, `rules`) sont posés ; seul `find` est nommé par le DSD (`agent-sessions/scratchpad#AC-2`). Ils sont à confirmer avec l'auteur du skill intégré (`agent-sessions/toolsets#FR-18`) : le skill enseigne ces noms, ils sont un contrat avec les modèles.
+      Décidé le 2026-10-29 par le développeur principal : noms validés.
+  [x] #3 Posé : l'instantané des variables date du début du run. Une fonction native de Rhai ne lit pas le scope ; le rendre dynamique exigerait un crochet `on_var` plus lourd. À rouvrir si le LLM s'en plaint.
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #4 Posé : la recherche `find` ne porte pas sur les variables ni sur les corps de skill (jamais préchargés dans la fenêtre, `agent-sessions/toolsets#FR-7`) ; elle porte sur nom, description, titre et documentation (`agent-sessions/scratchpad#FR-3`).
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #5 Les champs lus dans le JSON de métadonnées de Rhai (`name`, `signature`, `numParams`, `docComments`) sont ceux que le spike a observés de façon partielle (`spikes/rhai-1-25`, S6 ne lit que la présence des noms et des commentaires). À confirmer par un test dès l'implémentation ; la structure des modules imbriqués (`modules` par nom) aussi.
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [!] #6 Le texte exact du skill intégré sur `rhai_pad` (`agent-sessions/scratchpad#FR-9`) relève de `toolsets` ; ce fichier fournit le bloc @limits_notice qu'il peut embarquer ou citer. À valider quand `toolsets` sera spécifié.
+  [x] #7 Lot E2 : @Origin::Host désigne les fermetures d'enregistrement (genre `host`). Le groupe `host` de `vynil-core`
       (`get_env`, `log_*`) est @Origin::Core("host"). Les deux se lisent `host` dans `modules()`, faute de nom distinct : à
       trancher par le développeur principal.
-  [?] #8 Lot E2 : @ScriptFunction, paramètre de @IntrospectionSource::update, est public et réexporté à la racine, hors `Exposes`.
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité). Les deux origines se lisent `host`.
+  [x] #8 Lot E2 : @ScriptFunction, paramètre de @IntrospectionSource::update, est public et réexporté à la racine, hors `Exposes`.
       @VariableInfo::new prend le nom et la valeur, et calcule le type (`Dynamic::type_name`) et l'aperçu (@render_value, 60
       caractères).
-  [?] #9 Lot E2 : @Catalog::build reçoit les étapes d'enregistrement sous forme de paires (@Origin, signatures ajoutées). Ces
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #9 Lot E2 : @Catalog::build reçoit les étapes d'enregistrement sous forme de paires (@Origin, signatures ajoutées). Ces
       signatures sont calculées par la différence des métadonnées avant et après chaque étape (`registration_step`). Les
       sous-modules ne sont pas parcourus : un sous-module accordé par nom est un module de premier niveau, déjà listé ; les
       autres sont des dépendances.
-  [?] #10 Lot E2 : `functions()` ne liste pas les fonctions d'introspection elles-mêmes, enregistrées après le catalogue (ordre
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #10 Lot E2 : `functions()` ne liste pas les fonctions d'introspection elles-mêmes, enregistrées après le catalogue (ordre
       de ./engine.sdd). Le scénario « functions carry signature and documentation » utilise `fmt_json` (groupe de format) au
       lieu de `json_encode` (groupe pur de `vynil-core`, bloqué : ../../lymaille.sdd #9).
-  [?] #11 Lot E2 : les fonctions d'introspection, leurs constantes et `registration_step` portent
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #11 Lot E2 : les fonctions d'introspection, leurs constantes et `registration_step` portent
       `#[cfg_attr(not(test), expect(dead_code))]` tant que ./engine.rs ne les enregistre pas. Ces annotations sont à retirer
       alors, sinon `unfulfilled_lint_expectations`.
+      Fait : aucun `expect(dead_code)` ne subsiste dans `src` (constaté le 2026-10-29).

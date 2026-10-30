@@ -3,6 +3,7 @@
 //! cancellation hook. See `src/scratchpad/engine.sdd`.
 
 use std::cell::RefCell;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use rhai::module_resolvers::DummyModuleResolver;
@@ -32,6 +33,7 @@ pub struct ScratchpadEngine {
     grants: Grants,
     limits: ScratchpadLimits,
     catalog: Catalog,
+    introspection: Arc<IntrospectionSource>,
 }
 
 /// Builder of a [`ScratchpadEngine`]. Its groups and modules come from the grants.
@@ -43,6 +45,7 @@ pub struct EngineBuilder {
     limits: ScratchpadLimits,
     grants: Grants,
     registrations: Vec<Registration>,
+    unlisted: Vec<Registration>,
 }
 
 impl ScratchpadEngine {
@@ -53,6 +56,7 @@ impl ScratchpadEngine {
             limits,
             grants,
             registrations: Vec::new(),
+            unlisted: Vec::new(),
         }
     }
 
@@ -78,6 +82,11 @@ impl ScratchpadEngine {
     pub(in crate::scratchpad) const fn rhai(&self) -> &RhaiEngine {
         &self.engine
     }
+
+    /// The state the introspection functions read, updated by each run before it evaluates its script.
+    pub(in crate::scratchpad) const fn introspection(&self) -> &Arc<IntrospectionSource> {
+        &self.introspection
+    }
 }
 
 impl std::fmt::Debug for ScratchpadEngine {
@@ -101,8 +110,20 @@ impl EngineBuilder {
         self
     }
 
+    /// Adds a registration closure run after the catalog and the introspection: its functions are callable but the
+    /// catalog does not list them. Only the inspection pad uses it, for its own functions.
+    #[must_use]
+    pub(in crate::scratchpad) fn with_unlisted_registration<F>(mut self, registration: F) -> Self
+    where
+        F: FnOnce(&mut RhaiEngine) -> ScratchpadResult<()> + 'static,
+    {
+        self.unlisted.push(Box::new(registration));
+        self
+    }
+
     /// Builds the engine: the base engine, the pure group, the format functions, the granted groups in the order host,
-    /// sleep, files, shell, the granted modules, the registration closures, then the catalog and the introspection.
+    /// sleep, files, shell, the granted modules, the registration closures, then the catalog and the introspection, and
+    /// last the unlisted registration closures.
     ///
     /// # Errors
     ///
@@ -113,6 +134,7 @@ impl EngineBuilder {
             limits,
             grants,
             registrations,
+            unlisted,
         } = self;
         let mut engine = base_engine(&limits);
         let mut steps = vec![registration_step(
@@ -144,11 +166,15 @@ impl EngineBuilder {
         let catalog = Catalog::build(&engine, &grants, &steps)?;
         let source = Arc::new(IntrospectionSource::new(grants.clone(), catalog.clone(), limits));
         register_introspection(&mut engine, &source);
+        for registration in unlisted {
+            registration(&mut engine)?;
+        }
         Ok(ScratchpadEngine {
             engine,
             grants,
             limits,
             catalog,
+            introspection: source,
         })
     }
 }
@@ -159,6 +185,7 @@ impl std::fmt::Debug for EngineBuilder {
             .field("grants", &self.grants)
             .field("limits", &self.limits)
             .field("registrations", &self.registrations.len())
+            .field("unlisted", &self.unlisted.len())
             .finish_non_exhaustive()
     }
 }
@@ -298,28 +325,17 @@ fn cancellation_requested(_operations: u64) -> Option<Dynamic> {
 
 /// Guard that opens a run on the current thread: it installs the cancellation handle that the progress hook reads and the
 /// buffer that `print` and `debug` write into, and restores what was installed before when dropped, panic included.
+///
+/// The guard is not `Send`: the state it installs is thread-local, so the run must be dropped on the thread that opened it.
 #[derive(Debug)]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "opened by the run of a script, which ./run.sdd writes later"
-    )
-)]
 pub(in crate::scratchpad) struct RunScope {
     previous: Option<RunState>,
+    thread_bound: PhantomData<*const ()>,
 }
 
 impl RunScope {
     /// Opens a run whose handle is read by the progress hook and whose captured output holds at most `render_cap`
     /// characters.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "opened by the run of a script, which ./run.sdd writes later"
-        )
-    )]
     pub(in crate::scratchpad) fn enter(cancel: &CancelHandle, render_cap: usize) -> Self {
         let state = RunState {
             cancel: cancel.clone(),
@@ -335,19 +351,15 @@ impl RunScope {
             })
             .ok()
             .flatten();
-        Self { previous }
+        Self {
+            previous,
+            thread_bound: PhantomData,
+        }
     }
 }
 
 /// Text captured so far by `print` and `debug` in the run open on this thread, at most the render cap. Empty when no run is
 /// open.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "read after the run of a script, which ./run.sdd writes later"
-    )
-)]
 pub(in crate::scratchpad) fn captured_output() -> String {
     RUN.try_with(|cell| {
         cell.try_borrow()

@@ -45,6 +45,17 @@ Exposes:
   @Scratchpad::restore
   @Scratchpad::run
   @Scratchpad::snapshot
+  @RunOutcome::text
+  @RunOutcome::status
+  @RunOutcome::truncated
+  @RunOutcome::warnings
+  @RunOutcome::record
+  @RunOutcome::snapshot
+  @PadSnapshot::warnings
+  @Restored::into_pad
+  @Restored::broken
+  @PadSnapshot::variables
+  @PadSnapshot::functions
 
 Accepts:
   @Scratchpad::new: un @ScratchpadEngine partagé (`Arc`) ; rend un pad vide (scope vide, aucune fonction).
@@ -52,6 +63,7 @@ Accepts:
   @Scratchpad::run: le texte du script, le @CancelHandle du run et un @RunEnv ; fonction asynchrone.
   @RunEnv::new: le nom de l'agent, une référence vers le @Redactor de la session et une référence vers l'horloge (@Clock).
   @Scratchpad::snapshot: aucun argument.
+  @RunOutcome::snapshot: aucun argument ; l'instantané calculé à la fin du run, sans reprendre le verrou du pad.
 
 Returns:
   @RunOutcome (`#[non_exhaustive]`, accesseurs en lecture seule) : `text` (le résultat du tool pour le LLM, déjà plafonné et masqué), `status` (@RunStatus : `Ok`, `Failed` avec une @ScriptErrorClass, ou `Cancelled`), `truncated`, les avertissements de persistance (@PersistWarning) et l'enregistrement d'audit (@ScriptRecord, ../session/audit.sdd). La boucle de tour émet l'événement de script à partir de cet enregistrement ; ce fichier n'émet rien.
@@ -59,19 +71,25 @@ Returns:
 
 Must:
   Variables et fonctions se conservent d'un appel au suivant : un `let` de niveau supérieur reste dans le scope, une `fn` reste appelable (`agent-sessions/scratchpad#AC-1`). Le scope est celui d'un seul pad, jamais partagé entre sessions.
-  Chaque run : (1) refuse de démarrer, sans effet sur le pad, si le @CancelHandle est déjà annulé (statut `Cancelled`) ; (2) lit l'heure par l'horloge injectée (début et fin, durée en millisecondes) ; (3) pose l'instantané d'introspection (variables, fonctions du LLM) avant d'évaluer ; (4) évalue le script dans `tokio::task::spawn_blocking`, jamais dans une tâche async (`agent-sessions/scratchpad#DEC-3`) ; (5) rend le résultat.
-  Dans la tâche bloquante, dans cet ordre : ouverture d'un @RunScope (jeton du run pour le crochet de progrès et tampon de sortie, ./engine.sdd) puis de `vynil_core::cancel::scope` avec le jeton miroir ; compilation du script ; fusion de l'AST du script avec l'AST des fonctions du pad (`AST::merge`) ; évaluation avec le scope persistant (`eval_ast_with_scope`) ; enregistrement des fonctions du script dans le pad si la compilation a réussi (les instructions de niveau supérieur ne sont jamais conservées) ; calcul de l'instantané de persistance.
+  Chaque run : (1) refuse de démarrer, sans effet sur le pad, si le @CancelHandle est déjà annulé (statut `Cancelled`) ; (2) lit l'heure par l'horloge injectée (début et fin, durée en millisecondes) ; (3) pose l'instantané d'introspection (variables, fonctions du LLM) avant d'évaluer ; (4) évalue le script sur un fil dédié, à pile dimensionnée (256 Mio, 1 Gio en build de débogage), joint par un canal `oneshot`, jamais dans une tâche async ni sur un worker du runtime (`agent-sessions/scratchpad#DEC-3`, amendé le 2026-10-27) ; (5) rend le résultat.
+  Sur le fil d'évaluation, dans cet ordre : ouverture d'un @RunScope (jeton du run pour le crochet de progrès et tampon de sortie, ./engine.sdd) puis de `vynil_core::cancel::scope` avec le jeton miroir ; compilation du script ; fusion de l'AST du script avec l'AST des fonctions du pad (`AST::merge`) ; évaluation avec le scope persistant (`eval_ast_with_scope`) ; enregistrement des fonctions du script dans le pad si la compilation a réussi (les instructions de niveau supérieur ne sont jamais conservées) ; calcul de l'instantané de persistance.
     Observed in: spikes/rhai-1-25 (`scope_visibility`, B) : fonctions conservées comme AST croissant fusionné à chaque script.
   Un script qui ne compile pas est une erreur de syntaxe rendue au LLM et ne change rien au pad ; un script qui échoue à l'exécution conserve ce qu'il a posé dans le scope et les fonctions qu'il a définies.
-  Annulation, pont `CancelHandle` vers jeton de `vynil-core` : avant la tâche bloquante, un jeton `vynil_core::cancel::CancelToken` est créé, et une tâche async courte attend `CancelHandle::cancelled` pour annuler ce jeton ; elle est arrêtée à la fin du run. Le jeton de `vynil-core` est celui que lisent `rt::block_on` et `sleep` pendant un appel natif bloquant (annulation en 25 ms environ) ; celui de la crate est celui que lit le crochet de progrès entre deux opérations de Rhai. Quand le @CancelHandle est annulé à l'issue du run, quelle que soit l'erreur de Rhai, le statut est `Cancelled` (`agent-sessions/scratchpad#FR-10`, `agent-sessions/scratchpad#AC-9`).
+  Annulation, pont `CancelHandle` vers jeton de `vynil-core` : avant le fil d'évaluation, un jeton `vynil_core::cancel::CancelToken` est créé, et une tâche async courte attend `CancelHandle::cancelled` pour annuler ce jeton ; elle est arrêtée à la fin du run. Le jeton de `vynil-core` est celui que lisent `rt::block_on` et `sleep` pendant un appel natif bloquant (annulation en 25 ms environ) ; celui de la crate est celui que lit le crochet de progrès entre deux opérations de Rhai. Quand le @CancelHandle est annulé à l'issue du run, quelle que soit l'erreur de Rhai, le statut est `Cancelled` (`agent-sessions/scratchpad#FR-10`, `agent-sessions/scratchpad#AC-9`).
   Un appel MCP ou d'inférence qui ne rend jamais est abandonné à l'annulation du run : le futur est détruit et le run se termine dans le délai d'une annulation, sans attendre l'appel (`agent-sessions/scratchpad#AC-9`).
-  Une panique de la tâche bloquante (défaut de Rhai ou d'une fonction native) est interceptée à la frontière de la tâche et rendue comme @ScratchpadError::Internal ; le verrou du pad empoisonné par cette panique est récupéré (l'état laissé par l'évaluation est conservé) : aucune panique ne traverse `run`, et le pad reste utilisable.
+  Une panique du fil d'évaluation (défaut de Rhai ou d'une fonction native) est interceptée à la frontière du fil et rendue comme @ScratchpadError::Internal ; le verrou du pad empoisonné par cette panique est récupéré (l'état laissé par l'évaluation est conservé) : aucune panique ne traverse `run`, et le pad reste utilisable.
   Rendu, dans cet ordre : le texte capté par `print` et `debug` pendant le script (plafonné, une ligne par appel), puis la valeur finale par @render_value, puis les avertissements de persistance, un par ligne. Le texte entier est masqué par @Redactor::redact avant la troncature, puis la valeur est tronquée de sorte que le total ne dépasse pas le plafond de rendu (`agent-sessions/scratchpad#FR-5`, `agent-sessions/scratchpad#AC-4`, `agent-sessions#CON-3`) ; les avertissements et le texte capté ne sont jamais coupés avant la valeur : le plafond de la valeur est le plafond de rendu moins la longueur des avertissements et du texte capté, plancher à zéro.
   Erreur : le texte rendu est le `Display` de @ScratchpadError, complété des suggestions de ./suggest.sdd (candidats parmi les seuls éléments accordés), masqué des secrets, puis plafonné au plafond de rendu par @truncate_middle. Le statut est `Failed` avec la classe de l'erreur.
-  Avertissements de persistance : calculés à la fin de chaque run sur le scope vivant. Un avertissement pour une variable donnée est rendu au premier run qui la voit non persistable et n'est pas répété aux runs suivants tant qu'elle reste dans le même état ; il redevient possible si la variable disparaît ou devient persistable puis ne l'est plus. Les avertissements ne font pas échouer le script : le statut reste `Ok` (`agent-sessions/scratchpad#FR-7`).
+  Avertissements de persistance : calculés à la fin de chaque run, réussi ou en échec, sur le scope vivant (décidé le 2026-10-29 par le développeur principal). Un avertissement pour une variable donnée est rendu au premier run qui la voit non persistable et n'est pas répété aux runs suivants tant qu'elle reste dans le même état ; il redevient possible si la variable disparaît ou devient persistable puis ne l'est plus. Les avertissements ne font pas échouer le script : le statut reste `Ok` (`agent-sessions/scratchpad#FR-7`).
   Enregistrement d'audit : @ScriptRecord est construit avec le nom de l'agent, le texte complet du script, le résultat entier non plafonné (@full_text de la valeur, ou le texte de l'erreur), la durée et l'erreur éventuelle ; il masque et plafonne lui-même (`agent-sessions/session#AC-4`). Le record est rendu même si le run échoue ou est annulé. Le script n'est jamais tronqué.
   L'instantané d'un pad restauré puis non modifié est égal à celui qui a servi à le restaurer, aux variables non persistables près.
   Restauration : les variables sont reposées dans le scope par @restore_scope ; les fonctions sont recompilées par @recompile_functions ; le pad ne rejoue aucun script (`agent-sessions/scratchpad#DEC-1`) ; les clés cassées sont rendues dans @Restored. Après restauration, `f(x)` s'évalue comme avant la sauvegarde (`agent-sessions/scratchpad#AC-1`).
+  Si l'extraction des sources de fonctions échoue après une évaluation réussie (méthode typée, position saturée : ./persist.sdd #9), le run garde sa valeur et son statut `Ok` ; un avertissement dit que les fonctions du script ne sont pas persistées, et elles restent connues du pad (décidé le 2026-10-29 par le développeur principal).
+  Les avertissements des fonctions exclues de la persistance (forme masquée irrecevable) sont rendus dans le texte seulement : ils ne figurent pas dans les @PersistWarning de @RunOutcome.
+  Un moteur (@ScratchpadEngine) sert une seule session : l'état d'introspection qu'il porte (@IntrospectionSource) est mis à jour avant chaque run et n'est pas partagé entre pads concurrents.
+  Le fil d'évaluation entre dans le runtime de l'hôte (`Handle::enter`) : les appels natifs asynchrones s'exécutent sur ce runtime, et sur un runtime `current_thread` ils rendent l'erreur explicite de `vynil-core` (Scenario « current-thread runtime »).
+  Quand l'extraction des sources de fonctions échoue, l'avertissement « the functions of this script were not persisted; they stay callable in this session only. » est rendu dans le texte seulement (comme celui des fonctions exclues), et les sources de l'état portant les clés `nom/arité` des fonctions du script sont retirées : l'état ne garde jamais une ancienne version d'une fonction que le pad a redéfinie.
+  `Scratchpad::inspection` (`pub(in crate::scratchpad)`, usage de ./inspect.sdd) construit un pad dont les variables sont des constantes et dont les fonctions de session sont seulement listées (jamais fusionnées dans l'arbre appelable) ; son état de sources est vide. Le `RunOutcome` d'un pad d'inspection porte un instantané vide (décidé le 2026-10-29).
   Un seul run évalue à la fois par pad : le verrou du pad sérialise les runs concurrents ; l'exclusion d'un tour actif par session (@TurnGate) rend ce cas exceptionnel.
   Le runtime de l'hôte est un runtime tokio multi-thread (`agent-sessions#CON-6`) ; sur un runtime `current_thread`, un appel natif asynchrone depuis un script rend l'erreur explicite de `vynil-core` (rendue au LLM comme erreur d'exécution), le script lui-même s'exécute.
   Le pad et ses valeurs sont `Send + Sync`. Aucune E/S, aucune horloge système en direct : le temps passe par @Clock.
@@ -225,13 +243,62 @@ Scenario: secrets are masked before the state keeps the variables and the functi
   Then the saved state holds neither the value `s3cr3t-value` in its variables nor in its function sources, and the rendered result shows the masked form instead
 
 Tasks:
-  [ ] #1 Tests puis implémentation, dans l'ordre : pad et persistance entre appels, erreurs et rendu, avertissements, annulation (jeton miroir), audit et masquage, restauration.
-  [?] #2 Posé : le pad est un type de ce fichier et la boucle de tour (domaine `session`, tâche #2 de ../session/session.sdd) l'emploie ; elle range @PadSnapshot dans @SessionState (mutateurs `pub(crate)`) et émet l'événement de script depuis @ScriptRecord. Ce fichier ne dépend pas de @SessionState.
-  [?] #3 Le masquage des secrets dans le texte renvoyé au LLM (et non seulement dans les événements) est posé ici d'après `agent-sessions#CON-3` (« ni dans les sorties renvoyées au LLM »). La spec de ../session/redact.sdd limite son `Purpose` aux événements : à élargir à un seul endroit, ou à confirmer que le masquage de la sortie du tool se fait ici. À valider par le développeur principal ; recommandation : élargir le `Purpose` de ../session/redact.sdd.
-  [?] #4 Posé : le texte de `print` et de `debug` est rendu devant la valeur (voir ./engine.sdd #7). À confirmer par le développeur principal.
-  [?] #5 Posé : le pont d'annulation est une tâche async qui attend `CancelHandle::cancelled` et annule le jeton de `vynil-core`, car `vynil_core::cancel::current` est interne et que les deux jetons sont de types différents (réponse à la tâche #2 de ../session/cancel.sdd). Un second jeton dans l'autre sens n'est pas nécessaire, l'hôte n'annulant que par @CancelHandle.
-  [?] #6 Posé : un avertissement de persistance est rendu une seule fois par variable et par état (voir `Must`) pour ne pas encombrer chaque sortie ; il se rend de nouveau si la variable change d'état. Le DSD (`FR-7`) dit « à la fin d'un script » sans fixer la répétition. Alternative : à chaque script tant que la variable existe.
-  [?] #7 @ScriptRecord::new prend 7 paramètres (limite de clippy : 5) ; la tâche #3 de ../session/audit.sdd le remplace par une structure d'entrée nommée. Ce fichier s'écrit contre cette structure, pas contre les 7 paramètres.
-  [?] #8 Posé : une annulation à l'entrée n'ouvre aucun enregistrement d'audit de script exécuté mais rend tout de même un @ScriptRecord (statut annulé, durée zéro) pour que la boucle de tour garde la trace du script demandé ; à confirmer avec la boucle de tour.
-  [?] #9 Posé : `run` ne borne pas le nombre de scripts simultanés au-delà du pool bloquant de tokio (`agent-sessions/scratchpad#DEC-3`) ; la pression sur ce pool relève de l'hôte.
-  [ ] #10 Masquage des secrets avant la remise de l'état : masquer les secrets déclarés dans les valeurs de variables et les sources de fonctions avant de les remettre à l'état de session (Redactor, CON-3 ; persist.sdd #14 ne masque rien). Scenario « secrets are masked before the state keeps the variables and the function sources ».
+  [x] #1 Tests puis implémentation, dans l'ordre : pad et persistance entre appels, erreurs et rendu, avertissements, annulation (jeton miroir), audit et masquage, restauration.
+      Validé le 2026-10-29 (validator, 12 mutants tués) sous `SKIP=deny scripts/check`. Lot E2 complet (tâches #10 à #14).
+  [x] #2 Posé : le pad est un type de ce fichier et la boucle de tour (domaine `session`, tâche #2 de ../session/session.sdd) l'emploie ; elle range @PadSnapshot dans @SessionState (mutateurs `pub(crate)`) et émet l'événement de script depuis @ScriptRecord. Ce fichier ne dépend pas de @SessionState.
+      Validé le 2026-10-29 par le développeur principal.
+  [x] #3 Le masquage des secrets dans le texte renvoyé au LLM (et non seulement dans les événements) est posé ici d'après `agent-sessions#CON-3` (« ni dans les sorties renvoyées au LLM »). La spec de ../session/redact.sdd limite son `Purpose` aux événements : à élargir à un seul endroit, ou à confirmer que le masquage de la sortie du tool se fait ici. À valider par le développeur principal ; recommandation : élargir le `Purpose` de ../session/redact.sdd.
+      Validé le 2026-10-29 par le développeur principal. `redact.sdd` Purpose élargi.
+  [x] #4 Posé : le texte de `print` et de `debug` est rendu devant la valeur (voir ./engine.sdd #7). À confirmer par le développeur principal.
+      Décidé le 2026-10-29 par le développeur principal : confirmé (voir ./engine.sdd #7).
+  [x] #5 Posé : le pont d'annulation est une tâche async qui attend `CancelHandle::cancelled` et annule le jeton de `vynil-core`, car `vynil_core::cancel::current` est interne et que les deux jetons sont de types différents (réponse à la tâche #2 de ../session/cancel.sdd). Un second jeton dans l'autre sens n'est pas nécessaire, l'hôte n'annulant que par @CancelHandle.
+      Validé le 2026-10-29 par le développeur principal.
+  [x] #6 Posé : un avertissement de persistance est rendu une seule fois par variable et par état (voir `Must`) pour ne pas encombrer chaque sortie ; il se rend de nouveau si la variable change d'état. Le DSD (`FR-7`) dit « à la fin d'un script » sans fixer la répétition. Alternative : à chaque script tant que la variable existe.
+      Validé le 2026-10-29 par le développeur principal.
+  [x] #7 @ScriptRecord::new prend 7 paramètres (limite de clippy : 5) ; la tâche #3 de ../session/audit.sdd le remplace par une structure d'entrée nommée. Ce fichier s'écrit contre cette structure, pas contre les 7 paramètres.
+      Fait : voir ../session/audit.sdd #3.
+  [x] #8 Posé : une annulation à l'entrée n'ouvre aucun enregistrement d'audit de script exécuté mais rend tout de même un @ScriptRecord (statut annulé, durée zéro) pour que la boucle de tour garde la trace du script demandé ; à confirmer avec la boucle de tour.
+      Validé le 2026-10-29 par le développeur principal. À confirmer avec la boucle de tour (session.sdd #2).
+  [x] #9 Posé : `run` ne borne pas le nombre de scripts simultanés au-delà d'un fil dédié par run (`agent-sessions/scratchpad#DEC-3`, amendé) ; la pression sur les fils relève de l'hôte.
+      Validé le 2026-10-29 par le développeur principal.
+  [x] #10 Masquage des secrets avant la remise de l'état : masquer les secrets déclarés dans les valeurs de variables et les sources de fonctions avant de les remettre à l'état de session (Redactor, CON-3 ; persist.sdd #14 ne masque rien). Scenario « secrets are masked before the state keeps the variables and the function sources ».
+      Implémenté et testé (constaté par le validator le 2026-10-29, Scenario « secrets are masked before the state keeps… »).
+  [x] #11 Faire passer `scripts/check` : corriger les 27 erreurs clippy du validateur du 2026-10-29 (`run.rs`, code et tests) sans `allow` ni changement du harnais ; regrouper les 7 arguments de `settle` dans une structure d'entrée nommée.
+      Validé le 2026-10-29 (validator) sous `SKIP=deny scripts/check` : l'étape `cargo deny` échoue faute de `deny.toml` (lymaille.sdd #1, #5).
+  [x] #12 Renforcer les tests faibles : texte de l'erreur de limite (« string beyond the memory limit »), absence du secret dans l'erreur de l'enregistrement d'audit, absence de suggestion d'un module non accordé, module `writer` non atteint (sans dépendre du libellé « Closest candidates »), sérialisation réelle des runs.
+      Validé le 2026-10-29 (validator) sous `SKIP=deny scripts/check` : l'étape `cargo deny` échoue faute de `deny.toml` (lymaille.sdd #1, #5).
+  [x] #13 Scenarios ajoutés le 2026-10-29 (ci-dessous), tests puis implémentation : avertissements sur run en échec, échec d'extraction après évaluation, instantané d'introspection posé avant l'évaluation, avertissement qui redevient possible, fonction exclue par masquage, runtime `current_thread`.
+      Validé le 2026-10-29 (validator) sous `SKIP=deny scripts/check` : l'étape `cargo deny` échoue faute de `deny.toml` (lymaille.sdd #1, #5).
+
+Scenario: warnings are computed on a failed run
+  Given un script qui pose une variable non persistable puis échoue à l'exécution
+  When il est exécuté
+  Then le statut est Failed(Runtime) et le texte contient l'erreur puis l'avertissement de persistance de cette variable
+
+Scenario: extraction failure keeps the value
+  Given un script qui définit une fonction à méthode typée et rend 5
+  When il est exécuté
+  Then le statut est Ok, le texte contient 5 et un avertissement dit que les fonctions du script ne sont pas persistées, et la fonction reste appelable dans le même pad
+
+Scenario: introspection snapshot is set before evaluation
+  Given un pad où `let x = 1` a été exécuté
+  When le script `vars()` est exécuté
+  Then le résultat nomme `x`
+
+Scenario: a warning returns after the variable disappears
+  Given une variable non persistable déjà signalée, puis supprimée du scope
+  When elle est de nouveau posée non persistable au run suivant
+  Then l'avertissement est rendu une seconde fois
+
+Scenario: function excluded by masking is reported
+  Given un secret déclaré présent dans le texte source d'une fonction
+  When le script qui la définit est exécuté
+  Then le texte rendu signale que la fonction est exclue de la persistance et ne contient pas le secret, et `warnings()` reste vide
+  And un script dont l'extraction des fonctions échoue rend le texte « the functions of this script were not persisted » avec `warnings()` vide
+
+Scenario: current-thread runtime
+  Given un runtime tokio `current_thread`
+  When un script appelle une fonction native asynchrone
+  Then le statut est Failed(Runtime) avec l'erreur explicite de `vynil-core`, sans blocage
+  [x] #14 Validation du 2026-10-29 : (a) test du retrait des sources périmées (définir `fn f(){1}`, puis lancer `fn f(){2}` avec une fonction à méthode typée dans le même script, vérifier que l'instantané ne contient plus l'ancienne `f/0`) ; (b) remplacer la copie privée de `key_of` par un `pub(super)` de ./persist.rs ; (c) justifier par un commentaire ou repasser en `current_thread` le test `call_depth_is_an_error_rendered_to_the_llm` ; (d) étendre le Scenario « function excluded » aux deux avertissements rendus en texte seulement (Scenario étendu le 2026-10-29) ; (e) deux tests relevés par le validateur : retrait d'une fonction d'arité 1 ou plus, et conservation de la source d'une autre fonction `g/0` après l'échec d'extraction.
+      Validé le 2026-10-29 (validator, 12 mutants tués) sous `SKIP=deny scripts/check`.
