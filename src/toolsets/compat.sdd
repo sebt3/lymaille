@@ -23,7 +23,7 @@ Accepts:
   @check_creation_rule: une @AgentDefinition, la table des définitions de ses sous-agents et le nom du module de création de toolsets.
 
 Returns:
-  @check_context: la liste des @Gap (type, exigence, paramètre requis manquant, rôle obligatoire absent, type exigé introuvable ; toolset introuvable seulement pour @delegable_subagents) ; vide si compatible.
+  @check_context: la liste des @Gap (type, exigence, paramètre requis manquant, valeur qui viole un schéma du type (`InvalidValue` : paramètre rendu ou `*`, règle violée, jamais la valeur), rôle obligatoire absent, type exigé introuvable ; toolset introuvable seulement pour @delegable_subagents) ; vide si compatible.
   @delegable_subagents: une @Delegation : les identifiants des sous-agents compatibles (`kept()`, dans l'ordre de la définition) et les sous-agents retirés (`removed()`, @RemovedSubagent : identifiant et @RemovalReason `DefinitionMissing`, `ToolsetMissing` ou `Incompatible` avec les @Gap), sans erreur ; une vérification qui échoue par erreur (type incohérent, inclusion cyclique) donne `Incompatible` avec une liste d'écarts vide. Le retrait est donc visible de l'hôte et de la boucle de tour, qui peuvent l'émettre ou le journaliser (décision du 2026-10-30 : échec fermé avec avertissement) ; la librairie n'écrit aucun journal elle-même.
   @check_creation_rule: succès, ou @ToolsetsError::Forbidden.
 
@@ -34,6 +34,9 @@ Raises:
 Must:
   La vérification est structurelle, sans déclaration de conformité du contexte : le contexte satisfait un type si tous les paramètres requis aplatis y figurent et si tous les rôles obligatoires y sont liés (`agent-sessions#DEC-11`).
   La version du type est vérifiée contre l'exigence du toolset (@TypeRequirement) ; un type de version incompatible est un écart.
+  La vérification est complète, pas seulement la présence des noms (décision du 2026-10-30, `agent-sessions/toolsets#FR-4`) : chaque valeur présente du contexte, optionnelle comprise, est validée par `./context_type.sdd` contre le schéma du type et des types qu'il inclut ; une valeur qui viole un schéma est un écart @GapKind::InvalidValue. Les valeurs validées sont les paramètres du contexte (la présence des requis se lit sur les mêmes paramètres) ; les défauts et surcharges des toolsets n'y entrent pas.
+  Un écart ne contient jamais la valeur fautive, ni une clé du contexte qu'aucun schéma ne déclare (rendue `*`) : le texte d'un écart et son affichage de débogage ne portent que des noms, des règles et des nombres (`agent-sessions#CON-3`).
+  Une absence de paramètre requis reste un seul écart (@GapKind::MissingParameter), sans doublon.
   Pour l'agent principal, un écart fait échouer le démarrage avec un message explicite ; pour un sous-agent, il le retire de la liste délégable, sans erreur (`agent-sessions/toolsets#FR-4`, `AC-3`).
   Les rôles propres d'un toolset (@RoleDecl) obligatoires comptent comme les rôles du type.
   Le module de création de toolsets (`toolset_creator`) n'est accordable qu'à un agent de nature `Config` (`agent-sessions#BR-8`) : une définition qui l'accorde à un agent de travail ou à un sous-agent est refusée avec un message qui nomme la règle (`agent-sessions/toolsets#AC-8`).
@@ -77,6 +80,41 @@ Scenario: creation module refused for a work agent
   When the rule is checked
   Then it fails with Forbidden naming the rule
 
+Scenario: valeur de mauvais type est un écart
+  Given un toolset exigeant `cluster@1.0` et un contexte dont `namespace` vaut 5 alors que le type le déclare texte
+  When le contexte est vérifié
+  Then un écart de valeur nomme le paramètre `namespace` et la règle `type`, et ne contient pas la valeur 5
+
+Scenario: valeur hors énumération est un écart
+  Given un paramètre `env` déclaré avec `enum` `dev` et `prod`, et une valeur `staging` dans le contexte
+  When le contexte est vérifié
+  Then un écart de règle `enum` nomme `env`, et ne contient pas `staging`
+
+Scenario: paramètre optionnel validé comme les autres
+  Given un paramètre optionnel `zone` déclaré entier, et une valeur `eu` dans le contexte
+  When le contexte est vérifié
+  Then un écart de règle `type` nomme `zone`
+
+Scenario: propriété non déclarée interdite, nom masqué
+  Given un type dont le schéma interdit les propriétés non déclarées (`additionalProperties: false`), et un contexte qui porte la clé non déclarée `leaked-key`
+  When le contexte est vérifié
+  Then un écart de règle `additionalProperties` à la racine, et ni le nom `leaked-key` ni sa valeur n'apparaissent dans l'écart ni dans son affichage
+
+Scenario: valeur fautive ressemblant à un secret jamais rendue
+  Given un paramètre `api_token` déclaré entier, et une valeur `p4ss-reelle-XYZ` qui est un secret mais que la détection de `../secret.sdd` ne voit pas
+  When le contexte est vérifié
+  Then un écart de règle `type` nomme `api_token`, et la valeur n'apparaît ni dans l'affichage ni dans le débogage de l'écart
+
+Scenario: valeur requise absente, un seul écart
+  Given un paramètre requis `namespace` absent du contexte, le reste du contexte étant valide
+  When le contexte est vérifié
+  Then un seul écart, de paramètre manquant ; aucun écart de règle `required` n'est ajouté
+
+Scenario: sous-agent dont une valeur viole le schéma est retiré sans erreur
+  Given un sous-agent dont le toolset exige un type, et une valeur du contexte qui viole son schéma
+  When les sous-agents délégables sont calculés
+  Then le sous-agent est retiré avec la raison `Incompatible` et un écart de valeur, sans erreur
+
 Tasks:
   [x] #1 Tests puis implémentation.
       Validé le 2026-10-29 (validator, 12 mutants tués) sous `SKIP=deny scripts/check`.
@@ -84,5 +122,7 @@ Tasks:
       Validé le 2026-10-29 (validator, 12 mutants tués) sous `SKIP=deny scripts/check`.
   [x] #3 Fait le 2026-10-30 (lot T14) ; décidé le 2026-10-30 par le développeur principal : @delegable_subagents prend une table unique de toolsets pour le principal et ses sous-agents ; un sous-agent est retiré si sa définition manque, si l'un de ses toolsets est absent ou si sa vérification échoue (échec fermé), mais avec un avertissement et non en silence (à ajouter au résultat, avec un Scenario) ; @check_creation_rule compte un `delegable()` non vide même si l'identifiant est absent de la table, et contrôle aussi tout sous-agent de la table.
   [?] #2 Posé : le nom du module de création est reçu en paramètre ; ce module lui-même est un module de l'hôte ou du domaine `modules`, hors de ce document.
+  [x] #6 Validation complète des valeurs (`agent-sessions/toolsets#FR-4`, décision du 2026-10-30) : Scenarios « valeur … », « propriété non déclarée … », « valeur requise absente … » ci-dessus ; tests puis implémentation dans `compat.rs` et `context_type.rs`. Non validé.
+  [?] #7 Posé (lot de la validation complète, 2026-10-30) : seules les valeurs partagées du contexte (`resolved.shared()`) sont validées ; les défauts et surcharges propres à un toolset ne le sont pas, la spec étant silencieuse. Posé aussi : l'écart ne rend que le mot-clé de la règle et le paramètre de premier niveau, jamais le chemin profond ni la valeur. Le masquage des clés non déclarées (`collect_declared`) est dupliqué depuis `delegation/result.rs` et serait à factoriser dans un module commun. À confirmer par le développeur principal.
   [x] #5 Règle de création alignée sur la nature `Config` (DSD du 2026-10-29) : @check_creation_rule ne dépend plus de la délégation : seule la nature `Config` peut recevoir `toolset_creator`, y compris pour chaque sous-agent de la table reçue (décidé le 2026-10-29) ; les Scenarios « creation module refused … » sont à réécrire en conséquence. À faire après `definition.sdd` #12.
       Validé le 2026-10-29 (validator, 58 mutants dont 55 tués) sous `scripts/check` complet.

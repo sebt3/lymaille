@@ -51,6 +51,15 @@ pub enum GapKind {
         /// Name of the missing role.
         name: String,
     },
+    /// A value of the context breaks a rule of the parameter schema of the context type. Only the parameter and the rule
+    /// are named, never the value.
+    InvalidValue {
+        /// Name of the parameter concerned, `*` for a key that no schema declares, or `None` when the rule concerns the set
+        /// of parameters as a whole.
+        parameter: Option<String>,
+        /// Keyword of the violated rule, such as `type` or `enum`.
+        rule: String,
+    },
 }
 
 impl Gap {
@@ -98,6 +107,20 @@ impl fmt::Display for Gap {
                 ),
                 None => write!(f, "toolset `{toolset}` requires its own role `{name}`"),
             },
+            GapKind::InvalidValue {
+                parameter: Some(parameter),
+                rule,
+            } => write!(
+                f,
+                "toolset `{toolset}` requires parameter `{parameter}` of context type `{context_type}` to satisfy rule `{rule}`"
+            ),
+            GapKind::InvalidValue {
+                parameter: None,
+                rule,
+            } => write!(
+                f,
+                "toolset `{toolset}` requires the parameters of context type `{context_type}` to satisfy rule `{rule}`"
+            ),
         }
     }
 }
@@ -196,8 +219,9 @@ where
     Ok(gaps)
 }
 
-/// Gaps of one requirement of a toolset on a context type: the type is found, its version satisfies the requirement, and
-/// its flattened required parameters and roles are present in the context.
+/// Gaps of one requirement of a toolset on a context type: the type is found, its version satisfies the requirement, its
+/// flattened required parameters and roles are present in the context, and every value present satisfies the schemas of
+/// the type and of the types it includes.
 fn type_gaps<F>(
     toolset: &Toolset,
     type_name: &str,
@@ -239,6 +263,16 @@ where
             .iter()
             .filter(|role| !resolved.roles().contains(role))
             .map(|role| gap(GapKind::MissingRole { name: role.clone() })),
+    );
+    gaps.extend(
+        flat.violations(type_name, resolved.shared())?
+            .into_iter()
+            .map(|violation| {
+                gap(GapKind::InvalidValue {
+                    parameter: violation.parameter().map(str::to_owned),
+                    rule: violation.rule().to_owned(),
+                })
+            }),
     );
     Ok(gaps)
 }
@@ -826,5 +860,176 @@ mod tests {
         let gaps =
             check_context(&empty_context(), &[toolset], &lookup_of(Vec::new())).expect("no type to flatten");
         assert!(gaps.is_empty(), "an optional unbound role is no gap: {gaps:?}");
+    }
+
+    /// A context bound to the role `k8s`, with the one parameter given.
+    fn context_with(name: &str, value: Value) -> ToolsetContext {
+        ToolsetContext::new("ctx".to_owned(), ContextLevel::Session)
+            .expect("the context builds")
+            .with_parameter(name.to_owned(), value)
+            .expect("the parameter is added")
+            .with_role("k8s".to_owned(), "prod-k8s".to_owned())
+            .expect("the role is bound")
+    }
+
+    /// The gaps of `context` against a type named `cluster` built from `schema`, as texts.
+    fn texts_against(schema: Value, context: &ToolsetContext) -> Vec<String> {
+        let typed =
+            ContextType::new("cluster".to_owned(), version("1.0.0"), schema).expect("the sample type builds");
+        let lookup = lookup_of(vec![("cluster", typed)]);
+        let gaps = check_context(context, &[grafana_requiring_cluster("cluster@1.0")], &lookup)
+            .expect("the types are consistent");
+        gaps.iter().map(ToString::to_string).collect()
+    }
+
+    // Scenario: valeur de mauvais type est un écart
+    #[test]
+    fn value_of_the_wrong_type_is_a_gap() {
+        let toolsets = vec![grafana_requiring_cluster("cluster@1.0")];
+        let lookup = lookup_of(vec![("cluster", cluster("1.0.0"))]);
+        let context = context_with("namespace", json!(["valeur-fautive-42"]));
+        let gaps = check_context(&context, &toolsets, &lookup).expect("the types are consistent");
+        let texts: Vec<String> = gaps.iter().map(ToString::to_string).collect();
+        assert!(
+            texts
+                .iter()
+                .any(|text| text.contains("namespace") && text.contains("`type`")),
+            "the wrong type is a gap naming the parameter and the rule: {texts:?}"
+        );
+        assert!(
+            texts.iter().all(|text| !text.contains("valeur-fautive-42")),
+            "no gap carries the value: {texts:?}"
+        );
+        assert!(
+            !format!("{gaps:?}").contains("valeur-fautive-42"),
+            "the debug form carries no value either: {gaps:?}"
+        );
+    }
+
+    // Scenario: valeur hors énumération est un écart
+    #[test]
+    fn value_outside_an_enumeration_is_a_gap() {
+        let schema = json!({
+            "type": "object",
+            "properties": { "env": { "type": "string", "enum": ["dev", "prod"] } }
+        });
+        let texts = texts_against(schema, &context_with("env", json!("staging-valeur")));
+        assert!(
+            texts
+                .iter()
+                .any(|text| text.contains("env") && text.contains("`enum`")),
+            "the value outside the enumeration is a gap: {texts:?}"
+        );
+        assert!(
+            texts.iter().all(|text| !text.contains("staging-valeur")),
+            "the value never comes out: {texts:?}"
+        );
+    }
+
+    // Scenario: paramètre optionnel validé comme les autres
+    #[test]
+    fn optional_parameter_is_validated_too() {
+        let schema = json!({ "type": "object", "properties": { "zone": { "type": "integer" } } });
+        let texts = texts_against(schema, &context_with("zone", json!("eu")));
+        assert!(
+            texts
+                .iter()
+                .any(|text| text.contains("zone") && text.contains("`type`")),
+            "an optional parameter with a wrong value is a gap: {texts:?}"
+        );
+    }
+
+    // Scenario: propriété non déclarée interdite, nom masqué
+    #[test]
+    fn undeclared_property_refused_without_its_name() {
+        let schema = json!({
+            "type": "object",
+            "properties": { "a": { "type": "string" } },
+            "additionalProperties": false
+        });
+        let context = ToolsetContext::new("ctx".to_owned(), ContextLevel::Session)
+            .expect("the context builds")
+            .with_parameter("a".to_owned(), json!("ok"))
+            .expect("the parameter is added")
+            .with_parameter("leaked-key".to_owned(), json!("leaked-valeur-7"))
+            .expect("the parameter is added");
+        let texts = texts_against(schema, &context);
+        assert!(
+            texts.iter().any(|text| text.contains("`additionalProperties`")),
+            "the forbidden extra property is a gap: {texts:?}"
+        );
+        assert!(
+            texts
+                .iter()
+                .all(|text| !text.contains("leaked-key") && !text.contains("leaked-valeur-7")),
+            "neither the undeclared name nor its value comes out: {texts:?}"
+        );
+    }
+
+    // Scenario: valeur fautive ressemblant à un secret jamais rendue
+    #[test]
+    fn secret_value_never_comes_out_of_a_gap() {
+        let schema = json!({ "type": "object", "properties": { "api_token": { "type": "integer" } } });
+        let context = context_with("api_token", json!("p4ss-reelle-XYZ"));
+        let texts = texts_against(schema, &context);
+        assert!(
+            texts
+                .iter()
+                .any(|text| text.contains("api_token") && text.contains("`type`")),
+            "the gap names the parameter and the rule: {texts:?}"
+        );
+        assert!(
+            texts.iter().all(|text| !text.contains("p4ss-reelle-XYZ")),
+            "the secret value never comes out: {texts:?}"
+        );
+    }
+
+    // Scenario: valeur requise absente, un seul écart
+    #[test]
+    fn absent_required_value_is_a_single_gap() {
+        let toolsets = vec![grafana_requiring_cluster("cluster@1.0")];
+        let lookup = lookup_of(vec![("cluster", cluster("1.0.0"))]);
+        let context = ToolsetContext::new("ctx".to_owned(), ContextLevel::Session)
+            .expect("the context builds")
+            .with_role("k8s".to_owned(), "prod-k8s".to_owned())
+            .expect("the role is bound");
+        let gaps = check_context(&context, &toolsets, &lookup).expect("the types are consistent");
+        assert_eq!(
+            gaps.len(),
+            1,
+            "the absent parameter is one gap, with no required-rule duplicate: {gaps:?}"
+        );
+        assert!(
+            gaps.first()
+                .is_some_and(|gap| gap.to_string().contains("requires parameter `namespace`")),
+            "the single gap names the missing parameter: {gaps:?}"
+        );
+    }
+
+    // Scenario: sous-agent dont une valeur viole le schéma est retiré sans erreur
+    #[test]
+    fn sub_agent_with_a_value_breaking_its_schema_is_removed_without_error() {
+        let main = main_agent(vec!["worker".to_owned()]);
+        let subagents = vec![sub_agent("worker", vec!["grafana".to_owned()])];
+        let toolsets = vec![grafana_requiring_cluster("cluster@1.0")];
+        let lookup = lookup_of(vec![("cluster", cluster("1.0.0"))]);
+        let context = context_with("namespace", json!(["valeur-fautive-42"]));
+        let delegation = delegable_subagents(&main, &subagents, &toolsets, &context, &lookup)
+            .expect("a removal raises no error");
+        assert!(
+            delegation.kept().is_empty(),
+            "the sub-agent is not delegable: {delegation:?}"
+        );
+        match delegation
+            .removed()
+            .first()
+            .map(|removal| removal.reason().clone())
+        {
+            Some(RemovalReason::Incompatible(gaps)) => assert!(
+                gaps.iter().any(|gap| gap.to_string().contains("namespace")),
+                "the removal names the gap of the value: {gaps:?}"
+            ),
+            other => panic!("expected Incompatible with a value gap, got {other:?}"),
+        }
     }
 }

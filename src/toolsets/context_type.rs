@@ -4,8 +4,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use jsonschema::error::{ValidationError, ValidationErrorKind};
+use jsonschema::paths::LocationSegment;
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use vynil_core::Semver;
 
 use super::toolset_context::value_looks_like_secret;
@@ -51,9 +53,78 @@ pub struct FlatContextType {
     optional_parameters: BTreeSet<String>,
     required_roles: BTreeSet<String>,
     optional_roles: BTreeSet<String>,
+    /// The parameter schemas of the type and of every type it includes, each checked against the values.
+    schemas: Vec<Value>,
+}
+
+/// A rule of a parameter schema that a value of a toolset context breaks. It names the parameter and the rule only: never
+/// the value. A parameter that no schema declares is the marker `*`.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(in crate::toolsets) struct ValueViolation {
+    parameter: Option<String>,
+    rule: String,
+}
+
+impl ValueViolation {
+    /// Returns the parameter concerned, or `None` when the rule concerns the set of parameters as a whole.
+    pub(in crate::toolsets) fn parameter(&self) -> Option<&str> {
+        self.parameter.as_deref()
+    }
+
+    /// Returns the keyword of the violated rule, such as `type` or `enum`.
+    pub(in crate::toolsets) fn rule(&self) -> &str {
+        &self.rule
+    }
 }
 
 impl FlatContextType {
+    /// Validates the values of a context against every parameter schema of the type and of the types it includes, at any
+    /// depth. `type_name` names the type in a refusal.
+    ///
+    /// The `required` list of the root is not repeated here: the absence of a required parameter is the flat required
+    /// parameters' concern. A violation is named by the parameter and the rule only (`agent-sessions#CON-3`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ToolsetsError::InvalidContextType`] when a schema no longer compiles as a JSON Schema.
+    pub(in crate::toolsets) fn violations(
+        &self,
+        type_name: &str,
+        values: &BTreeMap<String, Value>,
+    ) -> ToolsetsResult<BTreeSet<ValueViolation>> {
+        let instance = Value::Object(
+            values
+                .iter()
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect::<Map<String, Value>>(),
+        );
+        let declared = declared_names(&self.schemas);
+        let mut found = BTreeSet::new();
+        for schema in &self.schemas {
+            let validator = jsonschema::validator_for(schema).map_err(|_refusal| {
+                invalid(
+                    type_name,
+                    "the parameter schema does not compile as a JSON Schema",
+                )
+            })?;
+            let errors = validator
+                .iter_errors(&instance)
+                .filter(|error| !is_root_required(error));
+            for error in errors {
+                let parameter = error
+                    .instance_path()
+                    .iter()
+                    .next()
+                    .map(|segment| masked_name(&segment, &declared));
+                let _added = found.insert(ValueViolation {
+                    parameter,
+                    rule: error.kind().keyword().to_owned(),
+                });
+            }
+        }
+        Ok(found)
+    }
+
     /// Returns the names of the required parameters, in order.
     #[must_use]
     pub const fn required_parameters(&self) -> &BTreeSet<String> {
@@ -180,6 +251,7 @@ impl ContextType {
     where
         F: Fn(&str) -> Option<Self>,
     {
+        gathered.schemas.push(self.schema.clone());
         for (name, required) in parameters(&self.schema) {
             if required {
                 insert_name(&mut gathered.required_parameters, &name);
@@ -247,6 +319,7 @@ struct Gathered {
     all_parameters: BTreeSet<String>,
     required_roles: BTreeSet<String>,
     all_roles: BTreeSet<String>,
+    schemas: Vec<Value>,
 }
 
 impl Gathered {
@@ -261,6 +334,7 @@ impl Gathered {
             optional_roles: self.all_roles.difference(&self.required_roles).cloned().collect(),
             required_parameters: self.required_parameters,
             required_roles: self.required_roles,
+            schemas: self.schemas,
         }
     }
 }
@@ -313,7 +387,63 @@ fn validate_schema(name: &str, schema: &Value) -> ToolsetsResult<()> {
             }
         }
     }
+    // The schema is compiled once here, so a refusal is never left to the check. The compiler's message is dropped: it can
+    // quote the schema. A reference to another document cannot be resolved (no network, no file), so it is refused here.
+    let _compiled = jsonschema::validator_for(schema)
+        .map_err(|_refusal| invalid(name, "the parameter schema does not compile as a JSON Schema"))?;
     Ok(())
+}
+
+/// Tells whether a violation is a `required` rule of the root: the absence of a required parameter is already a gap of the
+/// flat required parameters, so it is not repeated.
+fn is_root_required(error: &ValidationError<'_>) -> bool {
+    error.instance_path().is_empty() && matches!(error.kind(), ValidationErrorKind::Required { .. })
+}
+
+/// Names a segment of a violation path: a declared property by its name, any other key by the marker `*`.
+fn masked_name(segment: &LocationSegment<'_>, declared: &BTreeSet<String>) -> String {
+    match segment {
+        LocationSegment::Property(name) => {
+            let text: &str = name.as_ref();
+            if declared.contains(text) {
+                text.to_owned()
+            } else {
+                "*".to_owned()
+            }
+        }
+        LocationSegment::Index(_) => "*".to_owned(),
+    }
+}
+
+/// Collects the names of every property declared under a `properties` keyword of the schemas, at any depth.
+fn declared_names(schemas: &[Value]) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    for schema in schemas {
+        collect_declared(schema, &mut out);
+    }
+    out
+}
+
+/// Adds to `out` every property name declared under a `properties` keyword of `schema`, at any depth.
+fn collect_declared(schema: &Value, out: &mut BTreeSet<String>) {
+    match schema {
+        Value::Object(map) => {
+            for (key, child) in map {
+                if key == "properties"
+                    && let Value::Object(properties) = child
+                {
+                    out.extend(properties.keys().cloned());
+                }
+                collect_declared(child, out);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_declared(item, out);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
 }
 
 /// Lists the names of the `required` array of a schema. A schema is validated at construction, so a non-string entry
@@ -378,7 +508,9 @@ mod tests {
     use vynil_core::Semver;
 
     use super::{Bump, ContextType, RoleSpec};
-    use crate::toolsets::{ToolsetsError, TypeRequirement};
+    use crate::toolsets::{
+        ContextLevel, Toolset, ToolsetContext, ToolsetsError, TypeRequirement, check_context,
+    };
 
     fn semver(text: &str) -> Semver {
         Semver::parse(text).expect("a sample version must parse")
@@ -695,6 +827,114 @@ mod tests {
         assert!(
             serde_json::from_str::<ContextType>(text).is_err(),
             "an uppercase name must fail to deserialize"
+        );
+    }
+
+    /// A toolset `grafana` that requires `requirement`, built with the public constructors.
+    fn grafana_requiring(requirement: &str) -> Toolset {
+        Toolset::new(
+            "grafana".to_owned(),
+            "Grafana queries".to_owned(),
+            semver("1.0.0"),
+            "fn query() { 1 }".to_owned(),
+        )
+        .expect("the toolset builds")
+        .with_type_requirement(TypeRequirement::parse(requirement).expect("the requirement parses"))
+        .expect("the requirement is added")
+    }
+
+    // Scenario: schema that does not compile is refused
+    #[test]
+    fn schema_that_does_not_compile_is_refused() {
+        let result = ContextType::new("cluster".to_owned(), semver("1.0.0"), json!({ "type": "foo" }));
+        assert!(
+            matches!(result, Err(ToolsetsError::InvalidContextType { .. })),
+            "a schema that does not compile as JSON Schema must be refused, got {result:?}"
+        );
+    }
+
+    // Scenario: remote reference is refused
+    #[test]
+    fn remote_and_file_references_are_refused() {
+        for target in [
+            "https://example.com/schema.json",
+            "file:///nonexistent-lymaille-schema.json",
+        ] {
+            let schema = json!({ "type": "object", "properties": { "region": { "$ref": target } } });
+            match ContextType::new("cluster".to_owned(), semver("1.0.0"), schema) {
+                Err(error @ ToolsetsError::InvalidContextType { .. }) => assert!(
+                    !error.to_string().contains("example.com") && !error.to_string().contains("nonexistent"),
+                    "the refusal never quotes the reference: {error}"
+                ),
+                other => {
+                    panic!("a reference to another document must be refused, got {other:?} for {target}")
+                }
+            }
+        }
+    }
+
+    // Scenario: every value is validated against every flattened schema
+    #[test]
+    fn every_value_is_validated_against_every_flattened_schema() {
+        let k8s_prod = ContextType::new(
+            "k8s-prod".to_owned(),
+            semver("1.0.0"),
+            json!({ "type": "object", "properties": { "region": { "type": "integer" } } }),
+        )
+        .expect("the sample type must build")
+        .with_include(TypeRequirement::parse("cluster@1.0").expect("the sample requirement must parse"));
+        let lookup = lookup_in(vec![cluster_1_0(), k8s_prod]);
+        let context = ToolsetContext::new("ctx".to_owned(), ContextLevel::Project)
+            .expect("a named context builds")
+            .with_parameter("namespace".to_owned(), json!(["valeur-fautive-42"]))
+            .expect("a parameter is added")
+            .with_parameter("region".to_owned(), json!("eu"))
+            .expect("a parameter is added");
+        let gaps = check_context(&context, &[grafana_requiring("k8s-prod@1.0")], &lookup)
+            .expect("the types are consistent");
+        let texts: Vec<String> = gaps.iter().map(ToString::to_string).collect();
+        for parameter in ["namespace", "region"] {
+            assert!(
+                texts
+                    .iter()
+                    .any(|text| text.contains(parameter) && text.contains("`type`")),
+                "the wrong type of `{parameter}` is a gap, inherited or own: {texts:?}"
+            );
+        }
+        assert!(
+            texts.iter().all(|text| !text.contains("valeur-fautive-42")),
+            "no gap carries the value: {texts:?}"
+        );
+    }
+
+    // Scenario: undeclared key is rendered as a marker
+    #[test]
+    fn undeclared_key_is_rendered_as_a_marker() {
+        let open = ContextType::new(
+            "open".to_owned(),
+            semver("1.0.0"),
+            json!({ "type": "object", "additionalProperties": { "type": "integer" } }),
+        )
+        .expect("the sample type must build");
+        let lookup = lookup_in(vec![open]);
+        let context = ToolsetContext::new("ctx".to_owned(), ContextLevel::Session)
+            .expect("a named context builds")
+            .with_parameter("leaked-key".to_owned(), json!("texte"))
+            .expect("a parameter is added");
+        let gaps = check_context(&context, &[grafana_requiring("open@1.0")], &lookup)
+            .expect("the types are consistent");
+        let texts: Vec<String> = gaps.iter().map(ToString::to_string).collect();
+        assert!(
+            texts
+                .iter()
+                .any(|text| text.contains("`*`") && text.contains("`type`")),
+            "the undeclared key is the marker `*`: {texts:?}"
+        );
+        assert!(
+            texts
+                .iter()
+                .all(|text| !text.contains("leaked-key") && !text.contains("texte")),
+            "neither the key nor the value comes out: {texts:?}"
         );
     }
 

@@ -17,6 +17,8 @@ Exposes:
   @FlatContextType::optional_parameters
   @FlatContextType::required_roles
   @FlatContextType::optional_roles
+  @FlatContextType::violations
+  @ValueViolation
 
 Accepts:
   @ContextType::new: un nom, une version, un schéma de paramètres (`serde_json::Value`, objet JSON Schema) ; constructeurs chaînés : rôles (@RoleSpec : nom, obligatoire ou optionnel) et types inclus (@TypeRequirement).
@@ -25,6 +27,8 @@ Accepts:
 
 Returns:
   @FlatContextType: paramètres requis (noms listés par `required` des schémas), paramètres optionnels, rôles obligatoires et optionnels, du type et de tous ceux qu'il inclut.
+  @FlatContextType::violations: les valeurs présentes d'un contexte (`BTreeMap` nom vers valeur), le nom du type pour les erreurs ; rend les @ValueViolation.
+  @FlatContextType::violations: la liste des @ValueViolation (nom du paramètre rendu, ou `*` s'il n'est déclaré nulle part, et règle du schéma violée) pour chaque valeur présente, contre chaque schéma du type et des types qu'il inclut ; vide si toutes les valeurs satisfont leurs schémas. Une erreur (`InvalidContextType`) seulement si un schéma ne se compile plus.
   @ContextType::bump_since: un @Bump : majeure si un champ requis ou un rôle obligatoire est ajouté, si un champ ou un rôle est retiré, ou si un champ ou un rôle optionnel devient obligatoire ; mineure si seul un champ optionnel ou un rôle optionnel est ajouté ; sinon aucune.
 
 Raises:
@@ -36,11 +40,15 @@ Must:
   Le schéma n'est pas un secret : aucun paramètre ne porte de valeur par défaut contenant une référence de secret.
   Se sérialise et se désérialise à l'identique.
   Le nom d'un type est son identifiant : non vide, ASCII minuscule, chiffres et tirets.
+  La vérification structurelle est complète (`agent-sessions/toolsets#FR-4`, décision du 2026-10-30) : un schéma de paramètres est compilé comme JSON Schema à la construction, et un schéma qui ne compile pas est refusé, y compris une référence `$ref` distante ou de fichier, sans accès réseau ni fichier. À la vérification, chaque valeur présente est validée contre le schéma du type et de chaque type inclus, à toute profondeur (types, énumérations, `additionalProperties`, etc.). Les schémas ne se réduisent donc pas à `required` et `properties`.
+  La présence des paramètres requis reste vérifiée à part, par les noms `required` aplatis : une règle `required` de la racine n'est pas redonnée comme écart de valeur.
+  Un écart de valeur ne nomme ni la valeur soumise ni une clé du contexte que le schéma ne déclare pas : le paramètre est rendu s'il est déclaré sous `properties` à toute profondeur, sinon `*` ; seule la règle violée est nommée (`agent-sessions#CON-3`).
 
 Depends on:
   ./error.sdd
   ./toolset_context.sdd
   ./version.sdd
+  jsonschema (`default-features = false`, déjà au Cargo.toml : compilation du schéma et validation, sans réseau ni fichier)
   serde
   serde_json
   vynil-core
@@ -80,8 +88,28 @@ Scenario: inclusion cycle refused
   When one is flattened
   Then it fails with InvalidContextType
 
+Scenario: schema that does not compile is refused
+  Given a parameter schema `{"type": "foo"}`
+  When the type is built
+  Then it fails with InvalidContextType, and the message does not quote the schema
+
+Scenario: remote reference is refused
+  Given a parameter schema whose `$ref` points to `https://example.com/schema.json`
+  When the type is built
+  Then it fails with InvalidContextType, with no network access
+
+Scenario: every value is validated against every flattened schema
+  Given a type `cluster` requiring the text parameter `namespace`, and a type `k8s-prod` that includes it and declares the integer parameter `region`
+  When the values `namespace` = 5 and `region` = "eu" are checked on `k8s-prod`
+  Then two violations of the rule `type`, one on `namespace` and one on `region`
+
+Scenario: undeclared key is rendered as a marker
+  Given a schema whose `additionalProperties` is `{"type": "integer"}` and no declared property
+  When the undeclared key `leaked-key` = "texte" is checked
+  Then one violation of the rule `type` on the parameter `*`, and the text `leaked-key` appears nowhere
+
 Tasks:
   [x] #1 Tests puis implémentation.
       Validé le 2026-10-29 (validator, mutations manuelles) sous `SKIP=deny scripts/check`.
   [x] #3 Décidé le 2026-10-30 par le développeur principal : un champ ou un rôle qui passe d'optionnel à obligatoire est une rupture (majeure) ; l'inverse est mineur ; la valeur par défaut d'un paramètre est contrôlée par la même heuristique de secret que ./toolset_context.sdd ; `flatten` reçoit une fonction de recherche tant que le trait de ./store.sdd n'existe pas, sa signature sera reprise alors.
-  [ ] #2 Posé : un schéma de paramètres est un objet JSON Schema ; la vérification structurelle ne s'arrête plus à `required` et `properties` depuis la décision du 2026-10-30 (validation complète, voir ./toolsets.sdd #3) ; le schéma reste conservé tel quel.
+  [x] #2 Révisé pour la validation complète, décision du 2026-10-30 (voir ./toolsets.sdd #3) : un schéma de paramètres est compilé à la construction (refus si la compilation échoue, `$ref` distant compris) et conservé tel quel ; la vérification structurelle ne s'arrête plus à `required` et `properties` : chaque valeur présente est validée contre le schéma du type et des types inclus (voir Must). Non validé : tests à écrire et à faire échouer d'abord.
