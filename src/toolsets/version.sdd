@@ -1,0 +1,50 @@
+Spec: version
+
+Purpose:
+  Exigence de version d'un type de contexte (`cluster@1.2`) et nature d'un changement de version (`agent-sessions/toolsets#FR-10`, `FR-13`, `FR-14`).
+
+Owns:
+  ./version.rs
+
+Exposes:
+  @TypeRequirement
+  @Bump
+
+Accepts:
+  @TypeRequirement::new: un nom de type et une version minimale (@vynil_core::Semver) ; @TypeRequirement::parse: un texte `nom@majeure.mineure` ou `nom@majeure.mineure.correctif`.
+  @TypeRequirement::is_satisfied_by: une version.
+
+Returns:
+  @TypeRequirement::is_satisfied_by: vrai si la version a la même majeure que le minimum et lui est supérieure ou égale.
+  @Bump: `None`, `Minor` ou `Major` (ordre croissant, `Ord`).
+
+Raises:
+  @ToolsetsError::InvalidToolset: texte d'exigence sans `@`, nom vide, version illisible.
+
+Must:
+  `cluster@1.2` est satisfait par 1.2.0 et 1.3.0, pas par 1.1.0 ni 2.0.0 (`agent-sessions/toolsets#AC-7`) ; une version de préversion n'est jamais satisfaisante.
+  Une exigence `1.2` vaut `1.2.0`.
+
+Depends on:
+  ./error.sdd
+  vynil-core
+
+Scenario: same major, higher or equal minor
+  Given the requirement `cluster@1.2`
+  When it is checked against 1.2.0 and 1.3.0
+  Then it is satisfied in both cases
+
+Scenario: lower minor or other major
+  Given the requirement `cluster@1.2`
+  When it is checked against 1.1.0 and 2.0.0
+  Then it is not satisfied in either case
+
+Scenario: malformed requirement
+  Given the texts `cluster`, `@1.2` and `cluster@x`
+  When each is parsed
+  Then each fails with InvalidToolset
+
+Tasks:
+  [x] #1 Tests puis implémentation.
+      Validé le 2026-10-29 (validator, mutations manuelles) sous `SKIP=deny scripts/check`.
+  [x] #2 `vynil_core::Semver` est réutilisé tel quel : son champ public `version` donne la majeure, la mineure et la préversion sans dépendre de la crate `semver` (constaté dans `vynil-core` 0.9.0).

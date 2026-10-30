@@ -1,0 +1,66 @@
+Spec: toolset
+
+Purpose:
+  Déclaration d'un toolset : module Rhai (source), skills, exigences sur le ToolsetContext (types, paramètres typés avec défauts, rôles MCP propres), dépendances privées, version
+    (`agent-sessions/toolsets#FR-1`, `FR-2`, `FR-10`, `FR-14`).
+
+Owns:
+  ./toolset.rs
+
+Exposes:
+  @Toolset
+  @ParamDecl
+  @RoleDecl
+
+Accepts:
+  @Toolset::new: un nom (identifiant Rhai valide, il nomme le module), une description, une version (@vynil_core::Semver) et le texte source du module Rhai ; constructeurs chaînés : un skill, une exigence de type (@TypeRequirement), un paramètre (@ParamDecl : nom, schéma JSON, valeur par défaut optionnelle), un rôle MCP propre (@RoleDecl : nom, obligatoire ou optionnel), une dépendance (nom d'un module, jamais accordé au LLM par ce seul fait).
+
+Returns:
+  Accesseurs en lecture seule. Une description pour l'introspection (nom, description) ; le module n'est pas construit ici (./assemble.sdd).
+
+Raises:
+  @ToolsetsError::InvalidToolset: voir ./error.sdd.
+
+Must:
+  Un toolset est une donnée : texte source, skills et déclarations ; rien d'exécutable n'est construit à la création.
+  Les dépendances d'un toolset envers d'autres modules lui sont accessibles sans l'être au LLM (`agent-sessions/toolsets#FR-2`) : la déclaration les nomme, ./assemble.sdd les rend invisibles de l'introspection.
+  Aucune valeur propre à un environnement dans le toolset : les valeurs par défaut des paramètres sont génériques (`agent-sessions#BR-3`).
+  La description d'un toolset est non blanche, et la valeur par défaut d'un @ParamDecl passe le même contrôle de secret que ./toolset_context.sdd (@ToolsetsError::InvalidToolset) : le toolset ne porte aucune valeur d'environnement (décidé le 2026-10-29, à confirmer).
+  Les noms de paramètres, de rôles, de skills et de dépendances sont uniques chacun dans leur catégorie.
+  La version ne change que lorsque le contrat de sortie change (voir ./contract.sdd).
+  Se sérialise et se désérialise à l'identique.
+
+Depends on:
+  ./error.sdd
+  ./toolset_context.sdd
+  rhai
+  ./skill.sdd
+  ./version.sdd
+  serde
+  serde_json
+  vynil-core
+
+Scenario: toolset is plain data
+  Given a toolset built with a source, two skills and a requirement
+  When read
+  Then the accessors return what was given and nothing was compiled
+
+Scenario: duplicate names refused
+  Given a toolset with two skills of the same name
+  When the second is added
+  Then it fails with InvalidToolset
+
+Scenario: invalid module name refused
+  Given the name `a-b`
+  When a toolset is built with it
+  Then it fails with InvalidToolset
+
+Tasks:
+  [x] #3 Test d'un nom de module qui est un mot réservé de Rhai (`fn`), relevé par le validateur le 2026-10-29.
+      Validé le 2026-10-29 (validator, 12 mutants tués) sous `SKIP=deny scripts/check`.
+  [x] #1 Tests puis implémentation.
+      Validé le 2026-10-29 (validator, mutations manuelles) sous `SKIP=deny scripts/check`.
+  [x] #2 Description blanche et valeur par défaut ressemblant à un secret refusées (voir `Must`), avec leurs tests.
+      Validé le 2026-10-29 (validator, mutations manuelles) sous `SKIP=deny scripts/check`.
+  [x] #4 `Debug` manuel de @Toolset qui élide le texte source du module (un `{:?}` ne doit pas le répandre), avec son test.
+      Validé le 2026-10-29 (validator, 58 mutants dont 55 tués) sous `scripts/check` complet.

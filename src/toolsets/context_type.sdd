@@ -1,0 +1,87 @@
+Spec: context_type
+
+Purpose:
+  ContextType : schéma nommé et versionné des paramètres (JSON Schema) et des rôles MCP (obligatoires ou optionnels) d'un environnement, avec inclusion d'autres types ;
+    vocabulaire partagé entre auteurs de toolsets (`agent-sessions/toolsets#FR-9`, `FR-13`, `agent-sessions#DEC-11`).
+
+Owns:
+  ./context_type.rs
+
+Exposes:
+  @ContextType
+  @RoleSpec
+  @FlatContextType
+  @ContextType::flatten
+  @ContextType::bump_since
+  @FlatContextType::required_parameters
+  @FlatContextType::optional_parameters
+  @FlatContextType::required_roles
+  @FlatContextType::optional_roles
+
+Accepts:
+  @ContextType::new: un nom, une version, un schéma de paramètres (`serde_json::Value`, objet JSON Schema) ; constructeurs chaînés : rôles (@RoleSpec : nom, obligatoire ou optionnel) et types inclus (@TypeRequirement).
+  @ContextType::flatten: une fonction de recherche d'un type par nom (le trait de stockage ou une table) ; rend un @FlatContextType.
+  @ContextType::bump_since: une version précédente du même type.
+
+Returns:
+  @FlatContextType: paramètres requis (noms listés par `required` des schémas), paramètres optionnels, rôles obligatoires et optionnels, du type et de tous ceux qu'il inclut.
+  @ContextType::bump_since: un @Bump : majeure si un champ requis ou un rôle obligatoire est ajouté, si un champ ou un rôle est retiré, ou si un champ ou un rôle optionnel devient obligatoire ; mineure si seul un champ optionnel ou un rôle optionnel est ajouté ; sinon aucune.
+
+Raises:
+  @ToolsetsError::InvalidContextType: voir ./error.sdd (nom hors de `[a-z0-9-]+`, valeur par défaut de paramètre qui a l'allure d'un secret) ; un type inclus introuvable ou d'une version insuffisante est aussi refusé par @flatten.
+
+Must:
+  Un type qui en inclut un autre exige les champs et rôles des deux (`agent-sessions/toolsets#AC-6`) ; un rôle obligatoire dans l'un et optionnel dans l'autre est obligatoire.
+  L'inclusion est vérifiée contre l'exigence de version du type inclus (@TypeRequirement) et ne peut pas être cyclique.
+  Le schéma n'est pas un secret : aucun paramètre ne porte de valeur par défaut contenant une référence de secret.
+  Se sérialise et se désérialise à l'identique.
+  Le nom d'un type est son identifiant : non vide, ASCII minuscule, chiffres et tirets.
+
+Depends on:
+  ./error.sdd
+  ./toolset_context.sdd
+  ./version.sdd
+  serde
+  serde_json
+  vynil-core
+
+Scenario: including a type requires both field sets
+  Given a type `cluster` requiring `namespace` and a type `k8s-prod` including `cluster@1.0` and requiring `region`
+  When `k8s-prod` is flattened
+  Then the required parameters are `namespace` and `region`
+
+Scenario: optional field is a minor change
+  Given a type in 1.0 and the same type with one optional field added
+  When the bump is computed
+  Then it is Minor
+
+Scenario: required field is a major change
+  Given a type in 1.0 and the same type with one required field added
+  When the bump is computed
+  Then it is Major
+
+Scenario: removal is a major change
+  Given a type in 1.0 and the same type without one of its roles
+  When the bump is computed
+  Then it is Major
+
+Scenario: optional becoming required is a major change
+  Given a type in 1.0 with an optional field and the same type with that field required
+  When the bump is computed
+  Then it is Major
+
+Scenario: secret-like default refused
+  Given a parameter schema whose default value is `sk-abcdef`
+  When the type is built
+  Then it fails with InvalidContextType
+
+Scenario: inclusion cycle refused
+  Given two types that include each other
+  When one is flattened
+  Then it fails with InvalidContextType
+
+Tasks:
+  [x] #1 Tests puis implémentation.
+      Validé le 2026-10-29 (validator, mutations manuelles) sous `SKIP=deny scripts/check`.
+  [?] #3 Décisions posées le 2026-10-29 (à confirmer) : un champ ou un rôle qui passe d'optionnel à obligatoire est une rupture (majeure) ; l'inverse est mineur ; la valeur par défaut d'un paramètre est contrôlée par la même heuristique de secret que ./toolset_context.sdd ; `flatten` reçoit une fonction de recherche tant que le trait de ./store.sdd n'existe pas, sa signature sera reprise alors.
+  [?] #2 Posé : un schéma de paramètres est un objet JSON Schema dont la liste `required` et `properties` suffisent à la vérification structurelle (voir ./toolsets.sdd #3) ; le reste du schéma est conservé tel quel et n'est pas interprété.

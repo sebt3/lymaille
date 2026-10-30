@@ -8,6 +8,7 @@ mod clock;
 mod context;
 mod scratchpad;
 mod session;
+mod toolsets;
 
 pub use agents::{
     AgentDefinition, AgentKind, AgentStore, AgentsError, AgentsResult, DetectedModel, ErrorClass,
@@ -21,19 +22,28 @@ pub use context::{
     UsageTracker, estimate_tokens, replayed_reasoning,
 };
 pub use scratchpad::{
-    CandidateSet, Catalog, CoreGroup, EngineBuilder, FunctionEntry, FunctionSource, GrantedModule,
-    GrantedSkill, GrantedToolset, Grants, IntrospectionSource, LimitKind, NotFoundKind, Origin,
-    PersistWarning, Recompiled, Rendered, RestoreWarning, ScopeSnapshot, ScratchpadEngine, ScratchpadError,
-    ScratchpadLimits, ScratchpadResult, ScriptErrorClass, ScriptFunction, ScriptPosition,
-    UnpersistableReason, VariableInfo, extract_function_sources, full_text, limits_notice, nearest,
-    recompile_functions, register_format_functions, render_value, restore_scope, snapshot_scope, suggest_for,
-    to_dynamic, to_tagged, truncate_middle,
+    CandidateSet, Catalog, CoreGroup, EngineBuilder, FunctionDescriptor, FunctionEntry, FunctionSource,
+    GrantedModule, GrantedSkill, GrantedToolset, Grants, InspectionPad, InspectionTarget,
+    IntrospectionSource, LimitKind, ModuleDescriptor, NotFoundKind, Origin, PadSnapshot, PersistWarning,
+    Recompiled, Rendered, RestoreWarning, Restored, RunEnv, RunOutcome, RunStatus, ScopeSnapshot, Scratchpad,
+    ScratchpadEngine, ScratchpadError, ScratchpadLimits, ScratchpadResult, ScriptErrorClass, ScriptFunction,
+    ScriptPosition, UnpersistableReason, VariableInfo, descriptors_from_catalog, extract_function_sources,
+    full_text, limits_notice, nearest, recompile_functions, register_format_functions, render_value,
+    restore_scope, shell_module, snapshot_scope, suggest_for, to_dynamic, to_tagged, truncate_middle,
 };
 pub use session::{
     AgentRef, Backoff, BoundaryKind, CancelHandle, Event, EventKind, EventSink, FormatVersion, History,
-    InMemoryStore, Label, LabelAuthor, LabelTarget, Labels, McpInput, McpRecord, Message, ModelSnapshot,
-    NullSink, Outcome, Provenance, Reasoning, RecordingSink, Redactor, RunId, RunSignals, ScriptInput,
-    ScriptRecord, Segment, SegmentContext, SessionError, SessionId, SessionResult, SessionState,
-    SessionStore, SleepOutcome, TaggedValue, TokenCounters, ToolCall, TurnGate, TurnId, TurnPermit,
-    restore_notices,
+    InMemoryStore, InspectionTargetRef, Label, LabelAuthor, LabelTarget, Labels, McpInput, McpRecord,
+    Message, ModelSnapshot, NullSink, Outcome, Provenance, Reasoning, RecordingSink, Redactor, RunId,
+    RunSignals, ScriptInput, ScriptRecord, Segment, SegmentContext, SessionError, SessionId, SessionKind,
+    SessionResult, SessionState, SessionStore, SleepOutcome, TaggedValue, TokenCounters, ToolCall, TurnGate,
+    TurnId, TurnPermit, restore_notices,
+};
+pub use toolsets::{
+    Bump, ConfigStores, ContextLevel, ContextStore, ContextType, ContextTypeStore, Contract, FlatContextType,
+    Gap, GapKind, InMemoryToolsets, InspectionSlot, ParamDecl, ResolvedContext, RoleDecl, RoleSpec,
+    ScriptError, SessionFilter, SessionIndex, SessionMeta, SessionSummary, Skill, Toolset, ToolsetContext,
+    ToolsetStore, ToolsetsError, ToolsetsResult, TypeRequirement, VersionWarning, check_context,
+    check_creation_rule, check_declared_version, check_template, config_registration, delegable_subagents,
+    extract_contract, render_prompt, render_skill,
 };

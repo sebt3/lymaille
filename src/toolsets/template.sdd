@@ -1,0 +1,80 @@
+Spec: template
+
+Purpose:
+  Rendu Handlebars du prompt système et du corps et de la description des skills, avec les données du ToolsetContext et des métadonnées de session figées au rendu
+    (`agent-sessions/toolsets#FR-6`, `AC-2`, `AC-12`).
+
+Owns:
+  ./template.rs
+
+Exposes:
+  @render_prompt
+  @render_skill
+  @SessionMeta
+  @check_template
+
+Accepts:
+  @SessionMeta::new: l'identifiant de l'agent, la date de début de la session (texte posé par l'hôte), les toolsets accordés (nom, description), les noms des skills accordés et, pour un agent principal, le nombre de sous-agents parallélisables (`agent-sessions/delegation#FR-11`).
+  @render_prompt: le gabarit du prompt système, un @ResolvedContext et un @SessionMeta.
+  @render_skill: un @Skill, le nom du toolset auquel il est rattaché, un @ResolvedContext et un @SessionMeta ; rend description et corps rendus. `context.params` y est le contexte partagé recouvert des paramètres résolus du toolset (surcharge, puis contexte, puis défaut du toolset, `./toolset_context.sdd`) : un skill voit les valeurs de son propre toolset et d'aucun autre.
+  @check_template: un gabarit ; ne rend rien.
+
+Returns:
+  Le texte rendu. Variables disponibles : `context.params.<nom>` (le contexte partagé pour le prompt système), `context.roles.<nom>` (vrai si le rôle est lié), `session.agent_id`, `session.started_at`, `session.toolsets` (nom, description), `session.skills` (noms seulement), `session.parallel_subagents`.
+
+Raises:
+  @ToolsetsError::Template: gabarit invalide ou variable absente (mode strict) ; le message nomme le gabarit et la variable.
+
+Must:
+  Les sections conditionnelles selon la présence d'un rôle fonctionnent (`{{#if context.roles.k8s}}`) : un rôle absent fait disparaître la section (`agent-sessions/toolsets#AC-2`).
+  Le prompt système est rendu une seule fois, à la création ou à la restauration de la session : aucun état changeant en cours de session (todo, Memory, scope) n'y entre.
+  Le prompt contient le nom de chaque skill accordé, jamais leur description ni leur corps (`agent-sessions/toolsets#AC-12`).
+  Le rendu est déterministe : même gabarit et mêmes données, même texte ; aucune horloge, aucune E/S, aucun helper qui lit l'environnement ; les helpers du moteur de gabarit sont limités à ceux du moteur par défaut.
+  Aucune valeur de secret n'entre dans les données (le @ResolvedContext n'en porte pas).
+
+Depends on:
+  ./error.sdd
+  ./skill.sdd
+  ./toolset_context.sdd
+  handlebars
+  serde_json
+  [x] #6 Décidé le 2026-10-29 : une erreur de gabarit répète des fragments du gabarit (jetons, ligne) ; le texte est celui de l'auteur du toolset et revient à lui, donc rien n'est masqué. Un secret n'a pas sa place dans un gabarit (`agent-sessions#CON-3`).
+
+Scenario: same template, two contexts
+  Given one prompt template and two resolved contexts with different parameter values
+  When both are rendered
+  Then the texts differ only by those values
+
+Scenario: absent role removes its section
+  Given a template with a section conditional on the role `k8s`
+  When it is rendered with a context without that role
+  Then the section is absent
+
+Scenario: skill names without bodies
+  Given granted skills `deploy` and `triage`
+  When the system prompt is rendered
+  Then it contains both names and neither description nor body
+
+Scenario: skill sees its toolset parameters
+  Given un skill du toolset `ops` dont le paramètre `region` a le défaut `eu` et le contexte porte `region = us` pour `ops` seulement
+  When le skill est rendu avec `{{context.params.region}}`
+  Then le texte contient `us`, et le même gabarit rendu pour un autre toolset contient son propre défaut
+
+Scenario: unknown variable is an error
+  Given a template that uses `{{context.params.missing}}`
+  When it is rendered
+  Then it fails with Template naming the variable
+
+Scenario: rendering is deterministic
+  Given the same template and data
+  When rendered twice
+  Then the texts are equal
+
+Tasks:
+  [x] #1 Tests puis implémentation.
+      Validé le 2026-10-29 (validator, 58 mutants dont 55 tués) sous `scripts/check` complet.
+  [?] #2 Posé : mode strict (variable absente = erreur) plutôt que chaîne vide ; un auteur de toolset voit sa faute à l'enregistrement. À confirmer.
+  [x] #4 Passer le nom du toolset à @render_skill et recouvrir `context.params` des paramètres de ce toolset (décision du 2026-10-29), avec un Scenario « skill sees its toolset parameters ».
+      Validé le 2026-10-29 (validator, 58 mutants dont 55 tués) sous `scripts/check` complet.
+  [?] #5 Posé par l'implémentation : @check_template ne vérifie que la syntaxe ; une variable absente n'est détectée qu'au rendu (mode strict). L'enregistrement d'un brouillon ne la voit donc pas ; un contrôle à blanc avec des données d'essai est une évolution. À confirmer.
+  [?] #3 Posé : la date de début est un texte fourni par l'hôte (`SessionMeta`), non lue ici (`agent-sessions#NFR-1`).

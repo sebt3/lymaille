@@ -1,0 +1,81 @@
+Spec: store
+
+Purpose:
+  Traits de stockage des toolsets, des types de contexte et des ToolsetContext que l'hôte implémente, stockage en mémoire pour les tests, et cascade de niveaux
+    (`agent-sessions#CON-1`, `agent-sessions/toolsets#FR-5`, `FR-8`, `FR-9`, `AC-13`).
+
+Owns:
+  ./store.rs
+
+Exposes:
+  @ToolsetStore
+  @ContextTypeStore
+  @ContextStore
+  @InMemoryToolsets
+
+Accepts:
+  @ToolsetStore::get_active / put_draft: un nom de toolset / un @Toolset.
+  @ToolsetStore::get_draft: un nom.
+  @ContextTypeStore::get_type / put_type: un nom / un @ContextType.
+  @ContextStore::get_context / put_context: un nom / un @ToolsetContext.
+
+Returns:
+  Chaque `get_*` rend l'objet s'il existe, sinon rien. `get_active` rend la version active, jamais un brouillon. Chaque `put_*` remplace l'objet de même nom.
+  @InMemoryToolsets implémente les trois traits ; son `activate` (méthode propre, non du trait) fait d'un brouillon la version active.
+  @Layered (../agents/catalog.sdd) implémente @ToolsetStore, @ContextTypeStore et @ContextStore dès que ses couches le font, avec la même règle de cascade.
+
+Raises:
+  @ToolsetsError::Store: échec du stockage de l'hôte.
+  @ToolsetsError::Poisoned: verrou interne de @InMemoryToolsets empoisonné.
+
+Must:
+  Les traits sont `Send + Sync`, asynchrones, à futurs `Send`, sans macro ni objet dynamique, sans opération de liste ni de suppression (relèvent de l'hôte).
+  Un toolset enregistré par `put_draft` est un brouillon : il n'est visible d'aucune session tant que l'hôte ne l'a pas activé ; le trait n'offre aucune opération d'activation (`agent-sessions/toolsets#FR-8`, `AC-13`).
+  @put_draft valide le toolset (contrat extrait, gabarits, plafonds des skills) et refuse un toolset invalide ; @put_type refuse un type invalide.
+  @InMemoryToolsets stocke les objets sous leur forme JSON sérialisée, pour que ce qu'on relit passe par le format réel.
+  Un objet de la couche haute remplace entièrement celui de la base ; aucune fusion.
+
+Depends on:
+  ./toolset.sdd
+  ./context_type.sdd
+  ./toolset_context.sdd
+  ./contract.sdd
+  ./template.sdd
+  ./error.sdd
+  ../agents/catalog.sdd
+  [x] #6 Trois tests relevés par le validateur le 2026-10-29 : un skill dont la description ne compile pas est refusé par `put_draft` (Template) ; `activate` sans brouillon rend `InvalidToolset` sans panique ; verrou empoisonné rend `Poisoned` sur toutes les opérations (et le `Debug` s'affiche). Assertion du nom du toolset dans l'erreur de `validate_draft` et des noms de `drafts` dans le `Debug`.
+      Validé le 2026-10-29 (implémentation vérifiée par mutations de l'auteur), validation par le validator groupée avec T6.
+
+Scenario: put then get round trips
+  Given an in-memory store and a type, a context and an active toolset
+  When each is put then fetched
+  Then each equals the original
+
+Scenario: a draft is invisible until activated
+  Given a toolset put as a draft
+  When the active version is read, then the host activates it and it is read again
+  Then the first read finds nothing and the second finds the toolset
+
+Scenario: the trait cannot activate
+  Given the public surface of the store traits
+  When it is read
+  Then no operation activates a draft
+
+Scenario: invalid draft refused
+  Given a toolset whose source does not compile
+  When it is put as a draft
+  Then it fails with InvalidToolset and nothing is stored
+
+Scenario: layered stores cascade
+  Given un @Layered dont la couche haute contient le toolset actif `ops` et la basse `ops` et `base-only`
+  When `ops` et `base-only` sont lus, puis un brouillon est écrit
+  Then `ops` vient de la haute en remplaçant entièrement celui de la base, `base-only` vient de la basse, et le brouillon n'est écrit que dans la haute
+
+Tasks:
+  [x] #1 Tests puis implémentation.
+      Validé le 2026-10-29 (validator, mutations manuelles) sous `scripts/check` complet.
+  [x] #4 `Debug` manuel de @InMemoryToolsets qui élide le texte source des modules (même règle que ./toolset.sdd #4).
+      Validé le 2026-10-29 (validator, 58 mutants dont 55 tués) sous `scripts/check` complet.
+  [?] #5 Posés par l'implémentation, à confirmer : le plafond de rendu des skills est fourni à la construction (`InMemoryToolsets::new(render_cap_chars)`) ; `activate` sans brouillon rend `InvalidToolset` ; @put_type vérifie la relecture et ne détecte pas les cycles d'inclusion (ils le sont par `flatten`, les types pouvant arriver dans n'importe quel ordre).
+  [?] #2 Posé : l'activation d'un brouillon est une méthode d'@InMemoryToolsets seulement ; le trait que l'hôte implémente la laisse à son propre système (`FR-8`).
+  [?] #3 Posé : l'historique des versions actives (restauration d'un segment sur la définition d'origine, `agent-sessions/toolsets#FR-16`) est l'affaire de la session (segment figé), non de ce stockage.

@@ -1,0 +1,66 @@
+Spec: toolset_context
+
+Purpose:
+  ToolsetContext : jeu plat de paramètres nommés et de liaisons de rôles, avec une section de surcharge par toolset ; entité nommée à un niveau, sans secret ; valeurs résolues
+    (valeurs par défaut des toolsets comprises) (`agent-sessions/toolsets#FR-3`, `FR-5`, `FR-17`, `agent-sessions#DEC-5`, `agent-sessions#CON-3`).
+
+Owns:
+  ./toolset_context.rs
+
+Exposes:
+  @ToolsetContext
+  @ContextLevel
+  @ResolvedContext
+  @ToolsetContext::resolve
+  @ResolvedContext::toolsets
+  @ResolvedContext::shared
+  @ResolvedContext::roles
+
+Accepts:
+  @ToolsetContext::new: un nom et un @ContextLevel (`User`, `Project` ou `Session`) ; constructeurs chaînés : un paramètre (nom, valeur JSON), une liaison de rôle (nom du rôle, nom de la référence que l'hôte résout), une surcharge pour un toolset (nom du toolset, nom du paramètre, valeur).
+  @ToolsetContext::resolve: les valeurs par défaut déclarées par les toolsets de l'agent (nom du toolset, nom du paramètre, valeur) ; rend un @ResolvedContext.
+
+Returns:
+  @ResolvedContext: les paramètres résolus (table ordonnée nom vers valeur) pour chaque toolset et pour le reste, et la liste triée des noms des rôles liés. Aucune référence de secret : seuls les noms des rôles sortent.
+
+Raises:
+  @ToolsetsError::InvalidContext: voir ./error.sdd.
+
+Must:
+  Priorité d'une valeur : surcharge du toolset, puis paramètre du contexte, puis valeur par défaut du toolset (`agent-sessions#BR-3` : les valeurs d'environnement ne viennent que du contexte).
+  Un seul ToolsetContext par session, plat et partagé par l'agent principal et ses sous-agents (`agent-sessions#DEC-5`).
+  Une référence de rôle, une valeur de paramètre et une valeur par défaut reçue par @resolve dont la forme a l'allure d'un secret (la liste de ./../agents/provider.sdd, `://` suivi d'un `@`, préfixes `sk-` et `Bearer`) est refusée : le contexte ne contient que des références.
+  Deux valeurs par défaut pour le même couple (toolset, paramètre) sont refusées par @resolve (@ToolsetsError::InvalidContext), jamais départagées en silence.
+  @ResolvedContext est une copie indépendante : en modifier une valeur n'affecte pas le contexte.
+  Se sérialise et se désérialise à l'identique ; les tables sont ordonnées.
+
+Depends on:
+  ./error.sdd
+  serde
+  serde_json
+
+Scenario: override beats context beats default
+  Given a default `5`, a context parameter `7` and an override `9` for the same toolset parameter
+  When the context is resolved
+  Then the value is 9 for that toolset, 7 without the override, and 5 without either
+
+Scenario: only role names come out
+  Given a context binding the role `k8s` to the reference `prod-k8s`
+  When it is resolved
+  Then the resolved context lists `k8s` and never `prod-k8s`
+
+Scenario: secret-like value refused
+  Given a parameter whose value is `sk-abcdef`
+  When it is added
+  Then it fails with InvalidContext
+
+Scenario: resolved copy is independent
+  Given a resolved context
+  When one of its values is modified
+  Then a second resolution still returns the original value
+
+Tasks:
+  [x] #1 Tests puis implémentation.
+      Validé le 2026-10-29 (validator, mutations manuelles) sous `SKIP=deny scripts/check`.
+  [?] #3 Décisions posées le 2026-10-29 (à confirmer) : les références de rôle et les valeurs par défaut passent par le même contrôle de secret que les valeurs de paramètres ; un doublon de valeur par défaut est une erreur.
+  [?] #2 Posé : la détection de valeur ressemblant à un secret réutilise la liste de ../agents/provider.sdd (heuristique documentée, le contrôle réel reste à l'hôte, `agent-sessions#CON-3`) ; une fonction commune est à extraire quand les deux specs sont livrées.

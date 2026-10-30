@@ -1,0 +1,55 @@
+Spec: assemble
+
+Purpose:
+  Construit ce que le scratchpad reçoit : les @GrantedModule, @GrantedToolset et @GrantedSkill d'un agent à partir de ses toolsets, de leurs dépendances privées et du ToolsetContext résolu
+    (`agent-sessions/toolsets#FR-2`, `AC-1`, `agent-sessions/scratchpad#FR-3`).
+
+Owns:
+  ./assemble.rs
+
+Exposes:
+  @assemble
+  @Assembled
+
+Accepts:
+  @assemble: les @Toolset de l'agent, les modules accordés par la définition, les modules disponibles à titre de dépendance (nom vers module Rhai), un @ResolvedContext et un @ScratchpadEngine de base (@base_engine).
+
+Returns:
+  @Assembled: un @Grants (modules, toolsets, skills) et la liste des toolsets en échec, avec la raison.
+
+Raises:
+  @ToolsetsError::InvalidToolset: le module d'un toolset ne s'évalue pas ; un toolset en échec est retiré, les autres restent.
+
+Must:
+  Les dépendances d'un toolset lui sont accessibles à l'évaluation de son module mais n'apparaissent ni dans le scope, ni dans @Grants, ni dans l'introspection, sauf si la définition d'agent les accorde (`agent-sessions/toolsets#FR-2`, `AC-1`).
+  Le module d'un toolset est celui de ses fonctions publiques : les sous-modules d'import des dépendances, que l'export brut de Rhai expose, en sont retirés avant de l'accorder (Observed in: spikes/rhai-1-25, `private_dependencies`).
+  Un toolset dont une dépendance n'est pas disponible est en échec, pas accordé à moitié.
+  Les skills d'un toolset sont accordés avec lui (nom, description, nom du toolset) ; ceux d'un toolset non accordé ne le sont pas.
+  Aucune E/S ; l'évaluation du module n'ouvre aucune connexion.
+
+Depends on:
+  ./toolset.sdd
+  ./toolset_context.sdd
+  ./error.sdd
+  ../scratchpad/grant.sdd
+  ../scratchpad/engine.sdd
+  rhai
+
+Scenario: dependency works but stays hidden
+  Given a toolset `ops` that calls the module `helpers` and an agent that does not grant `helpers`
+  When the toolset is assembled and a function of `ops` that uses `helpers` is called
+  Then the call succeeds and `helpers` is absent from the grants
+
+Scenario: dependency not available
+  Given a toolset that depends on a missing module
+  When it is assembled
+  Then the toolset is reported as failed and the others are granted
+
+Scenario: skills follow their toolset
+  Given two toolsets with one skill each and only one granted
+  When they are assembled
+  Then only the skill of the granted toolset is granted
+
+Tasks:
+  [ ] #1 Tests puis implémentation.
+  [?] #2 Mécanisme du retrait des sous-modules d'import : à mesurer par un court spike avant l'implémentation (comme `scratchpad.sdd` #5) ; la dépendance à `Module::eval_ast_as_new` et à un résolveur de modules est à vérifier contre l'`import` fermé du scratchpad (`engine.sdd` #5).

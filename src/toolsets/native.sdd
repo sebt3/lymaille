@@ -1,0 +1,67 @@
+Spec: native
+
+Purpose:
+  Tool natif `skill` (lecture des skills sans Rhai) et fonction `session_context()` lisible de tout code Rhai
+    (`agent-sessions/toolsets#FR-17`, `FR-18`, `AC-10`, `AC-11`).
+
+Owns:
+  ./native.rs
+
+Exposes:
+  @SkillTool
+  @SkillTool::call
+  @session_context_registration
+  @builtin_rhai_pad_skill
+
+Accepts:
+  @SkillTool::new: les @Skill accordés (avec leur toolset), le skill intégré, un @ResolvedContext, un @SessionMeta et le plafond de rendu.
+  @SkillTool::call: aucun argument (liste), un nom (corps rendu) ou un nom et un nom de document (document annexe).
+  @session_context_registration: un @ResolvedContext ; rend une étape d'enregistrement (@EngineBuilder::with_registration, ../scratchpad/engine.sdd).
+
+Returns:
+  @SkillTool::call: sans argument, la liste des skills disponibles (nom et description) ; avec un nom, le corps rendu ; avec un nom de document, ce document. Chaque texte est plafonné par @truncate_middle.
+  `session_context()` : une table Rhai de copie (paramètres résolus par toolset, noms des rôles liés), jamais de référence de secret.
+
+Raises:
+  @ToolsetsError::InvalidSkill: nom de skill ou de document inconnu (le message liste les noms existants).
+  @ToolsetsError::Template: voir ./template.sdd.
+
+Must:
+  `skill` ne passe pas par Rhai : il se rend sans aucun appel à `rhai_pad` (`agent-sessions/toolsets#AC-11`).
+  Un skill intégré, toujours disponible, enseigne l'usage de `rhai_pad`, l'introspection et les limites de `agent-sessions#CON-4` ; son texte est en anglais (il parle au modèle) et cite le bloc de ../scratchpad/introspect.sdd (@limits_notice).
+  `session_context()` est déclarée déterministe auprès de Rhai, rend une copie, est lisible depuis un script du LLM et depuis une fonction d'un module de toolset (une constante de scope n'est pas visible d'un module) : la modifier n'affecte pas la valeur lue ensuite (`agent-sessions/toolsets#AC-10`).
+  Aucune panique, aucune E/S.
+
+Depends on:
+  ./skill.sdd
+  ./template.sdd
+  ./toolset_context.sdd
+  ./error.sdd
+  ../scratchpad/engine.sdd
+  ../scratchpad/render.sdd
+  ../scratchpad/introspect.sdd
+  rhai
+
+Scenario: skill tool works without rhai_pad
+  Given a session with no call to rhai_pad
+  When `skill` is called with no argument, with the built-in name, and with a document name
+  Then the list, the built-in body and the document are returned
+
+Scenario: unknown skill lists the names
+  Given a skill name that does not exist
+  When `skill` is called with it
+  Then the error lists the existing names
+
+Scenario: session_context is a copy
+  Given a script that modifies the value returned by `session_context()`
+  When a second call reads it
+  Then the value is unchanged and nothing panics
+
+Scenario: same value from a module and a script
+  Given a toolset function and a script that both read `session_context()`
+  When both run
+  Then they read the same value
+
+Tasks:
+  [ ] #1 Tests puis implémentation.
+  [?] #2 Texte exact du skill intégré sur `rhai_pad` : à rédiger avec le code ; le bloc @limits_notice de ../scratchpad/introspect.sdd est cité (`introspect.sdd` #6).

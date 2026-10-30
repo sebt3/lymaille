@@ -1,0 +1,80 @@
+Spec: compat
+
+Purpose:
+  Compatibilité structurelle d'un ToolsetContext avec les types exigés par les toolsets d'un agent, et règles de définition d'agent propres aux toolsets
+    (`agent-sessions/toolsets#FR-4`, `FR-8`, `agent-sessions#DEC-11`, `AC-3`, `AC-4`, `AC-8`).
+
+Owns:
+  ./compat.rs
+
+Exposes:
+  @check_context
+  @Gap
+  @GapKind
+  @delegable_subagents
+  @check_creation_rule
+
+Accepts:
+  @check_context: un @ToolsetContext, les @Toolset de l'agent et une recherche de @ContextType par nom.
+  @delegable_subagents: la @AgentDefinition d'un agent de travail, ses sous-agents (@AgentDefinition), leurs toolsets, un @ToolsetContext et la recherche de types.
+  @check_creation_rule: une @AgentDefinition, la table des définitions de ses sous-agents et le nom du module de création de toolsets.
+
+Returns:
+  @check_context: la liste des @Gap (type, exigence, paramètre requis manquant, rôle obligatoire absent, type exigé introuvable ; toolset introuvable seulement pour @delegable_subagents) ; vide si compatible.
+  @delegable_subagents: les identifiants des sous-agents compatibles, dans l'ordre de la définition ; les autres sont retirés sans erreur.
+  @check_creation_rule: succès, ou @ToolsetsError::Forbidden.
+
+Raises:
+  @ToolsetsError::Incompatible: levée par @delegable_subagents (le contrôle de démarrage) pour l'agent principal quand ses écarts ne sont pas vides ; la liste des @Gap est dans l'erreur. @check_context rend les écarts sans les lever, et propage les erreurs de `flatten`.
+  @ToolsetsError::Forbidden: voir ci-dessus.
+
+Must:
+  La vérification est structurelle, sans déclaration de conformité du contexte : le contexte satisfait un type si tous les paramètres requis aplatis y figurent et si tous les rôles obligatoires y sont liés (`agent-sessions#DEC-11`).
+  La version du type est vérifiée contre l'exigence du toolset (@TypeRequirement) ; un type de version incompatible est un écart.
+  Pour l'agent principal, un écart fait échouer le démarrage avec un message explicite ; pour un sous-agent, il le retire de la liste délégable, sans erreur (`agent-sessions/toolsets#FR-4`, `AC-3`).
+  Les rôles propres d'un toolset (@RoleDecl) obligatoires comptent comme les rôles du type.
+  Le module de création de toolsets (`toolset_creator`) n'est accordable qu'à un agent de nature `Config` (`agent-sessions#BR-8`) : une définition qui l'accorde à un agent de travail ou à un sous-agent est refusée avec un message qui nomme la règle (`agent-sessions/toolsets#AC-8`).
+  Le contrôle se fait au chargement ou à l'enregistrement d'une définition, puis à la création de la session.
+
+Depends on:
+  ./context_type.sdd
+  ./toolset_context.sdd
+  ./toolset.sdd
+  ./version.sdd
+  ./error.sdd
+  ../agents/definition.sdd
+
+Scenario: missing role removes a sub-agent
+  Given a context without the role `k8s` and a sub-agent whose toolset requires it
+  When the delegable sub-agents are computed
+  Then that sub-agent is absent and no error is raised
+
+Scenario: main agent fails to start
+  Given a main agent whose toolset requires the type `cluster` and a context without its roles
+  When the delegable sub-agents are computed at startup
+  Then it fails with Incompatible listing each gap
+
+Scenario: incompatible type version is a gap
+  Given a toolset requiring `cluster@1.2` and a type in 1.1
+  When the context is checked
+  Then a gap names the version
+
+Scenario: creation module refused for a sub-agent
+  Given a sub-agent granted the toolset-creation module
+  When the rule is checked
+  Then it fails with Forbidden naming the rule
+
+Scenario: creation module refused for a work agent
+  Given un agent de travail qui reçoit le module de création, avec ou sans sous-agents délégables
+  When the rule is checked
+  Then it fails with Forbidden naming the rule
+
+Tasks:
+  [x] #1 Tests puis implémentation.
+      Validé le 2026-10-29 (validator, 12 mutants tués) sous `SKIP=deny scripts/check`.
+  [x] #4 Trois tests manquants relevés par le validateur le 2026-10-29 : échec fermé d'un sous-agent dont le type est incohérent (inclusion cyclique) retiré sans erreur ; branche « table de sous-agents » de @check_creation_rule ; rôle propre optionnel non lié sans écart.
+      Validé le 2026-10-29 (validator, 12 mutants tués) sous `SKIP=deny scripts/check`.
+  [?] #3 Posés par l'implémentation, à confirmer : @delegable_subagents prend une table unique de toolsets pour le principal et ses sous-agents ; un sous-agent est retiré, sans erreur, si sa définition manque, si l'un de ses toolsets est absent ou si sa vérification échoue (échec fermé) ; @check_creation_rule compte un `delegable()` non vide même si l'identifiant est absent de la table, et contrôle aussi tout sous-agent de la table.
+  [?] #2 Posé : le nom du module de création est reçu en paramètre ; ce module lui-même est un module de l'hôte ou du domaine `modules`, hors de ce document.
+  [x] #5 Règle de création alignée sur la nature `Config` (DSD du 2026-10-29) : @check_creation_rule ne dépend plus de la délégation : seule la nature `Config` peut recevoir `toolset_creator`, y compris pour chaque sous-agent de la table reçue (décidé le 2026-10-29) ; les Scenarios « creation module refused … » sont à réécrire en conséquence. À faire après `definition.sdd` #12.
+      Validé le 2026-10-29 (validator, 58 mutants dont 55 tués) sous `scripts/check` complet.

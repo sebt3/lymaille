@@ -1,0 +1,102 @@
+Spec: config
+
+Purpose:
+  Modules Rhai de l'agent de configuration : `contexts` (compatibilité et valeurs résolues d'un ToolsetContext), `inspect` (choix de la cible de `rhai_prod_inspect`), `sessions` (lecture des sessions
+    passées) et le trait d'index de sessions que l'hôte implémente (`agent-sessions/toolsets#FR-19`, `agent-sessions#BR-8`).
+
+Owns:
+  ./config.rs
+
+References:
+  ./compat.sdd
+  ./toolset_context.sdd
+  ../scratchpad/inspect.sdd
+  ../session/store.sdd
+
+Depends on:
+  ./compat.sdd
+  ./store.sdd
+  ./toolset_context.sdd
+  ./error.sdd
+  ../scratchpad/inspect.sdd
+  ../session/state.sdd
+  ../session/store.sdd
+  ../session/redact.sdd
+  rhai
+
+Exposes:
+  @SessionIndex
+  @SessionFilter
+  @SessionSummary
+  @ScriptError
+  @ConfigStores
+  @InspectionSlot
+  @config_registration
+
+Accepts:
+  @SessionIndex::list: un @SessionFilter (agent et nature optionnels, limite) ; rend des identifiants de session. @SessionIndex::script_errors: un @SessionId ; rend les erreurs de script des runs de la session (numéro de tour, classe @ScriptErrorClass, texte), lues par l'hôte dans son journal d'audit puisque l'état de session ne les garde pas. Trait asynchrone de l'hôte, futurs `Send`, sans macro ni objet dynamique.
+  @InspectionSlot::new: aucun argument ; porte la cible courante (une seule, un @InspectionTargetRef de ../session/state.sdd ou rien), partagée entre le module `inspect` et le tool `rhai_prod_inspect` ; accesseurs `get` et `set`, `Send + Sync`.
+  @config_registration: les stockages (@AgentStore, @ToolsetStore, @ContextTypeStore, @ContextStore), un @SessionIndex, un @SessionStore, un @InspectionSlot et le @Redactor de la session ; rend une étape d'enregistrement (@EngineBuilder::with_registration).
+
+Returns:
+  @SessionSummary: identifiant, agent, nature, nombre de tours portant des signaux, total des erreurs Rhai de ces signaux (`rhai_errors`), noms des fonctions définies par le LLM (sans arité, triés, sans doublon) ; jamais le texte des messages ni les valeurs. L'issue et l'erreur par classe ne sont pas dans l'état de session : elles viennent de l'hôte (`script_errors`).
+  Module `contexts` : `check(agent, contexte)` rend un tableau d'écarts (@Gap en texte) sans rien exécuter ; `resolve(agent, contexte)` rend les paramètres résolus (valeurs par défaut des toolsets de l'agent comprises) et les noms des rôles liés, jamais de référence.
+  Module `inspect` : `open_context(agent, contexte)` et `open_session(id)` posent la cible courante (la précédente est remplacée) ; `close()` la retire ; `target()` la décrit en texte.
+  Module `sessions` : `list(filtre)` rend des @SessionSummary ; `errors(id)` rend les erreurs masquées des runs de la session (tour, classe, texte masqué par le @Redactor, lues par `SessionIndex::script_errors`) ; `functions(id)` rend le texte source des fonctions définies.
+
+Raises:
+  Les fonctions Rhai de ces modules sont synchrones et appellent les stockages asynchrones par `vynil_core::rt::block_on` (comme les modules MCP, `agent-sessions/modules#FR-6`) ; sur un runtime `current_thread`, elles rendent l'erreur explicite de `vynil-core`.
+  Les erreurs de stockage deviennent des erreurs Rhai d'exécution explicites (leur texte `Display`) ; un agent, un contexte ou une session inconnu rend une erreur Rhai qui le nomme.
+
+Must:
+  Les modules sont en lecture seule : aucune fonction de ce fichier n'écrit dans un stockage, n'active un toolset ni n'appelle un serveur MCP ; l'écriture de brouillons relève du module de création (`agent-sessions/toolsets#FR-8`).
+  Tout texte issu d'une session passée est rendu après le @Redactor de la session de configuration, et les valeurs de variables ne sortent que par `rhai_prod_inspect`.
+  Une seule cible d'inspection à la fois : l'ouverture d'une nouvelle cible remplace la précédente (décision du 2026-10-29).
+  Ouvrir une cible ne tient aucun secret : le contexte est résolu en noms de rôles et valeurs, les références de connexion restent à l'hôte.
+  `contexts::check` et `inspect::open_context` lisent la définition de l'agent par @AgentStore ; un agent inconnu rend une erreur Rhai qui le nomme.
+  Les modules ne sont accordables qu'à une définition de nature `Config` : la règle est portée par @AgentDefinition::validate (`../agents/definition.sdd`, modules réservés), non par ce fichier.
+
+Scenario: check reports gaps without executing
+  Given un agent de travail dont un toolset exige le type `cluster` et un contexte sans ses rôles
+  When `contexts::check` est appelé depuis le pad de configuration
+  Then le résultat liste les écarts et aucune fonction du toolset n'a été exécutée
+
+Scenario: opening a target replaces the previous one
+  Given une cible Definition ouverte
+  When `inspect::open_session(id)` est appelé
+  Then `inspect::target()` décrit la session et plus la définition
+
+Scenario: unknown session is an explicit error
+  Given un identifiant de session inconnu
+  When `inspect::open_session` est appelé avec lui
+  Then une erreur Rhai nomme l'identifiant
+
+Scenario: past errors are masked
+  Given une session passée dont une erreur de script contenait un secret déclaré
+  When `sessions::errors(id)` est appelé
+  Then le texte rendu ne contient pas le secret
+
+Scenario: summary carries no message text
+  Given une session passée
+  When `sessions::list` la rend
+  Then le résumé ne contient ni texte de message ni valeur de variable
+
+Scenario: no module writes
+  Given les modules de la configuration
+  When leurs fonctions sont énumérées
+  Then aucune n'écrit dans un stockage ni n'active de toolset
+
+Tasks:
+  [x] #6 Décisions du 2026-10-29 sur les choix de T11 : `config_registration` reçoit un @ConfigStores (regroupe @AgentStore, @ToolsetStore, @ContextTypeStore, @ContextStore, pour respecter la limite de cinq arguments) ; @ScriptError (tour, classe, texte) est le type rendu par `script_errors` ; `contexts::check` rend exactement les écarts qui feraient échouer le démarrage d'un agent de travail (elle passe par `delegable_subagents`, seule à signaler un toolset introuvable) ; `resolve` ignore en silence un toolset absent du stockage (`check` le signale) ; `sessions::errors` rend `{ turn, class, text }` avec les classes `syntax`, `runtime`, `not_found`, `limit`, `cancelled`, `engine`, `internal` ; `open_context` vérifie l'existence de l'agent et du contexte, pas sa nature.
+  [x] #8 Lot T12 (relevés du validateur le 2026-10-29) : `Debug` manuel de @ScriptError (jamais le texte) et de @ConfigStores (opaque) avec tests ; tests du filtre de `sessions::list` (agent, nature, limite, clé et nature inconnues, limite négative), de `list` sur plusieurs sessions dont une absente du stockage, de `check`/`resolve`/`open_context`/`list`/`errors`/`functions` sur un runtime `current_thread`, d'un @InspectionSlot empoisonné, d'une panne de @ContextTypeStore pendant `check`, de la nature, des classes d'erreur et du numéro de tour, du masquage de `id`, `agent`, des noms de fonctions et de la clé de `functions`.
+      Validé le 2026-10-29 (validator, mutations manuelles) sous `scripts/check` complet.
+  [x] #7 Tests de `check` et `resolve` sur un runtime `current_thread` (erreur explicite) ; mutation d'un `check` qui évaluerait le module du toolset.
+      Validé le 2026-10-29 (validator, mutations manuelles) sous `scripts/check` complet.
+  [x] #5 Compléter l'implémentation de T10 (décisions du 2026-10-29) : `config_registration` reçoit aussi un @AgentStore ; `contexts::check(agent, contexte)`, `contexts::resolve(agent, contexte)`, `inspect::open_context(agent, contexte)` ; `sessions::errors(id)` par `SessionIndex::script_errors` ; Scenarios « check reports gaps without executing » et « past errors are masked » ; @SessionFilter ajouté aux Exposes.
+      Validé le 2026-10-29 (validator, mutations manuelles) sous `scripts/check` complet.
+  [x] #1 Tests puis implémentation, après ../scratchpad/inspect.sdd #1 et ./store.sdd.
+      Validé le 2026-10-29 (validator, mutations manuelles) sous `scripts/check` complet. `[?]` #2 et #3 restent des décisions d'hôte.
+  [x] #4 Un pad d'inspection ne rend pas l'avertissement « the functions of this script were not persisted » (il ne persiste jamais) : à corriger dans ../scratchpad/run.sdd/run.rs avant la validation de #1.
+      Validé le 2026-10-29 (validator, 76 mutants, `scripts/check` complet vert).
+  [?] #2 Posé le 2026-10-29 : `SessionIndex` est un trait d'hôte séparé de @SessionStore (qui ne sait que charger et enregistrer par identifiant) ; son filtre exact est à fixer avec l'hôte. À confirmer.
+  [?] #3 Le nom du module `sessions` et la forme du résumé orienté échecs (`agent-sessions/toolsets#FR-19`) sont posés ici ; événement distinct à l'ouverture d'une cible (`agent-sessions#BR-5`) : à décider.

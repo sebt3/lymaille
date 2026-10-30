@@ -1,0 +1,39 @@
+Spec: error
+
+Purpose:
+  Type d'erreur du module `toolsets`.
+
+Owns:
+  ./error.rs
+
+Exposes:
+  @ToolsetsError
+  @ToolsetsResult
+
+Raises:
+  @ToolsetsError::InvalidContextType: nom vide ou hors de `[a-z0-9-]+`, schéma de paramètres qui n'est pas un objet JSON Schema, rôle en double, inclusion cyclique.
+  @ToolsetsError::InvalidToolset: nom vide, module absent ou qui ne compile pas, version illisible, exigence en double.
+  @ToolsetsError::InvalidSkill: nom ou description hors limites, document annexe en double.
+  @ToolsetsError::InvalidContext: nom vide, rôle ou paramètre dont le nom est vide, secret probable dans une valeur.
+  @ToolsetsError::SkillTooLarge: un corps de skill ou un document annexe dépasse le plafond de rendu.
+  @ToolsetsError::Template: un gabarit Handlebars qui ne compile pas ou qui référence une variable absente ; le message nomme le gabarit.
+  @ToolsetsError::Incompatible: exigences non satisfaites du ToolsetContext ; porte la liste des écarts.
+  @ToolsetsError::Forbidden: règle de définition d'agent violée (module de création de toolsets) ; le message nomme la règle.
+  @ToolsetsError::Store: échec du stockage de l'hôte.
+  @ToolsetsError::Poisoned: verrou interne d'un stockage mémoire empoisonné.
+
+Tasks:
+  [x] #1 @ToolsetsError::InvalidToolset porte un détail `String` (position de l'erreur Rhai de @extract_contract comprise) au lieu de détourner le champ `name`. Fait le 2026-10-29 : le texte d'erreur de Rhai n'est jamais recopié, seuls la ligne, la colonne et une classe fixe (`unexpected end of input`, `bad input`, `syntax error`) entrent dans le détail.
+      Validé le 2026-10-29 (validator, 12 mutants tués) sous `SKIP=deny scripts/check`.
+
+Must:
+  `#[non_exhaustive]`, `Debug`, `Display` en anglais court, `std::error::Error`, `Send + Sync`.
+  Aucun message ne contient de valeur de paramètre ni de référence de secret.
+
+Depends on:
+  thiserror
+
+Scenario: messages hide values
+  Given an invalid context holding a parameter value
+  When the error is formatted
+  Then the message names the parameter and never the value

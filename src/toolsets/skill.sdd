@@ -1,0 +1,64 @@
+Spec: skill
+
+Purpose:
+  Skill : métadonnées de frontmatter et corps markdown compatibles `SKILL.md` (Agent Skills), documents annexes nommés, rattachement à un toolset (`agent-sessions/toolsets#FR-7`, `FR-15`, `FR-18`).
+
+Owns:
+  ./skill.rs
+
+Exposes:
+  @Skill
+  @Skill::parse
+  @Skill::check_size
+
+Accepts:
+  @Skill::new: un nom (1 à 64 caractères : minuscules, chiffres et tirets), une description (1 à 1024 caractères), un corps (texte) ; constructeurs chaînés : `license`, `compatibility`, `metadata` (table de chaînes), un document annexe (nom, texte).
+  @Skill::parse: un texte `SKILL.md` (frontmatter YAML entre `---`, puis le corps).
+
+Returns:
+  Accesseurs en lecture seule. Le nom du toolset de rattachement est posé par @Toolset (./toolset.sdd), non par le skill.
+
+Raises:
+  @ToolsetsError::InvalidSkill: nom ou description hors limites, nom avec un caractère interdit, document annexe de nom vide ou en double, frontmatter absent ou illisible.
+  @ToolsetsError::SkillTooLarge: le corps d'un skill ou un document annexe dépasse le plafond de rendu reçu par @Skill::check_size (voir Must).
+
+Must:
+  Une description blanche est refusée ; une clé de `metadata` en double est refusée (@ToolsetsError::InvalidSkill), jamais remplacée en silence (décidé le 2026-10-29, à confirmer).
+  Le champ `allowed-tools` du frontmatter est ignoré : aucun champ de skill n'accorde de capacité.
+  Le corps et la description sont des gabarits (rendus par ./template.sdd) ; un corps qui ne compile pas comme gabarit est refusé à l'enregistrement du toolset.
+  Le corps d'un skill et chaque document annexe tiennent dans le plafond de rendu de `agent-sessions/scratchpad#FR-5` (`agent-sessions/toolsets#FR-18`) : @Skill::check_size reçoit le plafond en caractères et refuse un dépassement ; le contrôle porte sur le texte rendu avec les valeurs du contexte le plus long permis.
+  Un document annexe se lit à la demande et n'est jamais préchargé dans la fenêtre.
+  Se sérialise et se désérialise à l'identique.
+
+Depends on:
+  ./error.sdd
+  serde
+  [x] #5 `Debug` manuel de @Skill qui n'affiche que le nom et les tailles du corps et des annexes (le `Debug` dérivé répand corps, annexes et métadonnées dans tout `{:?}` d'un @Toolset), avec son test.
+      Validé le 2026-10-29 (implémentation vérifiée par mutations de l'auteur), validation par le validator groupée avec T6.
+
+Scenario: valid skill file is parsed
+  Given a SKILL.md with a name, a description and a body
+  When it is parsed
+  Then the fields are read and the body is the text after the frontmatter
+
+Scenario: invalid name refused
+  Given the names `Grafana`, `a b` and an empty name
+  When each is used for a skill
+  Then each fails with InvalidSkill
+
+Scenario: allowed-tools is ignored
+  Given a SKILL.md whose frontmatter has `allowed-tools`
+  When it is parsed
+  Then the skill carries no capability and parsing succeeds
+
+Scenario: oversized body refused
+  Given a body longer than the render cap
+  When the size is checked
+  Then it fails with SkillTooLarge
+
+Tasks:
+  [ ] #1 Tests puis implémentation.
+  [x] #4 Description blanche et clé de `metadata` en double refusées (voir `Must`), avec leurs tests.
+      Validé le 2026-10-29 (validator, mutations manuelles) sous `SKIP=deny scripts/check`.
+  [?] #2 Posé : @Skill::parse lit le frontmatter par l'analyseur YAML choisi en ./toolsets.sdd #2 ; sans lui, seul @Skill::new est livré.
+  [?] #3 « Contexte le plus long permis » (FR-18) : la taille rendue dépend des valeurs du contexte, inconnues à l'enregistrement. Posé : le contrôle porte sur le gabarit brut sans marge, et un dépassement au rendu est tronqué par @truncate_middle ; à confirmer.

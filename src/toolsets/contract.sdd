@@ -1,0 +1,87 @@
+Spec: contract
+
+Purpose:
+  Contrat de sortie d'un toolset extrait de l'AST de son module (signatures des fonctions publiques), comparaison de deux contrats et divergence avec la version déclarée
+    (`agent-sessions/toolsets#FR-10`, `FR-11`, `FR-12`).
+
+Owns:
+  ./contract.rs
+
+Exposes:
+  @Contract
+  @extract_contract
+  @Contract::bump_since
+  @check_declared_version
+  @VersionWarning
+
+Accepts:
+  @extract_contract: le texte source du module Rhai d'un toolset ; rend un @Contract.
+  @Contract::bump_since: un contrat précédent.
+  @check_declared_version: le contrat extrait, le contrat de la version précédente et les deux versions déclarées.
+
+Returns:
+  @Contract: ensemble ordonné des fonctions publiques (nom et noms des paramètres, dans l'ordre) ; ni le corps, ni la documentation, ni les fonctions privées n'y figurent.
+  @Contract::bump_since: un @Bump (./version.sdd) : majeure si une fonction est retirée ou si la liste de ses paramètres change, mineure si seules des fonctions sont ajoutées, aucune sinon.
+  @check_declared_version: rien, ou un @VersionWarning décrivant la divergence : signature changée sans version changée, version sous-déclarée (niveau déclaré inférieur au niveau du contrat), version mineure ou majeure changée sans changement de signature. Un correctif (patch) sans changement de contrat n'avertit pas (décidé le 2026-10-29).
+
+Raises:
+  @ToolsetsError::InvalidToolset: le source ne compile pas (la position de l'erreur de Rhai est dans le message).
+
+Must:
+  L'extraction ne s'exécute rien : elle compile et lit l'AST (`AST::iter_functions`) ; une fonction `private` n'entre pas dans le contrat.
+  Changer le corps ou la documentation d'une fonction laisse le contrat identique (`agent-sessions/toolsets#AC-5`).
+  Ajouter une fonction appelle une version mineure, en retirer une une version majeure (`agent-sessions/toolsets#AC-5`).
+  Une divergence est un avertissement, jamais un refus (`FR-12`, SHOULD).
+  Aucune E/S.
+
+Depends on:
+  ./error.sdd
+  ./version.sdd
+  rhai
+  vynil-core
+
+Scenario: adding a function is a minor change
+  Given a module with one public function and the same module with a second one
+  When the contracts are compared
+  Then the bump is Minor
+
+Scenario: body change leaves the contract
+  Given two modules with the same signatures and different bodies and docs
+  When the contracts are compared
+  Then the bump is None and the contracts are equal
+
+Scenario: removal is a major change
+  Given a module with two public functions and the same module without one
+  When the contracts are compared
+  Then the bump is Major
+
+Scenario: parameter change is a major change
+  Given a function `f(a)` and the same function as `f(a, b)`
+  When the contracts are compared
+  Then the bump is Major
+
+Scenario: private functions are outside the contract
+  Given a module with a private function
+  When the contract is extracted
+  Then the function is absent
+
+Scenario: under-declared version is warned
+  Given a removed function and a declared minor version bump
+  When the declared version is checked
+  Then a warning names the under-declared change and nothing is refused
+
+Scenario: undeclared change is warned
+  Given a removed function and an unchanged declared version
+  When the declared version is checked
+  Then a warning names the divergence and nothing is refused
+
+Tasks:
+  [x] #1 Tests puis implémentation.
+      Validé le 2026-10-29 (validator, mutations manuelles) sous `SKIP=deny scripts/check`.
+  [x] #4 @check_declared_version signale aussi une version sous-déclarée : toute version dont le niveau de changement déclaré est inférieur à celui du contrat (rupture majeure déclarée mineure, ajout déclaré en correctif, ou version identique) : avertissement, jamais un refus ; Scenario à ajouter.
+      Validé le 2026-10-29 (validator, 12 mutants tués) sous `SKIP=deny scripts/check`.
+  [?] #5 Posé par l'implémentation : une méthode Rhai `fn Type.nom()` est une fonction publique ordinaire de clé `nom/arité`.
+  [?] #2 Posé : un paramètre renommé sans changement de nombre est une rupture (majeure) puisque Rhai ne type pas statiquement ; à confirmer.
+  [?] #3 Posé : deux fonctions de même nom et d'arités différentes (surcharge Rhai) sont deux entrées du contrat ; la clé est `nom/arité` comme dans ../scratchpad/persist.sdd #4.
+  [x] #6 Un correctif (1.0.0 vers 1.0.1) sans changement de contrat n'avertit plus (il avertissait) ; test de non-avertissement, test de la sur-déclaration (majeur déclaré pour un changement mineur : pas d'avertissement). Le test `version_change_without_signature_change_is_warned` est à réécrire en mineure.
+      Validé le 2026-10-29 (validator, 58 mutants dont 55 tués) sous `scripts/check` complet.

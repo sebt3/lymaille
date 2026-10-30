@@ -1,0 +1,61 @@
+Spec: toolsets
+
+Purpose:
+  Toolsets (module Rhai, skills, exigences sur le ToolsetContext), types de contexte, ToolsetContext, versions et contrat de sortie, templating du prompt et des skills,
+    vérification structurelle de compatibilité, tools natifs `skill` et `session_context()`, stockage par traits. Réalise `agent-sessions/toolsets`
+    (./dsd/agent-sessions/toolsets.md).
+
+Structure:
+  ./mod.rs: déclarations et ré-exports
+  ./error.rs: erreur du module
+  ./version.rs: exigence de version (`cluster@1.2`) et nature d'un changement de version
+  ./context_type.rs: ContextType, rôles, paramètres par JSON Schema, inclusion
+  ./toolset_context.rs: ToolsetContext, valeurs résolues
+  ./skill.rs: skill et documents annexes
+  ./toolset.rs: déclaration d'un toolset
+  ./contract.rs: contrat de sortie extrait de l'AST et nature du changement
+  ./template.rs: rendu Handlebars du prompt système et des skills
+  ./store.rs: traits de stockage et stockage mémoire
+  ./compat.rs: compatibilité structurelle et règles de définition d'agent
+  ./assemble.rs: construction des @GrantedModule, @GrantedToolset et @GrantedSkill
+  ./native.rs: tool `skill`, fonction `session_context()`
+  ./config.rs: modules de l'agent de configuration (`contexts`, `inspect`, `sessions`)
+
+Owns:
+  ./mod.rs
+
+References:
+  ../../lymaille.sdd
+  ../../dsd/agent-sessions/toolsets.md
+  ../agents/agents.sdd
+  ../scratchpad/scratchpad.sdd
+  ../session/session.sdd
+  ./error.sdd
+  ./version.sdd
+  ./context_type.sdd
+  ./toolset_context.sdd
+  ./skill.sdd
+  ./toolset.sdd
+  ./contract.sdd
+  ./template.sdd
+  ./store.sdd
+  ./compat.sdd
+  ./assemble.sdd
+  ./native.sdd
+  ./config.sdd
+
+Must:
+  Ne réaliser aucune E/S : le stockage est un ensemble de traits que l'hôte implémente (`agent-sessions#CON-1`).
+  Ne jamais contenir de secret : un ToolsetContext ne porte que des références nommées (`agent-sessions#CON-3`) et les valeurs propres à un environnement viennent de lui, jamais de la définition du toolset (`agent-sessions#BR-3`).
+  La définition d'agent est la seule source de ce qui est accordé (`agent-sessions#BR-2`) : rien de ce que ce module enregistre n'étend ce qu'une session peut appeler.
+  `vynil_core::Semver` n'implémente pas serde : toute version d'un objet de ce module se sérialise en chaîne `major.minor.patch` (comme les versions de toolset de ../session/signals.sdd) et se relit par `Semver::parse`.
+  Déclarer chaque sous-module et ré-exporter ce que les specs enfants exposent ; mod.rs ne contient aucun comportement.
+
+Tasks:
+  [ ] #1 Déclarer les sous-modules dans ./mod.rs au fil des specs enfants livrées.
+  [!] #2 Dépendances nouvelles à épingler dans `/Cargo.toml` : `handlebars` (templates, `agent-sessions/toolsets#FR-6`), `yaml_serde` ou analyseur de frontmatter (skills `SKILL.md`, `FR-7`), `jsonschema` (seulement si #3 est tranché en faveur de la validation complète). Choix de crate et de version : décision du développeur principal.
+      Décidé le 2026-10-29 par le développeur principal : `handlebars` oui (lymaille.sdd #12) ; `yaml_serde` non pour l'instant (`Skill::parse` bloqué) ; `jsonschema` non.
+  [?] #3 Compatibilité structurelle (`FR-4`) : vérifier seulement la présence des noms de paramètres requis du schéma (`required`) et des rôles obligatoires, ou valider les valeurs du ToolsetContext contre le JSON Schema complet ? Posé : présence seulement, sans dépendance de validateur ; la validation complète est une évolution.
+  [!] #4 Le champ `allowed-tools` d'un skill est ignoré (`FR-7`) ; les modules `todo`, `Memory` et MCP viennent du domaine `modules` (non spécifié) : @assemble n'en construit aucun.
+  [ ] #6 Factoriser la détection de valeur ressemblant à un secret (dupliquée dans ./toolset_context.rs et ../agents/provider.rs) en une fonction commune `pub(crate)`.
+  [ ] #5 Spécifier `mod.rs` de la crate (`lib.sdd`) : déclaration du module `toolsets` et ré-exports.
