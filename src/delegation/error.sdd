@@ -32,4 +32,4 @@ Scenario: les messages ne portent pas de contenu
   Then le message nomme le watcher et ne contient pas le secret
 
 Tasks:
-  [ ] #1 Tests puis implémentation (lot D1).
+  [x] #1 Tests puis implémentation (lot D1), validé le 2026-10-30.

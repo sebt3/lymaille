@@ -6,6 +6,7 @@
 mod agents;
 mod clock;
 mod context;
+mod delegation;
 mod modules;
 mod runtime;
 mod scratchpad;
@@ -24,6 +25,7 @@ pub use context::{
     Budget, CompactionStrategy, ContextError, ContextResult, DefaultStrategy, Digest, ReplayMode, Summarizer,
     UsageTracker, estimate_tokens, replayed_reasoning,
 };
+pub use delegation::{DelegationError, DelegationResult};
 pub use modules::{
     InMemoryMemoryStore, McpConnector, McpEnv, McpError, McpLister, McpRetryPolicy, McpTool, Memory,
     MemoryLevel, MemoryScope, MemoryScopes, MemoryStore, MemorySummary, ModulesError, ModulesResult,
