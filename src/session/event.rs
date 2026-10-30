@@ -33,6 +33,16 @@ pub enum EventKind {
     Script(ScriptRecord),
     /// An MCP call was made.
     McpCall(McpRecord),
+    /// A reconnection to an MCP server is attempted after a loss of the connection. One event per attempt. Carries the role
+    /// of the server, never an argument nor a secret.
+    McpReconnect {
+        /// Role of the MCP server in the agent definition.
+        role: String,
+        /// Number of the attempt, starting at 1.
+        attempt: u32,
+        /// Delay before the attempt, in milliseconds.
+        delay_ms: u64,
+    },
     /// A turn exceeded its configured delay. The turn is not interrupted.
     Overrun {
         /// Time elapsed since the start of the turn, in milliseconds.
@@ -161,13 +171,14 @@ mod tests {
     use crate::clock::Timestamp;
     use crate::session::{EventSink as _, Outcome, RunId, SessionId, TurnId};
 
-    /// Names of the eleven variants of [`EventKind`], in the order of [`one_of_each_kind`].
-    const ALL_VARIANTS: [&str; 11] = [
+    /// Names of the twelve variants of [`EventKind`], in the order of [`one_of_each_kind`].
+    const ALL_VARIANTS: [&str; 12] = [
         "TokenUsage",
         "TodoChanged",
         "MemoryChanged",
         "Script",
         "McpCall",
+        "McpReconnect",
         "Overrun",
         "InferenceRetry",
         "TurnStarted",
@@ -178,6 +189,15 @@ mod tests {
 
     fn session() -> SessionId {
         SessionId::new("session-1").expect("a non-empty text makes a session identifier")
+    }
+
+    /// A reconnection attempt of the MCP server `monitoring`.
+    fn reconnect_sample() -> EventKind {
+        EventKind::McpReconnect {
+            role: "monitoring".to_owned(),
+            attempt: 1,
+            delay_ms: 500,
+        }
     }
 
     /// One event of each kind, with the name of its variant, so that a test can check that none is left out.
@@ -224,6 +244,7 @@ mod tests {
                     ),
                 )),
             ),
+            ("McpReconnect", reconnect_sample()),
             ("Overrun", EventKind::Overrun { elapsed_ms: 90_000 }),
             (
                 "InferenceRetry",
@@ -267,6 +288,7 @@ mod tests {
             EventKind::MemoryChanged { .. } => "MemoryChanged",
             EventKind::Script(_) => "Script",
             EventKind::McpCall(_) => "McpCall",
+            EventKind::McpReconnect { .. } => "McpReconnect",
             EventKind::Overrun { .. } => "Overrun",
             EventKind::InferenceRetry { .. } => "InferenceRetry",
             EventKind::TurnStarted { .. } => "TurnStarted",

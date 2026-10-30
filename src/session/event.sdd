@@ -24,7 +24,7 @@ Returns:
 
 Must:
   @EventKind est `#[non_exhaustive]` et couvre : usage de tokens (prompt, complétion), todo modifiée, Memory modifiée (niveau et
-    identifiant seulement, jamais le corps), script exécuté (@ScriptRecord), appel MCP (@McpRecord), dépassement de délai
+    identifiant seulement, jamais le corps), script exécuté (@ScriptRecord), appel MCP (@McpRecord), tentative de reconnexion MCP (`McpReconnect`, avec le rôle, le numéro de tentative et le délai en millisecondes), dépassement de délai
     (`Overrun`, avec la durée écoulée), réessai d'inférence (numéro, délai en millisecondes, classe de l'erreur), début de tour,
     fragment de texte streamé (`TextDelta`, avec le tour et le texte du fragment), fin de tour (issue de type @Outcome, réponse
     complète), fin de run.
@@ -79,4 +79,5 @@ Tasks:
       (session.sdd #2).
   [!] #7 Le texte d'un `TextDelta` est un texte de réponse : il passe par le @Redactor de la boucle de tour comme `TurnEnded.response` (#5).
       Règle validée le 2026-10-29 ; son application revient à la boucle de tour (session.sdd #2).
+  [x] #8 Variante `McpReconnect { role, attempt, delay_ms }` ajoutée le 2026-10-30 pour `agent-sessions/modules#FR-9` (un événement par tentative de reconnexion) ; ne porte ni argument ni secret.
   [!] #3 Événements de délégation (démarrage, fin de sous-agent, watcher déclenché) : définis par le domaine `delegation`.

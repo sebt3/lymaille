@@ -74,4 +74,5 @@ Scenario: listage seul n'appelle pas
   Then elle ne peut pas appeler `call_tool` (le type ne l'offre pas)
 
 Tasks:
-  [ ] #1 Tests puis implémentation. Le Scenario « listage seul n'appelle pas » est vérifié par la signature (un test de compilation n'est pas requis : le validateur le constate à la lecture).
+  [x] #1 Tests puis implémentation.
+      Posé à l'implémentation : les constructeurs de @ScriptedConnector consomment `self` ; un tool est connu s'il figure dans `new` ; `fail_unreachable(n)` fixe le compteur ; chaque appel (tool inconnu compris) consomme d'abord le compteur et est compté par `calls()` ; `received()` ne contient que les appels arrivés au serveur ; `reconnect` ne consomme rien ; @McpError est propre au module (distinct de @ModulesError) ; @McpTool se sérialise avec les champs `name`, `description`, `input_schema`. Le Scenario « listage seul n'appelle pas » est vérifié par la signature (un test de compilation n'est pas requis : le validateur le constate à la lecture).
