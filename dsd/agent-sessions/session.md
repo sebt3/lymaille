@@ -166,4 +166,21 @@ Source: user instruction, 2026-10-24
 
 ## Réalisation SpecDD
 
-`TBD` : aucune spec `.sdd` n'existe encore ; à créer avec le squelette du crate.
+Specs dans `src/session/` (une par fichier source, spec de répertoire `session.sdd` comprise), implémentées (des tâches de durcissement restent listées dans les `Tasks` de certaines specs) :
+
+- `session.sdd` : spec de répertoire (frontière : aucune E/S, aucun processus, aucune horloge système).
+- `id.sdd` : identifiants typés de session, de tour et de run.
+- `format.sdd` : version du format de session et règle de compatibilité à la restauration (FR-3, AC-2).
+- `error.sdd` : erreur typée du module.
+- `history.sdd` : historique persisté, raisonnement, appels d'outils, frontières de segment (FR-1).
+- `segment.sdd` : contexte d'un segment tel que le modèle l'a reçu (prompt rendu, tools natifs, profil résolu).
+- `tagged_value.sdd` : valeurs de variables étiquetées par leur type réel (`char`, `blob`, entier, flottant).
+- `state.sdd` : état persisté et (dé)sérialisation JSON, nature de la session, parent, cible d'inspection (FR-1, FR-2).
+- `store.sdd` : trait de stockage de l'hôte et stockage mémoire (FR-1, DEC-1).
+- `redact.sdd`, `audit.sdd` : masquage des secrets, enregistrements d'audit des scripts et des appels MCP (CON-3).
+- `event.sdd` : événements observables et canal vers l'hôte, dont `TextDelta`, `McpReconnect` et `TargetOpened` (FR-6, BR-5).
+- `cancel.sdd`, `backoff.sdd`, `turn_gate.sdd` : annulation, calendrier des réessais, au plus un tour actif par session (FR-4, FR-5, FR-7, NFR-2).
+- `label.sdd`, `signals.sdd` : étiquettes de l'hôte et signaux de qualité par tour et par run (FR-13, DEC-12, DEC-13).
+- `notice.sdd` : messages système signalant au LLM ce qui a changé à la restauration.
+
+État au 2026-10-30 : tout est livré sauf la **boucle de tour** (FR-4 à FR-7, FR-14, AC-3, AC-8 à AC-11) et la restauration complète (FR-3, AC-2), qui attendent l'assemblage des domaines (`session.sdd` #2 et #3). Les secrets coupés entre deux fragments de streaming restent à traiter avec la boucle (`event.sdd` #6, #7).

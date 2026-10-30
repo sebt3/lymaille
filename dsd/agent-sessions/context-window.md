@@ -112,4 +112,13 @@ raison d'être de `agent-sessions#BO-4`.
 
 ## Réalisation SpecDD
 
-`TBD` : aucune spec `.sdd` n'existe encore.
+Specs dans `src/context/`, implémentées (des tâches de durcissement restent listées dans les `Tasks` de certaines specs) :
+
+- `context.sdd` : spec de répertoire (seuils, suivi des tokens, mode de rejeu, traits de résumeur et de stratégie).
+- `budget.sdd` : seuils de compaction et de démarrage, refus d'un prompt ou d'un message trop gros (FR-1, FR-2, AC-1).
+- `usage.sdd` : suivi des tokens, taux de remplissage, usage cumulé, estimation locale (FR-3).
+- `replay.sdd` : mode de rejeu du raisonnement et sélection du raisonnement renvoyé (FR-9, AC-5).
+- `strategy.sdd` : traits remplaçables du résumé et du choix de ce qui est compacté, stratégie par défaut (FR-4 à FR-8).
+- `error.sdd` : erreur typée du module.
+
+État au 2026-10-30 : le **prompt de résumé par défaut** (`context.sdd` #3), l'**essai de bout en bout du rejeu du raisonnement** (TBD ci-dessus, AC-5) et l'**intégration à la boucle de tour** (`context.sdd` #2) restent à faire ; les deux premiers se font avec le code, le troisième avec la boucle de tour de `session`.

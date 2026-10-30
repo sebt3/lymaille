@@ -10,6 +10,8 @@ remplacer l'inférence actuelle de vanyline et à fournir à miryad-core des ét
 Statut du document : cadrage initial complet au 2026-10-24. Les points restants sont marqués `TBD`, dans les Open Issues
 ou dans la Solution concernée.
 
+Avancement de la réalisation au 2026-10-30 : six Solutions sur sept ont leurs specs `.sdd` et sont en grande partie implémentées (`session`, `context-window`, `scratchpad`, `agents`, `toolsets`, `modules` ; voir la section « Réalisation SpecDD » de chacune). Seule `delegation` n'est pas encore spécifiée. Ce qui manque pour assembler le tout : la boucle de tour (`session`), l'adaptateur `rig`, le tool `skill` et `session_context()` (`toolsets/native`), le manifeste de projet, la sérialisation frontmatter des définitions et la décision sur la section « pad de workflow » (extension réservée, `scratchpad.md`).
+
 ## Objectif et problème
 
 Les solutions d'agent usuelles chargent des dizaines de milliers de tokens de définitions d'outils au démarrage, perdent

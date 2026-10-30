@@ -51,7 +51,7 @@ Must:
   Déclarer chaque sous-module dans ./mod.rs et ré-exporter ce que les specs enfants exposent ; ./mod.rs ne contient aucun comportement.
 
 Tasks:
-  [ ] #1 Déclarer les sous-modules dans ./mod.rs au fil des specs enfants livrées.
+  [x] #1 Déclarer les sous-modules dans ./mod.rs au fil des specs enfants livrées.
   [x] #2 Dépendances à épingler dans `/Cargo.toml` (hors de cette spec) et features : `rhai` avec `sync`, `serde`, `internals`, `metadata` ; `vynil-core` avec les features `rhai` et `rt` (et, selon ./engine.sdd #3, `fs` et `shell` relayées) ; `serde`, `serde_json`, `thiserror`, `tokio` (`rt`, `rt-multi-thread`, `sync`, `time`, `macros`) et `tokio-util` pour @CancelHandle. À consigner par le développeur principal dans `/lymaille.sdd` (tâche #2) ; ce répertoire ne les épingle pas.
       Fait : voir lymaille.sdd #2, #7, #9.
   [x] #3 Déclarations à faire hors de ce répertoire : `/src/lib.sdd` (module `scratchpad` et ré-exports) et `/lymaille.sdd` (`References`). Non faites ici.

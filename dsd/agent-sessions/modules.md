@@ -104,4 +104,13 @@ Source: user instruction, 2026-10-24
 
 ## Réalisation SpecDD
 
-Specs : `src/modules/modules.sdd` et ses specs enfants (`todo`, `memory`, `memory_module`, `mcp_name`, `mcp`, `mcp_module`). Restent hors des specs : `FR-7` (notifications MCP vers les watchers, domaine `delegation`) et un connecteur MCP réel.
+Specs dans `src/modules/`, implémentées (des tâches de durcissement restent listées dans les `Tasks` de certaines specs) :
+
+- `modules.sdd` : spec de répertoire.
+- `error.sdd` : erreur typée du module.
+- `todo.sdd` : liste de tâches et module Rhai `todo` (FR-1, AC-1).
+- `memory.sdd`, `memory_module.sdd` : Memory par niveau, trait de stockage, modules `memory_user`, `memory_project`, `memory_session` (FR-2 à FR-5, AC-2).
+- `mcp_name.sdd`, `mcp.sdd`, `mcp_module.sdd` : nommage des fonctions, traits de connecteur, génération du module en mode réel et coquille, validation JSON Schema, reconnexion (FR-6, FR-9 à FR-11, AC-3 à AC-7).
+- `mcp_client.sdd` : connecteur MCP réel HTTP streamable sur `rmcp`, derrière la feature `mcp-http` (FR-6, CON-5).
+
+État au 2026-10-30 : reste `FR-7` (notifications MCP vers les watchers), qui attend le domaine `delegation`. FR-8 (modules de l'hôte) ne demande aucun code : un module construit par l'hôte entre dans `Grants`.

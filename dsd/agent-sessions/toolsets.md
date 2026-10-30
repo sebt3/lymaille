@@ -177,4 +177,18 @@ uniquement) s'appliquent.
 
 ## Réalisation SpecDD
 
-`TBD` : aucune spec `.sdd` n'existe encore.
+Specs dans `src/toolsets/`, implémentées sauf mention contraire (des tâches de durcissement restent listées dans les `Tasks` de certaines specs) :
+
+- `toolsets.sdd` : spec de répertoire.
+- `version.sdd`, `contract.sdd` : exigences de version et contrat de sortie extrait de l'AST, nature d'un changement (FR-10, FR-13, FR-14).
+- `context_type.sdd`, `toolset_context.sdd` : types de contexte versionnés et inclusion, ToolsetContext sans secret, valeurs résolues (FR-3, FR-4, FR-9).
+- `skill.sdd`, `toolset.sdd` : skills `SKILL.md` et déclaration d'un toolset (FR-1, FR-7, FR-15).
+- `template.sdd` : rendu Handlebars du prompt et des skills (FR-6).
+- `store.sdd` : traits de stockage, stockage mémoire, cascade (FR-8, FR-16).
+- `compat.sdd` : compatibilité structurelle, sous-agents retirés signalés par `Delegation`, règle du module de création (FR-4, FR-8, AC-3, AC-4, AC-8).
+- `assemble.sdd` : construction des modules, toolsets et skills accordés, dépendances privées (FR-2, AC-1).
+- `config.sdd` : modules de l'agent de configuration `contexts`, `inspect`, `sessions` et événement `TargetOpened` (FR-19, BR-8).
+- `native.sdd` : tool `skill` et fonction `session_context()` (FR-17, FR-18, AC-10, AC-11) — **non implémentée**.
+- `error.sdd` : erreur typée du module.
+
+État au 2026-10-30 : restent le **tool `skill` et `session_context()`** (`native.sdd`), le texte du **skill intégré sur `rhai_pad`**, la **validation JSON Schema complète** (`toolsets.sdd` #3, `jsonschema` désormais admis), le **module de création de toolsets** (FR-8, hôte ou domaine `modules`) et l'analyseur de frontmatter des skills (`Skill::parse`, `yaml_serde`).

@@ -84,4 +84,14 @@ et ce que l'agent consomme.
 
 ## Réalisation SpecDD
 
-`TBD` : aucune spec `.sdd` n'existe encore.
+Specs dans `src/agents/`, implémentées (des tâches de durcissement restent listées dans les `Tasks` de certaines specs) :
+
+- `agents.sdd` : spec de répertoire (définitions, fournisseurs, profils, catalogue, trait d'inférence).
+- `definition.sdd` : définition d'agent de nature `Work`, `Config` ou `Sub`, bac à sable, plafonds, empreinte (FR-1, FR-2, BR-8).
+- `provider.sdd` : fournisseur d'inférence, adresse et authentification par références (FR-6).
+- `profile.sdd` : profil de modèle, surcharge de ce que le fournisseur détecte (FR-7).
+- `catalog.sdd` : traits de stockage, stockage mémoire et cascade `Layered` par niveau (FR-5).
+- `inference.sdd` : trait du fournisseur d'inférence, classement des erreurs, streaming de fragments, fournisseur scripté.
+- `error.sdd` : erreur typée du module.
+
+État au 2026-10-30 : restent la **sérialisation frontmatter + corps** d'une définition (FR-3, `agents.sdd` #5, dépend du choix de `yaml_serde`), le **manifeste de projet** (FR-4, `agents.sdd` #3, dépend de `toolsets`, maintenant livré) et l'**adaptateur `rig`** (clients, `list_models`, décodage du raisonnement : décision d'architecture du 2026-10-27, pas encore spécifié ni implémenté ; le TBD de détection des modèles ci-dessus en dépend).
