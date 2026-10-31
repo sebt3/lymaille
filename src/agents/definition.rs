@@ -353,23 +353,41 @@ impl AgentDefinition {
     /// Returns [`AgentsError::InvalidDefinition`] when the frontmatter is missing or not closed, when it is not readable
     /// YAML of a definition, or when it holds a `prompt` field, which the body is. The refusal carries no value of the text.
     pub fn from_text(text: &str) -> AgentsResult<Self> {
+        if text.len() > TEXT_MAX_BYTES {
+            return Err(text_refusal(TEXT_TOO_LARGE));
+        }
         let (frontmatter, prompt) = split_text(text)
             .ok_or_else(|| text_refusal("the frontmatter is missing or is not closed by a `---` line"))?;
-        let mut head: Value = yaml_serde::from_str(&frontmatter)
+        let head: yaml_serde::Value = yaml_serde::from_str(&frontmatter)
             .ok()
-            .ok_or_else(|| text_refusal("the frontmatter is not readable YAML of a definition"))?;
-        let object = head
-            .as_object_mut()
-            .ok_or_else(|| text_refusal("the frontmatter is not a table of fields"))?;
+            .ok_or_else(|| text_refusal(UNREADABLE))?;
+        let yaml_serde::Value::Mapping(fields) = head else {
+            return Err(text_refusal("the frontmatter is not a table of fields"));
+        };
+        let mut object = serde_json::Map::new();
+        for (key, value) in fields {
+            let yaml_serde::Value::String(key) = key else {
+                return Err(text_refusal(KEY_NOT_TEXT));
+            };
+            if holds_non_finite(&value) {
+                return Err(text_refusal(NOT_FINITE));
+            }
+            let value = serde_json::to_value(&value)
+                .ok()
+                .ok_or_else(|| text_refusal(UNREADABLE))?;
+            if object.insert(key, value).is_some() {
+                return Err(text_refusal(KEY_TWICE));
+            }
+        }
         if object.contains_key("prompt") {
             return Err(text_refusal(
                 "the frontmatter holds a prompt field, the prompt is the body",
             ));
         }
         let _previous = object.insert("prompt".to_owned(), Value::String(prompt));
-        serde_json::from_value::<Self>(head)
+        serde_json::from_value::<Self>(Value::Object(object))
             .ok()
-            .ok_or_else(|| text_refusal("the frontmatter is not readable YAML of a definition"))
+            .ok_or_else(|| text_refusal(UNREADABLE))
     }
 
     /// Returns the fingerprint of the definition: 16 hexadecimal digits of FNV-1a 64 bits over its canonical JSON.
@@ -452,6 +470,35 @@ fn split_text(text: &str) -> Option<(String, String)> {
 fn line_text(line: &str) -> &str {
     let without_newline = line.strip_suffix('\n').unwrap_or(line);
     without_newline.strip_suffix('\r').unwrap_or(without_newline)
+}
+
+/// Size in bytes of a text above which it is refused before any parsing, 256 KiB (decision of 2026-10-31, D-a).
+const TEXT_MAX_BYTES: usize = 256 * 1024;
+
+/// Reason of a text over [`TEXT_MAX_BYTES`].
+const TEXT_TOO_LARGE: &str = "the text is larger than 256 KiB";
+
+/// Reason of a frontmatter that is not readable YAML of a definition.
+const UNREADABLE: &str = "the frontmatter is not readable YAML of a definition";
+
+/// Reason of a key of the frontmatter that is not a text, such as `1: x`.
+const KEY_NOT_TEXT: &str = "a key of the frontmatter is not text";
+
+/// Reason of a key of the frontmatter declared twice: it is refused, never overwritten in silence.
+const KEY_TWICE: &str = "a key of the frontmatter is declared twice";
+
+/// Reason of a number of the frontmatter that is not finite, such as `.nan` or `.inf`: it would be lost in the definition.
+const NOT_FINITE: &str = "a number of the frontmatter is not finite (`.nan` or `.inf`)";
+
+/// Tells whether a YAML value holds a non-finite float (`.nan`, `.inf`, `-.inf`), at any depth.
+fn holds_non_finite(value: &yaml_serde::Value) -> bool {
+    match value {
+        yaml_serde::Value::Number(number) => number.as_f64().is_some_and(|float| !float.is_finite()),
+        yaml_serde::Value::Sequence(items) => items.iter().any(holds_non_finite),
+        yaml_serde::Value::Mapping(mapping) => mapping.values().any(holds_non_finite),
+        yaml_serde::Value::Tagged(tagged) => holds_non_finite(&tagged.value),
+        yaml_serde::Value::Null | yaml_serde::Value::Bool(_) | yaml_serde::Value::String(_) => false,
+    }
 }
 
 /// Identifier that a refusal of a text carries: the definition is not known for certain when the text does not read.
@@ -708,6 +755,103 @@ mod tests {
                 Err(AgentsError::InvalidDefinition { .. })
             ),
             "a text whose first line is not `---` has no frontmatter"
+        );
+    }
+
+    /// Size of a text above which it is refused before any parsing (decision of 2026-10-31, D-a).
+    const TEXT_LIMIT_BYTES: usize = 256 * 1024;
+
+    /// The text of the main definition with a prompt of `prompt_len` bytes.
+    fn text_with_prompt_of(prompt_len: usize) -> String {
+        AgentDefinition::new(
+            "main".to_owned(),
+            AgentKind::Work,
+            "x".repeat(prompt_len),
+            "strix-qwen".to_owned(),
+        )
+        .to_text()
+        .expect("the definition writes")
+    }
+
+    // Scenario: texte de plus de 256 Kio refusé avant toute analyse
+    #[test]
+    fn text_over_256_kib_is_refused_before_parsing() {
+        let text = format!("---\nid: [broken\n---\n{}", "x".repeat(TEXT_LIMIT_BYTES));
+        match AgentDefinition::from_text(&text) {
+            Err(AgentsError::InvalidDefinition { id, reason }) => {
+                assert!(reason.contains("256 KiB"), "the size is the reason: {reason}");
+                assert_eq!(id, "<AGENT.md>", "the refusal names the text");
+            }
+            other => panic!("an oversized text must fail with InvalidDefinition, got {other:?}"),
+        }
+    }
+
+    // Scenario: texte de 256 Kio exactement lu
+    #[test]
+    fn text_of_exactly_256_kib_is_read() {
+        let empty = text_with_prompt_of(0);
+        let text = text_with_prompt_of(TEXT_LIMIT_BYTES.saturating_sub(empty.len()));
+        assert_eq!(text.len(), TEXT_LIMIT_BYTES, "the sample is exactly the limit");
+        assert!(
+            AgentDefinition::from_text(&text).is_ok(),
+            "a text of exactly 256 KiB is read"
+        );
+    }
+
+    // Scenario: température non finie refusée
+    #[test]
+    fn non_finite_temperature_is_refused() {
+        let definition = main_agent().with_sampling(SamplingParams::default().with_temperature(0.7));
+        let text = definition.to_text().expect("the definition writes");
+        assert!(
+            text.contains("temperature: 0.7"),
+            "the sample holds the temperature: {text}"
+        );
+        for literal in [".nan", ".inf", "-.inf"] {
+            let edited = text.replace("temperature: 0.7", &format!("temperature: {literal}"));
+            assert!(
+                matches!(
+                    AgentDefinition::from_text(&edited),
+                    Err(AgentsError::InvalidDefinition { .. })
+                ),
+                "a temperature of `{literal}` is refused"
+            );
+        }
+    }
+
+    // Scenario: clé dupliquée au premier niveau refusée, sans sa valeur
+    #[test]
+    fn duplicate_top_level_key_is_refused_without_its_value() {
+        let text = main_agent().to_text().expect("the definition writes");
+        let duplicated = text.replacen(
+            "profile: strix-qwen\n",
+            "profile: strix-qwen\nprofile: other-profile\n",
+            1,
+        );
+        assert!(
+            duplicated.contains("other-profile"),
+            "the sample holds the duplicate: {duplicated}"
+        );
+        match AgentDefinition::from_text(&duplicated) {
+            Err(error @ AgentsError::InvalidDefinition { .. }) => assert!(
+                !error.to_string().contains("other-profile"),
+                "the refusal carries no value: {error}"
+            ),
+            other => panic!("a duplicate key must fail with InvalidDefinition, got {other:?}"),
+        }
+    }
+
+    // Scenario: clé qui n'est pas un texte refusée
+    #[test]
+    fn non_string_key_is_refused() {
+        let text = main_agent().to_text().expect("the definition writes");
+        let numbered = text.replacen("---\n", "---\n1: x\n", 1);
+        assert!(
+            matches!(
+                AgentDefinition::from_text(&numbered),
+                Err(AgentsError::InvalidDefinition { .. })
+            ),
+            "a numeric key is refused"
         );
     }
 

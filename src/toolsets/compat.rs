@@ -264,16 +264,12 @@ where
             .filter(|role| !resolved.roles().contains(role))
             .map(|role| gap(GapKind::MissingRole { name: role.clone() })),
     );
-    gaps.extend(
-        flat.violations(type_name, resolved.shared())?
-            .into_iter()
-            .map(|violation| {
-                gap(GapKind::InvalidValue {
-                    parameter: violation.parameter().map(str::to_owned),
-                    rule: violation.rule().to_owned(),
-                })
-            }),
-    );
+    gaps.extend(flat.violations(resolved.shared()).into_iter().map(|violation| {
+        gap(GapKind::InvalidValue {
+            parameter: violation.parameter().map(str::to_owned),
+            rule: violation.rule().to_owned(),
+        })
+    }));
     Ok(gaps)
 }
 
@@ -401,7 +397,7 @@ mod tests {
     use serde_json::{Value, json};
     use vynil_core::Semver;
 
-    use super::{GapKind, RemovalReason, check_context, check_creation_rule, delegable_subagents};
+    use super::{Gap, GapKind, RemovalReason, check_context, check_creation_rule, delegable_subagents};
     use crate::agents::{AgentDefinition, AgentKind};
     use crate::toolsets::{
         ContextLevel, ContextType, RoleDecl, RoleSpec, Toolset, ToolsetContext, ToolsetsError,
@@ -872,14 +868,160 @@ mod tests {
             .expect("the role is bound")
     }
 
-    /// The gaps of `context` against a type named `cluster` built from `schema`, as texts.
-    fn texts_against(schema: Value, context: &ToolsetContext) -> Vec<String> {
+    /// The gaps of `context` against a type named `cluster` built from `schema`.
+    fn gaps_against(schema: Value, context: &ToolsetContext) -> Vec<Gap> {
         let typed =
             ContextType::new("cluster".to_owned(), version("1.0.0"), schema).expect("the sample type builds");
         let lookup = lookup_of(vec![("cluster", typed)]);
-        let gaps = check_context(context, &[grafana_requiring_cluster("cluster@1.0")], &lookup)
-            .expect("the types are consistent");
-        gaps.iter().map(ToString::to_string).collect()
+        check_context(context, &[grafana_requiring_cluster("cluster@1.0")], &lookup)
+            .expect("the types are consistent")
+    }
+
+    /// The gaps of `context` against a type named `cluster` built from `schema`, as texts.
+    fn texts_against(schema: Value, context: &ToolsetContext) -> Vec<String> {
+        gaps_against(schema, context)
+            .iter()
+            .map(ToString::to_string)
+            .collect()
+    }
+
+    /// A context that binds the role `k8s` and holds no parameter.
+    fn role_only() -> ToolsetContext {
+        ToolsetContext::new("role-only".to_owned(), ContextLevel::Session)
+            .expect("the context builds")
+            .with_role("k8s".to_owned(), "prod-k8s".to_owned())
+            .expect("the role is bound")
+    }
+
+    /// The gap of a `required` rule of the root that no flat required parameter explains.
+    fn required_rule_gap() -> GapKind {
+        GapKind::InvalidValue {
+            parameter: None,
+            rule: "required".to_owned(),
+        }
+    }
+
+    // Scenario: un requis déclaré hors de la forme plate est un écart de règle required
+    #[test]
+    fn required_parameter_declared_by_ref_or_all_of_is_a_gap() {
+        let outside_flat_form = [
+            json!({ "$defs": { "base": { "required": ["namespace"] } }, "$ref": "#/$defs/base" }),
+            json!({ "allOf": [{ "required": ["namespace"] }] }),
+        ];
+        for schema in outside_flat_form {
+            let gaps = gaps_against(schema.clone(), &role_only());
+            assert!(
+                gaps.iter().any(|gap| gap.kind() == &required_rule_gap()),
+                "an absent parameter required outside the flat form is a `required` gap: {schema} {gaps:?}"
+            );
+        }
+    }
+
+    // Scenario: un requis sous dependentRequired ou if/then est un écart quand la condition tient
+    #[test]
+    fn required_parameter_under_dependent_or_conditional_rule_is_a_gap() {
+        let conditional = [
+            json!({ "dependentRequired": { "zone": ["namespace"] } }),
+            json!({ "if": { "required": ["zone"] }, "then": { "required": ["namespace"] } }),
+        ];
+        for schema in conditional {
+            let gaps = gaps_against(schema.clone(), &context_with("zone", json!("eu")));
+            assert!(
+                gaps.iter().any(|gap| gap.kind() == &required_rule_gap()),
+                "a parameter required under a condition that holds is a `required` gap: {schema} {gaps:?}"
+            );
+        }
+    }
+
+    // Scenario: un requis hors de la forme plate, présent, ne donne aucun écart
+    #[test]
+    fn required_parameter_outside_flat_form_is_no_gap_when_present() {
+        let schema = json!({ "allOf": [{ "required": ["namespace"] }] });
+        let gaps = gaps_against(schema, &context_with("namespace", json!("apps")));
+        assert!(
+            gaps.is_empty(),
+            "the present parameter satisfies the rule: {gaps:?}"
+        );
+    }
+
+    // Scenario: un requis répété dans allOf reste un seul écart
+    #[test]
+    fn required_parameter_repeated_in_all_of_is_a_single_gap() {
+        let schema = json!({
+            "required": ["namespace"],
+            "properties": { "namespace": { "type": "string" } },
+            "allOf": [{ "required": ["namespace"] }]
+        });
+        let kinds: Vec<GapKind> = gaps_against(schema, &role_only())
+            .iter()
+            .map(|gap| gap.kind().clone())
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![GapKind::MissingParameter {
+                name: "namespace".to_owned()
+            }],
+            "one missing parameter is one gap, without a `required` duplicate"
+        );
+    }
+
+    // Scenario: propriété non déclarée à la racine sans nom ni valeur dans l'affichage du débogage
+    #[test]
+    fn undeclared_root_property_has_no_parameter_and_no_name_nor_value_in_debug() {
+        let schema = json!({
+            "type": "object",
+            "properties": { "a": { "type": "string" } },
+            "additionalProperties": false
+        });
+        let context = context_with("a", json!("ok"))
+            .with_parameter("leaked-key".to_owned(), json!("leaked-valeur-7"))
+            .expect("the parameter is added");
+        let gaps = gaps_against(schema, &context);
+        assert!(
+            gaps.iter().any(|gap| gap.kind()
+                == &GapKind::InvalidValue {
+                    parameter: None,
+                    rule: "additionalProperties".to_owned()
+                }),
+            "the root rule has no parameter: {gaps:?}"
+        );
+        let shown = format!("{gaps:?}");
+        assert!(
+            !shown.contains("leaked-key") && !shown.contains("leaked-valeur-7"),
+            "neither the name nor the value comes out of the debug form: {shown}"
+        );
+    }
+
+    // Scenario: valeur fautive ressemblant à un secret jamais rendue
+    #[test]
+    fn secret_like_value_never_comes_out_of_the_debug_form() {
+        let schema = json!({ "type": "object", "properties": { "api_token": { "type": "integer" } } });
+        let gaps = gaps_against(schema, &context_with("api_token", json!("p4ss-reelle-XYZ")));
+        assert!(!gaps.is_empty(), "the wrong type is a gap: {gaps:?}");
+        assert!(
+            !format!("{gaps:?}").contains("p4ss-reelle-XYZ"),
+            "the debug form carries no secret: {gaps:?}"
+        );
+    }
+
+    // Scenario: une propriété déclarée à toute profondeur est nommée dans l'écart
+    #[test]
+    fn property_declared_at_any_depth_is_named_in_the_gap() {
+        let declared_deep = [
+            json!({ "allOf": [{ "properties": { "deep": { "type": "integer" } } }] }),
+            json!({ "if": {}, "then": { "properties": { "deep": { "type": "integer" } } } }),
+        ];
+        for schema in declared_deep {
+            let gaps = gaps_against(schema.clone(), &context_with("deep", json!("eu")));
+            assert!(
+                gaps.iter().any(|gap| gap.kind()
+                    == &GapKind::InvalidValue {
+                        parameter: Some("deep".to_owned()),
+                        rule: "type".to_owned()
+                    }),
+                "a property declared at any depth is named, not masked: {schema} {gaps:?}"
+            );
+        }
     }
 
     // Scenario: valeur de mauvais type est un écart

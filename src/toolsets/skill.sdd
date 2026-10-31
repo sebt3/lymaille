@@ -19,7 +19,7 @@ Returns:
   Accesseurs en lecture seule. Le nom du toolset de rattachement est posé par @Toolset (./toolset.sdd), non par le skill.
 
 Raises:
-  @ToolsetsError::InvalidSkill: nom ou description hors limites, nom avec un caractère interdit, document annexe de nom vide ou en double, frontmatter absent ou illisible.
+  @ToolsetsError::InvalidSkill: nom ou description hors limites, nom avec un caractère interdit, document annexe de nom vide ou en double, frontmatter absent ou illisible, texte de plus de 256 Kio, `name` ou `description` absent ou YAML null.
   @ToolsetsError::SkillTooLarge: le corps d'un skill ou un document annexe dépasse le plafond de rendu reçu par @Skill::check_size (voir Must).
 
 Must:
@@ -28,11 +28,15 @@ Must:
   Le corps et la description sont des gabarits (rendus par ./template.sdd) ; un corps qui ne compile pas comme gabarit est refusé à l'enregistrement du toolset.
   Le corps d'un skill et chaque document annexe tiennent dans le plafond de rendu de `agent-sessions/scratchpad#FR-5` (`agent-sessions/toolsets#FR-18`) : @Skill::check_size reçoit le plafond en caractères et refuse un dépassement ; le contrôle porte sur le texte rendu avec les valeurs du contexte le plus long permis.
   Un document annexe se lit à la demande et n'est jamais préchargé dans la fenêtre.
+  Un texte `SKILL.md` de plus de 256 Kio (262 144 octets) est refusé avant toute analyse, avec une raison fixe qui dit la taille ; la constante `TEXT_MAX_BYTES` est nommée dans le code (décision du 2026-10-31, D-a).
+  Un `name` ou une `description` absent, ou un YAML null (`~`, `null`, vide), est refusé : un null n'est pas du texte, il ne devient jamais la chaîne `null`. Une `license` ou une `compatibility` null se lit comme absente (décision du 2026-10-31).
   Se sérialise et se désérialise à l'identique.
 
 Depends on:
   ./error.sdd
+  ./template.sdd (rendu du corps et de la description, hors de ce fichier)
   serde
+  yaml_serde (décidé le 2026-10-31, ../toolsets.sdd #2, `default-features = false`)
   [x] #5 `Debug` manuel de @Skill qui n'affiche que le nom et les tailles du corps et des annexes (le `Debug` dérivé répand corps, annexes et métadonnées dans tout `{:?}` d'un @Toolset), avec son test.
       Validé le 2026-10-29 (implémentation vérifiée par mutations de l'auteur), validation par le validator groupée avec T6.
 
@@ -56,6 +60,26 @@ Scenario: corps trop volumineux refusé
   When la taille est vérifiée
   Then il échoue avec SkillTooLarge
 
+Scenario: texte SKILL.md de plus de 256 Kio refusé avant toute analyse
+  Given un texte `SKILL.md` de plus de 256 Kio (262 144 octets) dont le frontmatter est illisible
+  When il est analysé
+  Then il échoue avec InvalidSkill, la raison dit la taille, et le texte n'est pas analysé
+
+Scenario: texte SKILL.md de 256 Kio exactement lu
+  Given un texte `SKILL.md` valide de 262 144 octets
+  When il est analysé
+  Then il est lu
+
+Scenario: name ou description en null YAML refusé
+  Given un frontmatter dont `name` ou `description` vaut `~`, `null` ou rien
+  When il est analysé
+  Then il échoue avec InvalidSkill, sans que le texte `null` devienne le nom ou la description
+
+Scenario: licence null lue comme absente
+  Given un frontmatter dont `license` vaut `~`
+  When il est analysé
+  Then la licence est absente et l'analyse réussit
+
 Tasks:
   [x] #1 Tests puis implémentation, vérifié le 2026-10-31.
   [x] #4 Description blanche et clé de `metadata` en double refusées (voir `Must`), avec leurs tests.
@@ -65,6 +89,7 @@ Tasks:
       - les fins de ligne CRLF sont acceptées ; un frontmatter absent ou non fermé est refusé ;
       - un refus issu d'un texte lu porte le nom `<SKILL.md>` à la place du nom du skill : la valeur refusée n'entre jamais dans le message ;
       - une valeur scalaire de `metadata` (`version: 1.0`) est lue comme son texte (`"1.0"`) ; une liste ou une table est refusée ; une clé en double est refusée ;
-      - un champ inconnu est ignoré ; `allowed-tools` est ignoré (`Scenario: allowed-tools is ignored`).
+      - un champ inconnu est ignoré ; `allowed-tools` est ignoré (`Scenario: allowed-tools est ignoré`).
+      - décision du 2026-10-31 (correctif 4 et D-a) : un YAML null pour `name` ou `description` est refusé, `license: ~` donne `None` ; un texte de plus de 256 Kio est refusé avant analyse. Tests écrits, vus rouges pour le null (la chaîne `null` était acceptée comme nom) et pour la borne, puis verts ; en attente de validation par le validateur.
       Les refus (nom invalide, description blanche, frontmatter absent, YAML illisible, métadonnée en double) passent aussi sur le stub : ce sont des garde-fous, la preuve rouge est le scénario de lecture valide.
   [?] #3 « Contexte le plus long permis » (FR-18) : la taille rendue dépend des valeurs du contexte, inconnues à l'enregistrement. Posé : le contrôle porte sur le gabarit brut sans marge, et un dépassement au rendu est tronqué par @truncate_middle ; à confirmer.

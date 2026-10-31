@@ -14,13 +14,13 @@ Exposes:
   @builtin_rhai_pad_skill
 
 Accepts:
-  @SkillTool::new: les @Skill accordés (avec leur toolset), le skill intégré, un @ResolvedContext, un @SessionMeta et le plafond de rendu.
+  @SkillTool::new: les @Skill accordés (avec leur toolset), le skill intégré, un @ResolvedContext, un @SessionMeta, le plafond de rendu et le @Redactor de la session, partagé en `Arc<Redactor>` (décision du 2026-10-31, D-c).
   @SkillTool::call: aucun argument (liste), un nom (corps rendu) ou un nom et un nom de document (document annexe).
-  @session_context_registration: un @ResolvedContext ; rend une étape d'enregistrement (@EngineBuilder::with_registration, ../scratchpad/engine.sdd).
+  @session_context_registration: un @ResolvedContext et le @Redactor de la session (`Arc<Redactor>`) ; rend une étape d'enregistrement (@EngineBuilder::with_registration, ../scratchpad/engine.sdd).
 
 Returns:
-  @SkillTool::call: sans argument, la liste des skills disponibles (nom et description) ; avec un nom, le corps rendu ; avec un nom de document, ce document. Chaque texte est plafonné par @truncate_middle.
-  `session_context()` : une table Rhai de copie (paramètres résolus par toolset, noms des rôles liés), jamais de référence de secret.
+  @SkillTool::call: sans argument, la liste des skills disponibles (nom et description) ; avec un nom, le corps rendu ; avec un nom de document, ce document. Chaque texte est d'abord masqué par le @Redactor de la session (chaque secret déclaré devient `***`), puis plafonné par @truncate_middle.
+  `session_context()` : une table Rhai de copie (paramètres résolus par toolset, noms des rôles liés), jamais de référence de secret, et masquée par le @Redactor de la session dans ses textes, ses clés et ses nombres.
 
 Raises:
   @ToolsetsError::InvalidSkill: nom de skill ou de document inconnu ; `name` porte le nom demandé seul, `known` la liste des noms existants (le message les liste).
@@ -31,6 +31,8 @@ Must:
   Un skill intégré, toujours disponible, enseigne l'usage de `rhai_pad`, l'introspection et les limites de `agent-sessions#CON-4` ; son texte est en anglais (il parle au modèle) et cite le bloc de ../scratchpad/introspect.sdd (@limits_notice).
   `session_context()` est déclarée déterministe auprès de Rhai, rend une copie, est lisible depuis un script du LLM et depuis une fonction d'un module de toolset (une constante de scope n'est pas visible d'un module) : la modifier n'affecte pas la valeur lue ensuite (`agent-sessions/toolsets#AC-10`).
   Aucune panique, aucune E/S.
+  Un secret déclaré au @Redactor de la session n'apparaît jamais dans un texte que `skill` rend (liste, corps, document) ni dans la copie que `session_context()` donne : les textes, les clés et les nombres qui contiennent le secret sont masqués (décision du 2026-10-31, D-c). Le @Redactor est partagé en `Arc` : ses secrets sont fixés avant la construction du registre et du tool ; un secret déclaré plus tard n'est pas vu.
+  Le texte du skill intégré n'affirme que ce que le scratchpad fait : chaque affirmation est vérifiée en exécutant le script qu'elle décrit (`built_in_claims_hold_in_the_scratchpad`), y compris les groupes `pure`, `format` et `host` de `modules()`, `functions("global")`, `functions("script")`, `functions("<module>")`, et la recherche de `find` (tous les mots, cinquante résultats au plus).
 
 Depends on:
   ./skill.sdd
@@ -38,6 +40,7 @@ Depends on:
   ./toolset_context.sdd
   ./error.sdd
   ../scratchpad/engine.sdd
+  ../session/redact.sdd
   ../scratchpad/render.sdd
   ../scratchpad/introspect.sdd
   rhai
@@ -62,6 +65,41 @@ Scenario: même valeur depuis un module et depuis un script
   When les deux s'exécutent
   Then elles lisent la même valeur
 
+Scenario: un secret déclaré à la session n'apparaît jamais dans session_context()
+  Given une session dont le contexte porte un paramètre `api_token` égal à un secret déclaré au @Redactor, que la détection de `../toolsets/toolset_context.sdd` ne voit pas
+  When un script appelle `session_context()`
+  Then le secret n'apparaît pas dans le résultat, et le texte masqué `***` le remplace
+
+Scenario: un secret déclaré n'apparaît jamais dans le texte d'un skill
+  Given un skill dont la description, le corps et un document annexe citent le paramètre qui porte le secret déclaré
+  When `skill` est appelé sans argument, avec le nom du skill, et avec le nom du document
+  Then aucun de ces textes ne porte le secret
+
+Scenario: un secret déclaré sous forme de nombre est masqué, un nombre sans secret reste un nombre
+  Given un paramètre entier égal à un secret déclaré, et un paramètre entier qui ne contient aucun secret
+  When `session_context()` est appelé
+  Then le premier n'apparaît pas, et le second reste un nombre utilisable dans une expression
+
+Scenario: un secret déclaré sous forme de clé est masqué
+  Given un paramètre dont le nom est un secret déclaré
+  When `session_context()` est appelé
+  Then le nom n'apparaît pas dans le résultat
+
+Scenario: session_context donne les paramètres résolus par toolset, défauts compris
+  Given un contexte dont un toolset surcharge `region` et dont un défaut fournit `zone`
+  When `session_context()` est lu
+  Then `toolsets.<nom>.region` vaut la surcharge et `toolsets.<nom>.zone` vaut le défaut (`agent-sessions/toolsets#FR-17`)
+
+Scenario: chaque affirmation du skill intégré sur le scratchpad est vraie
+  Given une session avec un toolset `ops` qui documente `restart_pod` et soixante autres fonctions
+  When chaque affirmation du texte (valeur finale, `let` persistant, `print` avant le résultat, `vars()`, `modules()`, `functions()`, `find()`, `rules()`) est exécutée
+  Then chacune se vérifie, et les appels erronés (`functions("nope")`, `find("")`) échouent
+
+Scenario: le texte du skill intégré décrit l'origine, le genre et la recherche
+  Given le texte du skill intégré
+  When on le lit
+  Then il nomme `functions("global")` et `functions("script")`, les groupes `pure`, `format` et `host`, la recherche par tous les mots et la limite de cinquante résultats
+
 Tasks:
   [x] #1 Tests puis implémentation, vérifié le 2026-10-30.
       Livré le 2026-10-30 (implémentation, à valider par le développeur principal). Écarts et choix posés, à relire :
@@ -73,4 +111,5 @@ Tasks:
       - la liste sans argument rend aussi le corps de chaque skill (la description et le corps passent par le même rendu) : un corps qui ne se rend pas fait échouer la liste ;
       - @builtin_rhai_pad_skill refuse un texte qui dépasse le plafond de rendu (`SkillTooLarge`) ;
       - signatures : `SkillTool::new(granted: Vec<(String, Skill)>, builtin, context, session, cap_chars: usize)`, `call(name: Option<&str>, document: Option<&str>)`, `session_context_registration(context) -> impl FnOnce(&mut RhaiEngine)`, `builtin_rhai_pad_skill(limits) -> ToolsetsResult<Skill>`.
-  [?] #2 Texte exact du skill intégré sur `rhai_pad` : à rédiger avec le code ; le bloc @limits_notice de ../scratchpad/introspect.sdd est cité (`introspect.sdd` #6).
+  [?] #2 Texte exact du skill intégré sur `rhai_pad` : à rédiger avec le code ; le bloc @limits_notice de ../scratchpad/introspect.sdd est cité (`introspect.sdd` #6). Révisé le 2026-10-31 (correctif 7) : chaque affirmation est testée en l'exécutant ; la phrase « the host stops a runaway loop » ne vient pas de ce texte mais de `limits_notice` (../scratchpad/introspect.sdd, hors du périmètre de cette tâche) : à reformuler là-bas, ce que le modèle ne peut pas déclencher lui-même.
+  [x] #3 Correctif du 2026-10-31 (validation indépendante, décision D-c) : `session_context()` et `skill` reçoivent le @Redactor de la session et masquent leur sortie (Scenarios « un secret déclaré … » ci-dessus) ; le constructeur de @SkillTool prend six paramètres, ce qui dépasse le seuil `too-many-arguments` du harnais : `#[expect(clippy::too_many_arguments)]` avec raison, à valider (un type public qui regrouperait les paramètres élargirait la surface publique). Tests : les textes du skill et la copie de session vus rouges avant correction ; les clés, les nombres et le texte du skill intégré ajoutés après, vus verts ; mutants manuels tués. En attente de validation par le validateur.

@@ -1,6 +1,7 @@
 //! Skill: metadata and body compatible with `SKILL.md` (Agent Skills), named annex documents, and the render cap they are
-//! checked against (`agent-sessions/toolsets#FR-7`, `FR-15`, `FR-18`). The frontmatter parser is not part of this lot: a
-//! skill is built from its fields, and the toolset it belongs to is set by the toolset, not by the skill.
+//! checked against (`agent-sessions/toolsets#FR-7`, `FR-15`, `FR-18`). A skill is built from its fields, or read from a
+//! `SKILL.md` text by [`Skill::parse`], which reads the frontmatter with `yaml_serde`. The toolset a skill belongs to is set
+//! by the toolset, not by the skill.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -14,15 +15,22 @@ use super::{ToolsetsError, ToolsetsResult};
 const NAME_MAX_CHARS: usize = 64;
 /// Largest number of characters of a skill description.
 const DESCRIPTION_MAX_CHARS: usize = 1024;
+/// Largest size in bytes of a `SKILL.md` text that is parsed, 256 KiB (decision of 2026-10-31, D-a). A larger text is refused
+/// before any parsing.
+const TEXT_MAX_BYTES: usize = 256 * 1024;
 /// Line that opens and closes the frontmatter of a `SKILL.md` text.
 const FENCE: &str = "---";
 /// Name that a refusal of a parsed text carries in place of a value of the file.
 const PARSED_NAME: &str = "<SKILL.md>";
+/// Reason of a text over [`TEXT_MAX_BYTES`].
+const TEXT_TOO_LARGE: &str = "the text is larger than 256 KiB";
 /// Reason of a text without a closed frontmatter.
 const FRONTMATTER_MISSING: &str = "the frontmatter is missing or is not closed by a `---` line";
 /// Reason of a frontmatter that is not YAML with the expected fields.
 const FRONTMATTER_UNREADABLE: &str =
     "the frontmatter is not readable YAML with a name, a description and string metadata";
+/// Reason of a `name` or a `description` that is missing, or a YAML null: a null is not text.
+const FIELD_NOT_TEXT: &str = "the name and the description must be text, not missing and not a YAML null";
 
 /// Skill: a body of instructions with its metadata and its annex documents. The body and the description are templates,
 /// rendered by the template module; a skill grants no capability.
@@ -92,16 +100,22 @@ impl Skill {
     ///
     /// # Errors
     ///
-    /// Returns [`ToolsetsError::InvalidSkill`] when the frontmatter is missing or not closed, when it is not readable YAML
-    /// with those fields, when a metadata key is declared twice, or when the name or the description is refused. A refusal
-    /// names the file (`<SKILL.md>`), never a value of the text.
+    /// Returns [`ToolsetsError::InvalidSkill`] when the text is over 256 KiB (refused before any parsing), when the frontmatter
+    /// is missing or not closed, when it is not readable YAML with those fields, when `name` or `description` is missing or a
+    /// YAML null, when a metadata key is declared twice, or when the name or the description is refused. A refusal names the
+    /// file (`<SKILL.md>`), never a value of the text.
     pub fn parse(text: &str) -> ToolsetsResult<Self> {
+        if text.len() > TEXT_MAX_BYTES {
+            return Err(parsed_refusal(TEXT_TOO_LARGE));
+        }
         let (frontmatter, body) =
             split_frontmatter(text).ok_or_else(|| parsed_refusal(FRONTMATTER_MISSING))?;
         let record: Frontmatter = yaml_serde::from_str(&frontmatter)
             .ok()
             .ok_or_else(|| parsed_refusal(FRONTMATTER_UNREADABLE))?;
-        let mut skill = Self::new(record.name, record.description, body).map_err(hide_name)?;
+        let name = record.name.ok_or_else(|| parsed_refusal(FIELD_NOT_TEXT))?;
+        let description = record.description.ok_or_else(|| parsed_refusal(FIELD_NOT_TEXT))?;
+        let mut skill = Self::new(name, description, body).map_err(hide_name)?;
         if let Some(license) = record.license {
             skill = skill.with_license(license);
         }
@@ -271,8 +285,10 @@ impl<'de> Deserialize<'de> for Skill {
 /// The frontmatter of a `SKILL.md` text. Unknown fields are ignored: `allowed-tools` grants nothing.
 #[derive(Deserialize)]
 struct Frontmatter {
-    name: String,
-    description: String,
+    /// Optional so that a YAML null reads as absent, which is refused, and not as the text `null`.
+    name: Option<String>,
+    /// Optional so that a YAML null reads as absent, which is refused, and not as the text `null`.
+    description: Option<String>,
     license: Option<String>,
     compatibility: Option<String>,
     metadata: Option<MetadataPairs>,
@@ -658,6 +674,59 @@ mod tests {
             Skill::parse("---\nname: grafana\ndescription: d\nmetadata:\n  version: 1.0\n---\nbody\n")
                 .expect("a scalar parses as its text");
         assert_eq!(parsed.metadata().get("version").map(String::as_str), Some("1.0"));
+    }
+
+    /// Size of a `SKILL.md` text above which it is refused before any parsing (decision of 2026-10-31, D-a).
+    const TEXT_LIMIT_BYTES: usize = 256 * 1024;
+
+    // Scenario: texte SKILL.md de plus de 256 Kio refusé avant toute analyse
+    #[test]
+    fn text_over_256_kib_is_refused_before_parsing() {
+        let text = format!("---\nname: [broken\n---\n{}", "x".repeat(TEXT_LIMIT_BYTES));
+        match Skill::parse(&text) {
+            Err(ToolsetsError::InvalidSkill { reason, name, .. }) => {
+                assert!(reason.contains("256 KiB"), "the size is the reason: {reason}");
+                assert_eq!(name, "<SKILL.md>", "the refusal names the file");
+            }
+            other => panic!("an oversized text must fail with InvalidSkill, got {other:?}"),
+        }
+    }
+
+    // Scenario: texte SKILL.md de 256 Kio exactement lu
+    #[test]
+    fn text_of_exactly_256_kib_is_read() {
+        let head = "---\nname: grafana\ndescription: d\n---\n";
+        let body = "x".repeat(TEXT_LIMIT_BYTES.saturating_sub(head.len()));
+        let text = format!("{head}{body}");
+        assert_eq!(text.len(), TEXT_LIMIT_BYTES, "the sample is exactly the limit");
+        assert!(Skill::parse(&text).is_ok(), "a text of exactly 256 KiB is read");
+    }
+
+    // Scenario: name ou description en null YAML refusé
+    #[test]
+    fn yaml_null_name_or_description_is_refused() {
+        for frontmatter in [
+            "name: ~\ndescription: d",
+            "name: null\ndescription: d",
+            "name:\ndescription: d",
+            "name: grafana\ndescription: ~",
+            "name: grafana\ndescription: null",
+            "name: grafana\ndescription:",
+        ] {
+            let text = format!("---\n{frontmatter}\n---\nbody\n");
+            assert!(
+                matches!(Skill::parse(&text), Err(ToolsetsError::InvalidSkill { .. })),
+                "a YAML null is not text, refused: {frontmatter:?}"
+            );
+        }
+    }
+
+    // Scenario: licence null lue comme absente
+    #[test]
+    fn yaml_null_license_reads_as_none() {
+        let parsed = Skill::parse("---\nname: grafana\ndescription: d\nlicense: ~\n---\nbody\n")
+            .expect("a null license parses");
+        assert_eq!(parsed.license(), None, "a null license is no license");
     }
 
     // Scenario: corps trop volumineux refusé

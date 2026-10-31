@@ -5,8 +5,9 @@
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum ToolsetsError {
-    /// A context type is inconsistent: empty name, parameter schema that is not a JSON Schema object, role declared
-    /// twice, or an inclusion that is missing, too old or cyclic.
+    /// A context type is inconsistent: empty name, parameter schema that is not a JSON Schema object, a schema that does
+    /// not compile or whose serialized form is over 64 KiB, role declared twice, or an inclusion that is missing, too old
+    /// or cyclic.
     #[error("invalid context type `{name}`: {reason}")]
     InvalidContextType {
         /// Name of the refused context type, or of the type whose inclusion failed.
@@ -27,8 +28,9 @@ pub enum ToolsetsError {
         /// offending version text. Never a fragment of a source text.
         detail: String,
     },
-    /// A skill is inconsistent or unknown: name or description out of bounds, an annex document declared twice, or a
-    /// skill or annex document requested by a name that does not exist.
+    /// A skill is inconsistent or unknown: name or description out of bounds, a YAML null or a missing `name` or
+    /// `description`, a `SKILL.md` text that is over 256 KiB, or whose frontmatter is missing or unreadable, an annex
+    /// document declared twice, or a skill or annex document requested by a name that does not exist.
     #[error("invalid skill `{name}`: {reason}{}", known_note(.known))]
     InvalidSkill {
         /// Name that was refused: the skill, or the annex document, as declared or requested.

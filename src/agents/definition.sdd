@@ -28,7 +28,7 @@ Accepts:
   @SandboxLimits::with_max_string_bytes, @SandboxLimits::with_max_array_len, @SandboxLimits::with_max_map_len: un entier non signé (`u64`) par plafond de mémoire (octets pour la chaîne, éléments pour le tableau, entrées pour la table) ; zéro est accepté par le constructeur et refusé par @AgentDefinition::validate.
 
   @AgentDefinition::to_text: aucun argument (la définition) ; un texte `AGENT.md` : frontmatter YAML entre deux lignes `---`, puis le prompt système comme corps.
-  @AgentDefinition::from_text: un texte de ce format.
+  @AgentDefinition::from_text: un texte de ce format, de 256 Kio au plus (décision du 2026-10-31, D-a).
 
 Returns:
   @AgentDefinition::to_text: le texte `---`, les champs de la définition sauf `prompt` en YAML (clés triées), `---`, puis le prompt exactement, sans ajout ni retrait.
@@ -39,7 +39,7 @@ Returns:
 
 Raises:
   @AgentsError::InvalidDefinition: un sous-agent ou un agent de configuration qui déclare des sous-agents délégables ; un agent de travail ou de configuration qui déclare un schéma de sortie ; un module réservé à la configuration (`toolset_creator`, `inspect`, `contexts`, `sessions`) accordé à un agent de travail ou à un sous-agent ; un identifiant, un prompt ou un nom de profil vide ; un sous-agent délégable égal à l'agent lui-même ou en double ; une liste de toolsets ou de modules qui contient un doublon ; un plafond de mémoire du sandbox posé à zéro.
-  @AgentsError::InvalidDefinition, identifiant `<AGENT.md>` et raison fixe : frontmatter absent ou non fermé, YAML illisible, champ de mauvais type, champ `prompt` dans le frontmatter (le prompt est le corps, choix posé le 2026-10-31 à valider : un doublon refusé plutôt qu'écrasé en silence). Le message ne porte jamais le prompt ni une valeur du texte.
+  @AgentsError::InvalidDefinition, identifiant `<AGENT.md>` et raison fixe : frontmatter absent ou non fermé, YAML illisible, champ de mauvais type, champ `prompt` dans le frontmatter, texte de plus de 256 Kio (refusé avant toute analyse), nombre non fini (`.nan`, `.inf`, `-.inf`), clé qui n'est pas un texte, clé déclarée deux fois au premier niveau (le prompt est le corps, choix posé le 2026-10-31 à valider : un doublon refusé plutôt qu'écrasé en silence). Le message ne porte jamais le prompt ni une valeur du texte.
 
 Must:
   Le modèle se désigne par un nom de profil : la définition n'a aucun champ de fournisseur.
@@ -53,6 +53,8 @@ Must:
   Le prompt est le corps exact : aucun `trim`, aucune ligne ajoutée. Seule la première ligne `---` après le frontmatter ferme ce dernier ; une ligne `---` dans le corps reste dans le prompt.
   Le texte doit s'ouvrir par la ligne `---` ; les fins de ligne CRLF sont acceptées à la relecture et le prompt garde les siennes.
   Le découpage du frontmatter reprend celui de `../toolsets/skill.rs` (`Skill::parse`) par copie : à factoriser dans un module partagé si un troisième texte apparaît.
+  Un texte de plus de 256 Kio (262 144 octets) est refusé avant toute analyse, avec une raison fixe qui dit la taille ; la constante `TEXT_MAX_BYTES` est nommée dans le code (décision du 2026-10-31, D-a).
+  Un nombre non fini (`.nan`, `.inf`, `-.inf`) à n'importe quelle profondeur du frontmatter est refusé : il ne peut pas être conservé, et il ne devient jamais un échantillonnage vide. Une clé qui n'est pas un texte (`1: x`) et une clé déclarée deux fois au premier niveau sont refusées, jamais écrasées (décision du 2026-10-31).
 
 Depends on:
   ./error.sdd
@@ -60,6 +62,31 @@ Depends on:
   serde
   serde_json
   yaml_serde (décidé le 2026-10-31, ../toolsets/toolsets.sdd #2)
+
+Scenario: texte de plus de 256 Kio refusé avant toute analyse
+  Given un texte de plus de 256 Kio (262 144 octets) dont le frontmatter est illisible
+  When il est relu
+  Then la relecture échoue avec InvalidDefinition, la raison dit la taille, et le texte n'est pas analysé
+
+Scenario: texte de 256 Kio exactement lu
+  Given un texte de définition de 262 144 octets exactement
+  When il est relu
+  Then la relecture réussit
+
+Scenario: température non finie refusée
+  Given une définition dont la température vaut `.nan` (ou `.inf`) dans le texte
+  When elle est relue
+  Then la relecture échoue avec InvalidDefinition, au lieu d'un échantillonnage vide
+
+Scenario: clé dupliquée au premier niveau refusée, sans sa valeur
+  Given un texte dont une clé du premier niveau du frontmatter est déclarée deux fois
+  When il est relu
+  Then la relecture échoue avec InvalidDefinition, sans la valeur de la seconde déclaration
+
+Scenario: clé qui n'est pas un texte refusée
+  Given un texte dont le frontmatter porte la clé `1`
+  When il est relu
+  Then la relecture échoue avec InvalidDefinition
 
 Tasks:
   [x] #6 Tests manquants : l'empreinte change pour chaque champ de la liste du Must (prompt, profil, toolsets, modules, délai et plafond de sandbox, sous-agents délégables, schéma de sortie, aussi id, nature, paramètres, stratégie de contexte) ;
@@ -211,3 +238,4 @@ Scenario: frontmatter absent ou non fermé refusé
   Given un texte sans ligne `---` d'ouverture, puis un texte sans ligne `---` de fermeture
   When chacun est relu
   Then chacun échoue avec InvalidDefinition
+  [x] #19 Correctif du 2026-10-31 (validation indépendante, D-a et correctif 5) : bornes de 256 Kio sur `from_text`, nombres non finis, clé non textuelle et clé dupliquée refusés (Scenarios ci-dessus). Tests vus rouges avant correction pour les quatre cas ; la clé dupliquée est refusée par la lecture YAML elle-même (raison fixe « not readable YAML » de `from_text`, vérifiée) : la garde `KEY_TWICE` de `definition.rs` n'est pas atteignable avec `yaml_serde` 0.10.7 ; elle est gardée par sécurité, à trancher par le validateur (la retirer ou la conserver). En attente de validation par le validateur.

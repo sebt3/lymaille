@@ -37,6 +37,7 @@ Must:
   La vérification est complète, pas seulement la présence des noms (décision du 2026-10-30, `agent-sessions/toolsets#FR-4`) : chaque valeur présente du contexte, optionnelle comprise, est validée par `./context_type.sdd` contre le schéma du type et des types qu'il inclut ; une valeur qui viole un schéma est un écart @GapKind::InvalidValue. Les valeurs validées sont les paramètres du contexte (la présence des requis se lit sur les mêmes paramètres) ; les défauts et surcharges des toolsets n'y entrent pas.
   Un écart ne contient jamais la valeur fautive, ni une clé du contexte qu'aucun schéma ne déclare (rendue `*`) : le texte d'un écart et son affichage de débogage ne portent que des noms, des règles et des nombres (`agent-sessions#CON-3`).
   Une absence de paramètre requis reste un seul écart (@GapKind::MissingParameter), sans doublon.
+  Une règle `required` de la racine dont la propriété n'est pas un requis aplati (par exemple sous `$ref`, `allOf`, `dependentRequired` ou `if`/`then`) est un écart @GapKind::InvalidValue de règle `required`, sans paramètre ni valeur ; une règle `required` dont la propriété est un requis aplati ne donne aucun écart de plus (correctif du 2026-10-31, `context_type.sdd`).
   Pour l'agent principal, un écart fait échouer le démarrage avec un message explicite ; pour un sous-agent, il le retire de la liste délégable, sans erreur (`agent-sessions/toolsets#FR-4`, `AC-3`).
   Les rôles propres d'un toolset (@RoleDecl) obligatoires comptent comme les rôles du type.
   Le module de création de toolsets (`toolset_creator`) n'est accordable qu'à un agent de nature `Config` (`agent-sessions#BR-8`) : une définition qui l'accorde à un agent de travail ou à un sous-agent est refusée avec un message qui nomme la règle (`agent-sessions/toolsets#AC-8`).
@@ -64,6 +65,36 @@ Scenario: l'agent principal ne démarre pas
   Given un agent principal dont le toolset exige le type `cluster` et un contexte sans ses rôles
   When les sous-agents délégables sont calculés au démarrage
   Then il échoue avec Incompatible en listant chaque écart
+
+Scenario: un requis déclaré hors de la forme plate est un écart de règle required
+  Given un type `cluster` dont le schéma exige `namespace` sous `$ref` ou sous `allOf`, et un contexte qui ne porte pas `namespace`
+  When le contexte est vérifié
+  Then un écart de règle `required` sans paramètre est rendu, sans valeur
+
+Scenario: un requis sous dependentRequired ou if/then est un écart quand la condition tient
+  Given un type `cluster` dont `dependentRequired` ou `if`/`then` exige `namespace` quand `zone` est présent, et un contexte qui porte `zone` sans `namespace`
+  When le contexte est vérifié
+  Then un écart de règle `required` sans paramètre est rendu
+
+Scenario: un requis hors de la forme plate, présent, ne donne aucun écart
+  Given le type `cluster` dont `allOf` exige `namespace`, et un contexte qui porte `namespace`
+  When le contexte est vérifié
+  Then aucun écart
+
+Scenario: un requis répété dans allOf reste un seul écart
+  Given un type dont `namespace` est requis à la racine et répété dans `allOf`, et un contexte sans `namespace`
+  When le contexte est vérifié
+  Then un seul écart, de paramètre manquant, sans écart de règle `required`
+
+Scenario: propriété non déclarée à la racine sans nom ni valeur dans l'affichage du débogage
+  Given un type qui interdit les propriétés non déclarées (`additionalProperties: false`), et un contexte qui porte `leaked-key`
+  When le contexte est vérifié
+  Then l'écart de règle `additionalProperties` n'a aucun paramètre, et ni le nom `leaked-key` ni sa valeur n'apparaissent dans l'écart ni dans son affichage de débogage
+
+Scenario: une propriété déclarée à toute profondeur est nommée dans l'écart
+  Given un type dont `allOf[0].properties` ou un `then` déclare `deep` de type entier, et un contexte où `deep` vaut "eu"
+  When le contexte est vérifié
+  Then un écart de règle `type` nomme `deep` (et non `*`), sans la valeur
 
 Scenario: une version de type incompatible est un écart
   Given un toolset exigeant `cluster@1.2` et un type en 1.1
@@ -122,7 +153,8 @@ Tasks:
       Validé le 2026-10-29 (validator, 12 mutants tués) sous `SKIP=deny scripts/check`.
   [x] #3 Fait le 2026-10-30 (lot T14) ; décidé le 2026-10-30 par le développeur principal : @delegable_subagents prend une table unique de toolsets pour le principal et ses sous-agents ; un sous-agent est retiré si sa définition manque, si l'un de ses toolsets est absent ou si sa vérification échoue (échec fermé), mais avec un avertissement et non en silence (à ajouter au résultat, avec un Scenario) ; @check_creation_rule compte un `delegable()` non vide même si l'identifiant est absent de la table, et contrôle aussi tout sous-agent de la table.
   [?] #2 Posé : le nom du module de création est reçu en paramètre ; ce module lui-même est un module de l'hôte ou du domaine `modules`, hors de ce document.
-  [x] #6 Validation complète des valeurs (`agent-sessions/toolsets#FR-4`, décision du 2026-10-30) : Scenarios « valeur … », « propriété non déclarée … », « valeur requise absente … » ci-dessus ; tests puis implémentation dans `compat.rs` et `context_type.rs`. Non validé.
+  [x] #6 Validation complète des valeurs (`agent-sessions/toolsets#FR-4`, décision du 2026-10-30) : Scenarios « valeur … », « propriété non déclarée … », « valeur requise absente … » ci-dessus ; tests puis implémentation dans `compat.rs` et `context_type.rs`. Livré le 2026-10-31 (correctif 1 et correctif 6 : tests écrits, vus rouges pour les cas de requis hors forme plate, puis verts ; en attente de validation par le validateur).
   [?] #7 Posé (lot de la validation complète, 2026-10-30) : seules les valeurs partagées du contexte (`resolved.shared()`) sont validées ; les défauts et surcharges propres à un toolset ne le sont pas, la spec étant silencieuse. Posé aussi : l'écart ne rend que le mot-clé de la règle et le paramètre de premier niveau, jamais le chemin profond ni la valeur. Le masquage des clés non déclarées (`collect_declared`) est dupliqué depuis `delegation/result.rs` et serait à factoriser dans un module commun. À confirmer par le développeur principal.
   [x] #5 Règle de création alignée sur la nature `Config` (DSD du 2026-10-29) : @check_creation_rule ne dépend plus de la délégation : seule la nature `Config` peut recevoir `toolset_creator`, y compris pour chaque sous-agent de la table reçue (décidé le 2026-10-29) ; les Scenarios « creation module refused … » sont à réécrire en conséquence. À faire après `definition.sdd` #12.
       Validé le 2026-10-29 (validator, 58 mutants dont 55 tués) sous `scripts/check` complet.
+  [x] #8 Correctif du 2026-10-31 (validation indépendante) : requis de la racine hors forme plate (`context_type.sdd`, Must), Scenarios « requis … », « propriété non déclarée … » et « propriété déclarée à toute profondeur » ci-dessus, assertions de valeur absente et de débogage ajoutées aux Scenarios existants. Tests vus rouges avant correction ; mutants : voir le rapport du développeur. En attente de validation par le validateur.

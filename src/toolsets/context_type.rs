@@ -3,6 +3,7 @@
 //! (`agent-sessions/toolsets#FR-9`, `FR-13`, `agent-sessions#DEC-11`).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use jsonschema::error::{ValidationError, ValidationErrorKind};
 use jsonschema::paths::LocationSegment;
@@ -38,9 +39,28 @@ pub struct ContextType {
     #[serde(with = "semver_text")]
     version: Semver,
     schema: Value,
+    /// The schema compiled once, when the type is built; it is not serialized, it is rebuilt from `schema` on reading.
+    #[serde(skip)]
+    compiled: Arc<CompiledSchema>,
     roles: Vec<RoleSpec>,
     includes: Vec<TypeRequirement>,
 }
+
+/// A parameter schema with its validator, compiled once when its type is built (decision of 2026-10-31, D-b): a check never
+/// compiles again. The schema is kept beside the validator for the names it declares and for the equality of types.
+#[derive(Debug)]
+struct CompiledSchema {
+    schema: Value,
+    validator: jsonschema::Validator,
+}
+
+impl PartialEq for CompiledSchema {
+    fn eq(&self, other: &Self) -> bool {
+        self.schema == other.schema
+    }
+}
+
+impl Eq for CompiledSchema {}
 
 /// Flat view of a context type and of the types it includes.
 ///
@@ -53,8 +73,8 @@ pub struct FlatContextType {
     optional_parameters: BTreeSet<String>,
     required_roles: BTreeSet<String>,
     optional_roles: BTreeSet<String>,
-    /// The parameter schemas of the type and of every type it includes, each checked against the values.
-    schemas: Vec<Value>,
+    /// The compiled parameter schemas of the type and of every type it includes, each checked against the values.
+    schemas: Vec<Arc<CompiledSchema>>,
 }
 
 /// A rule of a parameter schema that a value of a toolset context breaks. It names the parameter and the rule only: never
@@ -79,19 +99,16 @@ impl ValueViolation {
 
 impl FlatContextType {
     /// Validates the values of a context against every parameter schema of the type and of the types it includes, at any
-    /// depth. `type_name` names the type in a refusal.
+    /// depth, with the validators compiled when the types were built.
     ///
-    /// The `required` list of the root is not repeated here: the absence of a required parameter is the flat required
-    /// parameters' concern. A violation is named by the parameter and the rule only (`agent-sessions#CON-3`).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ToolsetsError::InvalidContextType`] when a schema no longer compiles as a JSON Schema.
+    /// A `required` rule of the root that names one of the flat required parameters is not repeated here: that absence is
+    /// the flat required parameters' concern, reported once. Any other `required` rule of the root, such as one under
+    /// `$ref`, `allOf`, `dependentRequired` or `if`/`then`, is a violation without a parameter. A violation is named by the
+    /// parameter and the rule only (`agent-sessions#CON-3`).
     pub(in crate::toolsets) fn violations(
         &self,
-        type_name: &str,
         values: &BTreeMap<String, Value>,
-    ) -> ToolsetsResult<BTreeSet<ValueViolation>> {
+    ) -> BTreeSet<ValueViolation> {
         let instance = Value::Object(
             values
                 .iter()
@@ -99,30 +116,37 @@ impl FlatContextType {
                 .collect::<Map<String, Value>>(),
         );
         let declared = declared_names(&self.schemas);
-        let mut found = BTreeSet::new();
-        for schema in &self.schemas {
-            let validator = jsonschema::validator_for(schema).map_err(|_refusal| {
-                invalid(
-                    type_name,
-                    "the parameter schema does not compile as a JSON Schema",
-                )
-            })?;
-            let errors = validator
-                .iter_errors(&instance)
-                .filter(|error| !is_root_required(error));
-            for error in errors {
-                let parameter = error
-                    .instance_path()
-                    .iter()
-                    .next()
-                    .map(|segment| masked_name(&segment, &declared));
-                let _added = found.insert(ValueViolation {
-                    parameter,
-                    rule: error.kind().keyword().to_owned(),
-                });
-            }
+        self.schemas
+            .iter()
+            .flat_map(|compiled| compiled.validator.iter_errors(&instance))
+            .filter_map(|error| self.violation_of(&error, &declared))
+            .collect()
+    }
+
+    /// The violation that `error` stands for, or `None` when it is the `required` rule of the root for a flat required
+    /// parameter, which is already a gap of its own.
+    fn violation_of(
+        &self,
+        error: &ValidationError<'_>,
+        declared: &BTreeSet<String>,
+    ) -> Option<ValueViolation> {
+        if error.instance_path().is_empty()
+            && let ValidationErrorKind::Required { property } = error.kind()
+            && property
+                .as_str()
+                .is_some_and(|name| self.required_parameters.contains(name))
+        {
+            return None;
         }
-        Ok(found)
+        let parameter = error
+            .instance_path()
+            .iter()
+            .next()
+            .map(|segment| masked_name(&segment, declared));
+        Some(ValueViolation {
+            parameter,
+            rule: error.kind().keyword().to_owned(),
+        })
     }
 
     /// Returns the names of the required parameters, in order.
@@ -151,12 +175,15 @@ impl FlatContextType {
 }
 
 impl ContextType {
-    /// Builds a context type from its name, its version and its parameter schema (a JSON Schema object).
+    /// Builds a context type from its name, its version and its parameter schema (a JSON Schema object). The schema is
+    /// compiled here, once: a schema that does not compile, or whose serialized form is over 64 KiB, is refused.
     ///
     /// # Errors
     ///
     /// Returns [`ToolsetsError::InvalidContextType`] when the name is empty or not made of lowercase ASCII letters,
-    /// digits and hyphens, or when the schema is not a JSON Schema object.
+    /// digits and hyphens, when the schema is not a JSON Schema object, when its serialized form is over 64 KiB, when a
+    /// parameter default looks like a secret, or when the schema does not compile (a reference to another document
+    /// included). The reason never quotes the schema.
     pub fn new(name: String, version: Semver, schema: Value) -> ToolsetsResult<Self> {
         if !is_valid_name(&name) {
             return Err(invalid(
@@ -164,11 +191,12 @@ impl ContextType {
                 "the name must be non-empty lowercase ASCII letters, digits and hyphens",
             ));
         }
-        validate_schema(&name, &schema)?;
+        let compiled = Arc::new(compile_schema(&name, schema)?);
         Ok(Self {
             name,
             version,
-            schema,
+            schema: compiled.schema.clone(),
+            compiled,
             roles: Vec::new(),
             includes: Vec::new(),
         })
@@ -251,7 +279,7 @@ impl ContextType {
     where
         F: Fn(&str) -> Option<Self>,
     {
-        gathered.schemas.push(self.schema.clone());
+        gathered.schemas.push(Arc::clone(&self.compiled));
         for (name, required) in parameters(&self.schema) {
             if required {
                 insert_name(&mut gathered.required_parameters, &name);
@@ -319,7 +347,7 @@ struct Gathered {
     all_parameters: BTreeSet<String>,
     required_roles: BTreeSet<String>,
     all_roles: BTreeSet<String>,
-    schemas: Vec<Value>,
+    schemas: Vec<Arc<CompiledSchema>>,
 }
 
 impl Gathered {
@@ -355,9 +383,30 @@ fn is_valid_name(name: &str) -> bool {
             .all(|character| character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-')
 }
 
+/// Largest serialized size of a parameter schema, in bytes: 64 KiB (decision of 2026-10-31, D-b).
+const SCHEMA_MAX_BYTES: usize = 64 * 1024;
+
+/// Checks a parameter schema and compiles it once. The serialized schema is at most [`SCHEMA_MAX_BYTES`]; the parts that
+/// the structural check reads are an object, a `required` list of names and a `properties` object, and no default of a
+/// parameter looks like a secret. The compiler's message is dropped, since it can quote the schema.
+fn compile_schema(name: &str, schema: Value) -> ToolsetsResult<CompiledSchema> {
+    let size = serde_json::to_string(&schema).map_or(usize::MAX, |text| text.len());
+    if size > SCHEMA_MAX_BYTES {
+        return Err(invalid(
+            name,
+            "the parameter schema is larger than 64 KiB once serialized",
+        ));
+    }
+    validate_shape(name, &schema)?;
+    // A reference to another document cannot be resolved (no network, no file), so it is refused here.
+    let validator = jsonschema::validator_for(&schema)
+        .map_err(|_refusal| invalid(name, "the parameter schema does not compile as a JSON Schema"))?;
+    Ok(CompiledSchema { schema, validator })
+}
+
 /// Checks the parts of a parameter schema that the structural check reads: an object, a `required` list of names and
-/// a `properties` object. The rest of the schema is kept as it is.
-fn validate_schema(name: &str, schema: &Value) -> ToolsetsResult<()> {
+/// a `properties` object without a secret-like default. The rest of the schema is compiled as it is.
+fn validate_shape(name: &str, schema: &Value) -> ToolsetsResult<()> {
     let Some(object) = schema.as_object() else {
         return Err(invalid(name, "the parameter schema is not a JSON Schema object"));
     };
@@ -387,17 +436,7 @@ fn validate_schema(name: &str, schema: &Value) -> ToolsetsResult<()> {
             }
         }
     }
-    // The schema is compiled once here, so a refusal is never left to the check. The compiler's message is dropped: it can
-    // quote the schema. A reference to another document cannot be resolved (no network, no file), so it is refused here.
-    let _compiled = jsonschema::validator_for(schema)
-        .map_err(|_refusal| invalid(name, "the parameter schema does not compile as a JSON Schema"))?;
     Ok(())
-}
-
-/// Tells whether a violation is a `required` rule of the root: the absence of a required parameter is already a gap of the
-/// flat required parameters, so it is not repeated.
-fn is_root_required(error: &ValidationError<'_>) -> bool {
-    error.instance_path().is_empty() && matches!(error.kind(), ValidationErrorKind::Required { .. })
 }
 
 /// Names a segment of a violation path: a declared property by its name, any other key by the marker `*`.
@@ -416,15 +455,19 @@ fn masked_name(segment: &LocationSegment<'_>, declared: &BTreeSet<String>) -> St
 }
 
 /// Collects the names of every property declared under a `properties` keyword of the schemas, at any depth.
-fn declared_names(schemas: &[Value]) -> BTreeSet<String> {
+fn declared_names(schemas: &[Arc<CompiledSchema>]) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
-    for schema in schemas {
-        collect_declared(schema, &mut out);
+    for compiled in schemas {
+        collect_declared(&compiled.schema, &mut out);
     }
     out
 }
 
 /// Adds to `out` every property name declared under a `properties` keyword of `schema`, at any depth.
+///
+/// Known limit (decision of 2026-10-31, not changed): any key of an object named `properties` counts as a declared name, even
+/// one under `enum`, `const` or `default`, where it is a value and not a declaration. Such a name is then rendered as itself
+/// instead of `*`; a value is never rendered, only a name.
 fn collect_declared(schema: &Value, out: &mut BTreeSet<String>) {
     match schema {
         Value::Object(map) => {
@@ -781,6 +824,56 @@ mod tests {
                 Err(ToolsetsError::InvalidContextType { .. })
             ),
             "a schema that is not an object is refused"
+        );
+    }
+
+    // Scenario: schéma de plus de 64 Kio refusé sans son contenu
+    #[test]
+    fn schema_over_64_kib_is_refused_without_its_content() {
+        let schema = json!({ "type": "object", "description": "d".repeat(70_000) });
+        match ContextType::new("cluster".to_owned(), semver("1.0.0"), schema) {
+            Err(error @ ToolsetsError::InvalidContextType { .. }) => assert!(
+                !error.to_string().contains("dddd"),
+                "the refusal never quotes the schema: {error}"
+            ),
+            other => panic!("an oversized schema must fail with InvalidContextType, got {other:?}"),
+        }
+    }
+
+    // Scenario: schéma d'un octet au-delà de 64 Kio refusé
+    #[test]
+    fn schema_one_byte_over_64_kib_is_refused() {
+        let empty = json!({ "type": "object", "description": "" });
+        let base = serde_json::to_string(&empty).expect("a schema serializes").len();
+        let over = json!({ "type": "object", "description": "d".repeat(65537usize.saturating_sub(base)) });
+        assert_eq!(
+            serde_json::to_string(&over).expect("a schema serializes").len(),
+            65537,
+            "the sample is one byte over 64 KiB once serialized"
+        );
+        assert!(
+            matches!(
+                ContextType::new("cluster".to_owned(), semver("1.0.0"), over),
+                Err(ToolsetsError::InvalidContextType { .. })
+            ),
+            "a schema one byte over 64 KiB is refused"
+        );
+    }
+
+    // Scenario: schéma de 64 Kio exactement accepté
+    #[test]
+    fn schema_of_exactly_64_kib_is_accepted() {
+        let empty = json!({ "type": "object", "description": "" });
+        let base = serde_json::to_string(&empty).expect("a schema serializes").len();
+        let fits = json!({ "type": "object", "description": "d".repeat(65536usize.saturating_sub(base)) });
+        assert_eq!(
+            serde_json::to_string(&fits).expect("a schema serializes").len(),
+            65_536,
+            "the sample is exactly 64 KiB once serialized"
+        );
+        assert!(
+            ContextType::new("cluster".to_owned(), semver("1.0.0"), fits).is_ok(),
+            "a schema of exactly 64 KiB is accepted"
         );
     }
 

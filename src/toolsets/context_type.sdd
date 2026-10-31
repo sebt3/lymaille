@@ -17,22 +17,20 @@ Exposes:
   @FlatContextType::optional_parameters
   @FlatContextType::required_roles
   @FlatContextType::optional_roles
-  @FlatContextType::violations
-  @ValueViolation
 
 Accepts:
-  @ContextType::new: un nom, une version, un schéma de paramètres (`serde_json::Value`, objet JSON Schema) ; constructeurs chaînés : rôles (@RoleSpec : nom, obligatoire ou optionnel) et types inclus (@TypeRequirement).
+  @ContextType::new: un nom, une version, un schéma de paramètres (`serde_json::Value`, objet JSON Schema, compilé une seule fois ici, et de 64 Kio au plus une fois sérialisé) ; constructeurs chaînés : rôles (@RoleSpec : nom, obligatoire ou optionnel) et types inclus (@TypeRequirement).
   @ContextType::flatten: une fonction de recherche d'un type par nom (le trait de stockage ou une table) ; rend un @FlatContextType.
   @ContextType::bump_since: une version précédente du même type.
 
 Returns:
   @FlatContextType: paramètres requis (noms listés par `required` des schémas), paramètres optionnels, rôles obligatoires et optionnels, du type et de tous ceux qu'il inclut.
-  @FlatContextType::violations: les valeurs présentes d'un contexte (`BTreeMap` nom vers valeur), le nom du type pour les erreurs ; rend les @ValueViolation.
-  @FlatContextType::violations: la liste des @ValueViolation (nom du paramètre rendu, ou `*` s'il n'est déclaré nulle part, et règle du schéma violée) pour chaque valeur présente, contre chaque schéma du type et des types qu'il inclut ; vide si toutes les valeurs satisfont leurs schémas. Une erreur (`InvalidContextType`) seulement si un schéma ne se compile plus.
+  @FlatContextType::violations: les valeurs présentes d'un contexte (`BTreeMap` nom vers valeur) ; rend les @ValueViolation. Fonction interne au module `toolsets` (`pub(in crate::toolsets)`), hors de l'API de la crate.
+  @FlatContextType::violations: la liste des @ValueViolation (nom du paramètre rendu, ou `*` s'il n'est déclaré nulle part, et règle du schéma violée) pour chaque valeur présente, contre le validateur compilé de chaque schéma du type et des types qu'il inclut ; vide si toutes les valeurs satisfont leurs schémas. Aucune erreur : la compilation a eu lieu à la construction du type (décision du 2026-10-31, D-b).
   @ContextType::bump_since: un @Bump : majeure si un champ requis ou un rôle obligatoire est ajouté, si un champ ou un rôle est retiré, ou si un champ ou un rôle optionnel devient obligatoire ; mineure si seul un champ optionnel ou un rôle optionnel est ajouté ; sinon aucune.
 
 Raises:
-  @ToolsetsError::InvalidContextType: voir ./error.sdd (nom hors de `[a-z0-9-]+`, valeur par défaut de paramètre qui a l'allure d'un secret) ; un type inclus introuvable ou d'une version insuffisante est aussi refusé par @flatten.
+  @ToolsetsError::InvalidContextType: voir ./error.sdd (nom hors de `[a-z0-9-]+`, schéma qui n'est pas un objet JSON Schema, schéma qui ne compile pas, schéma sérialisé de plus de 64 Kio, valeur par défaut de paramètre qui a l'allure d'un secret) ; un type inclus introuvable ou d'une version insuffisante est aussi refusé par @flatten.
 
 Must:
   Un type qui en inclut un autre exige les champs et rôles des deux (`agent-sessions/toolsets#AC-6`) ; un rôle obligatoire dans l'un et optionnel dans l'autre est obligatoire.
@@ -43,6 +41,10 @@ Must:
   La vérification structurelle est complète (`agent-sessions/toolsets#FR-4`, décision du 2026-10-30) : un schéma de paramètres est compilé comme JSON Schema à la construction, et un schéma qui ne compile pas est refusé, y compris une référence `$ref` distante ou de fichier, sans accès réseau ni fichier. À la vérification, chaque valeur présente est validée contre le schéma du type et de chaque type inclus, à toute profondeur (types, énumérations, `additionalProperties`, etc.). Les schémas ne se réduisent donc pas à `required` et `properties`.
   La présence des paramètres requis reste vérifiée à part, par les noms `required` aplatis : une règle `required` de la racine n'est pas redonnée comme écart de valeur.
   Un écart de valeur ne nomme ni la valeur soumise ni une clé du contexte que le schéma ne déclare pas : le paramètre est rendu s'il est déclaré sous `properties` à toute profondeur, sinon `*` ; seule la règle violée est nommée (`agent-sessions#CON-3`).
+  Un `required` de la racine dont la propriété n'est pas un requis aplati (sous `$ref`, `allOf`, `dependentRequired`, `if`/`then`) est un écart de règle `required` sans paramètre ni valeur ; un requis aplati n'est jamais redonné (correctif du 2026-10-31, voir ./compat.sdd).
+  La borne de taille est de 64 Kio (65 536 octets) sur la forme sérialisée du schéma (`SCHEMA_MAX_BYTES`, décision du 2026-10-31, D-b) : au-delà, le type est refusé avec une raison fixe qui ne cite pas le schéma. Un schéma exactement à la borne est accepté.
+  Le schéma est compilé une seule fois, à la construction du type (@ContextType::new, que la désérialisation emprunte aussi) ; le validateur compilé est conservé par le type et repris par @ContextType::flatten, sans recompilation à la vérification (décision du 2026-10-31, D-b).
+  Limite connue, décidée le 2026-10-31 et non corrigée : toute clé d'un objet nommé `properties` compte comme nom déclaré, y compris sous `enum`, `const` ou `default` où elle est une valeur. Un tel nom peut alors être rendu à la place de `*` ; une valeur n'est jamais rendue.
 
 Depends on:
   ./error.sdd
@@ -108,8 +110,24 @@ Scenario: clé non déclarée rendue par un marqueur
   When la clé non déclarée `leaked-key` = "texte" est vérifiée
   Then une violation de la règle `type` sur le paramètre `*`, et le texte `leaked-key` n'apparaît nulle part
 
+Scenario: schéma de plus de 64 Kio refusé sans son contenu
+  Given un schéma de paramètres dont la forme sérialisée dépasse 64 Kio
+  When le type est construit
+  Then il échoue avec InvalidContextType, et le message ne cite pas le schéma
+
+Scenario: schéma de 64 Kio exactement accepté
+  Given un schéma dont la forme sérialisée vaut 65 536 octets
+  When le type est construit
+  Then il est accepté
+
+Scenario: schéma d'un octet au-delà de 64 Kio refusé
+  Given un schéma dont la forme sérialisée vaut 65 537 octets
+  When le type est construit
+  Then il échoue avec InvalidContextType
+
 Tasks:
   [x] #1 Tests puis implémentation.
       Validé le 2026-10-29 (validator, mutations manuelles) sous `SKIP=deny scripts/check`.
   [x] #3 Décidé le 2026-10-30 par le développeur principal : un champ ou un rôle qui passe d'optionnel à obligatoire est une rupture (majeure) ; l'inverse est mineur ; la valeur par défaut d'un paramètre est contrôlée par la même heuristique de secret que ./toolset_context.sdd ; `flatten` reçoit une fonction de recherche tant que le trait de ./store.sdd n'existe pas, sa signature sera reprise alors.
-  [x] #2 Révisé pour la validation complète, décision du 2026-10-30 (voir ./toolsets.sdd #3) : un schéma de paramètres est compilé à la construction (refus si la compilation échoue, `$ref` distant compris) et conservé tel quel ; la vérification structurelle ne s'arrête plus à `required` et `properties` : chaque valeur présente est validée contre le schéma du type et des types inclus (voir Must). Non validé : tests à écrire et à faire échouer d'abord.
+  [x] #2 Révisé pour la validation complète, décision du 2026-10-30 (voir ./toolsets.sdd #3) : un schéma de paramètres est compilé à la construction (refus si la compilation échoue, `$ref` distant compris) et conservé tel quel ; la vérification structurelle ne s'arrête plus à `required` et `properties` : chaque valeur présente est validée contre le schéma du type et des types inclus (voir Must). Livré le 2026-10-31 (correctif 2 et limite connue) : tests écrits, vus rouges avant la correction pour la borne de 64 Kio ; en attente de validation par le validateur.
+  [x] #4 Correctif du 2026-10-31 (validation indépendante, décision D-b) : schéma compilé une seule fois (le validateur est conservé par le type et par @FlatContextType), borne de 64 Kio, `violations` sans erreur, limite de `collect_declared` documentée. Scenarios « schéma … 64 Kio » ci-dessus, tests vus rouges avant correction pour la borne ; la mise en cache n'a pas de comportement observable (pas de test rouge possible, couverte par la batterie existante). En attente de validation par le validateur.

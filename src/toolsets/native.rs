@@ -3,6 +3,7 @@
 //! See `src/toolsets/native.sdd`.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use rhai::serde::to_dynamic;
 use rhai::{Dynamic, Engine as RhaiEngine, EvalAltResult, FuncRegistration, Module, Shared};
@@ -11,6 +12,7 @@ use serde_json::Value;
 
 use super::{ResolvedContext, SessionMeta, Skill, ToolsetsError, ToolsetsResult, render_skill};
 use crate::scratchpad::{ScratchpadLimits, ScratchpadResult, limits_notice, truncate_middle};
+use crate::session::Redactor;
 
 /// Name of the built-in skill that teaches the `rhai_pad` tool.
 const BUILTIN_NAME: &str = "rhai-pad";
@@ -18,18 +20,19 @@ const BUILTIN_NAME: &str = "rhai-pad";
 /// Description of the built-in skill, as the model sees it in the list of skills.
 const BUILTIN_DESCRIPTION: &str = "Run a Rhai script in this session's scratchpad, and discover its functions, modules, toolsets, skills and limits.";
 
-/// Text of the built-in skill before the sandbox notice. A draft in English, to be reread by the lead developer.
+/// Text of the built-in skill before the sandbox notice, in English since it speaks to the model. Each claim is checked by a
+/// test that runs it in the scratchpad (`built_in_claims_hold_in_the_scratchpad`).
 const BUILTIN_BODY: &str = "Use `rhai_pad` to run one Rhai script in this session's scratchpad. The value of the last statement is the result. \
 Variables declared with `let` persist to the next run of this session. Call the functions of a granted module as `module::function(arguments)`. \
 Text printed with `print` or `debug` comes back before the result.
 
 Discover what is available before you write a script:
 - `vars()`: the variables of the scope at the start of this run, with their type and a preview of their value.
-- `modules()`: the granted modules.
-- `functions()`: every function you can call, with its signature and documentation; `functions(\"module\")` lists the functions of one module.
+- `modules()`: the granted modules and the groups of built-in functions (for example `pure`, `format` and `host`), each with its `kind` (`module`, `core`, `format` or `host`) and its number of functions.
+- `functions()`: every function you can call, with its signature and documentation. `functions(\"global\")` lists the built-in groups, `functions(\"script\")` the functions you defined in this session, and `functions(\"name\")` the functions of one granted module; any other name is an error.
 - `toolsets()`: the granted toolsets, with their descriptions.
 - `skills()`: the granted skills, with their descriptions. Read the text of a skill with the `skill` tool, not with a script.
-- `find(\"text\")`: the functions, modules, toolsets and skills whose name or description contains the text, in any case.
+- `find(\"words\")`: the functions, granted modules, toolsets and skills that hold every word of the query, in any case, in their name, path, signature, documentation or description. The exact names come first; at most 50 results are returned.
 - `rules()`: the sandbox rules and the limits.
 
 `session_context()` returns a copy of the toolset context of this session: `params` holds the shared parameters, `toolsets` holds the resolved parameters of each toolset, and `roles` holds the names of the bound roles. Changing the copy does not change the context.
@@ -45,8 +48,9 @@ struct Entry {
 
 /// The `skill` tool, which reads the granted skills without Rhai.
 ///
-/// It lists the skills, gives the rendered text of one, or one of its annex documents. Every text it gives is capped by
-/// `truncate_middle` (`agent-sessions/toolsets#FR-18`, `AC-11`).
+/// It lists the skills, gives the rendered text of one, or one of its annex documents. Every text it gives is masked by the
+/// redactor of the session, then capped by `truncate_middle` (`agent-sessions/toolsets#FR-18`, `AC-11`, decision of
+/// 2026-10-31 D-c: a declared secret never comes out).
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct SkillTool {
@@ -54,20 +58,27 @@ pub struct SkillTool {
     context: ResolvedContext,
     session: SessionMeta,
     cap_chars: usize,
+    redactor: Arc<Redactor>,
 }
 
 impl SkillTool {
-    /// Builds the tool over the granted skills, each with its toolset, and over the built-in skill.
+    /// Builds the tool over the granted skills, each with its toolset, and over the built-in skill. `redactor` is the redactor
+    /// of the session: the secrets it declares are masked in every text the tool gives.
     ///
     /// # Errors
     ///
     /// Returns [`ToolsetsError::InvalidSkill`] when two skills share a name, the built-in one included.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the tool takes its six inputs at once; grouping them in a struct would add a public type for one constructor"
+    )]
     pub fn new(
         granted: Vec<(String, Skill)>,
         builtin: Skill,
         context: ResolvedContext,
         session: SessionMeta,
         cap_chars: usize,
+        redactor: Arc<Redactor>,
     ) -> ToolsetsResult<Self> {
         let mut entries = BTreeMap::new();
         for (toolset, skill) in granted {
@@ -79,6 +90,7 @@ impl SkillTool {
             context,
             session,
             cap_chars,
+            redactor,
         })
     }
 
@@ -151,9 +163,12 @@ impl SkillTool {
         )
     }
 
-    /// The text capped at the render cap, its middle replaced by the notice of `truncate_middle`.
+    /// The text masked by the redactor of the session, then capped at the render cap, its middle replaced by the notice of
+    /// `truncate_middle`. The mask comes first: a cut can then never leave a part of a declared secret.
     fn capped(&self, text: &str) -> String {
-        truncate_middle(text, self.cap_chars).text().to_owned()
+        truncate_middle(&self.redactor.redact(text), self.cap_chars)
+            .text()
+            .to_owned()
     }
 }
 
@@ -186,26 +201,58 @@ struct ContextCopy<'context> {
 
 /// Builds the Rhai registration step of `session_context()`.
 ///
-/// It is passed to `ScratchpadEngine::builder`'s `with_registration`. The function gives a copy, built at each call, of the given resolved context: the shared parameters, the parameters by
-/// toolset and the names of the bound roles. No reference of a role and no secret is in it. It is registered with
-/// `FuncRegistration`, which declares it non-volatile, that is deterministic for Rhai: `register_fn` would declare it
-/// volatile.
+/// It is passed to `ScratchpadEngine::builder`'s `with_registration`. The function gives a copy, built at each call, of the
+/// given resolved context: the shared parameters, the parameters by toolset and the names of the bound roles. No reference
+/// of a role is in it, and every secret declared to `redactor` is masked in it, keys and numbers included (decision of
+/// 2026-10-31, D-c). It is registered with `FuncRegistration`, which declares it non-volatile, that is deterministic for
+/// Rhai: `register_fn` would declare it volatile.
 pub fn session_context_registration(
     context: ResolvedContext,
+    redactor: Arc<Redactor>,
 ) -> impl FnOnce(&mut RhaiEngine) -> ScratchpadResult<()> + 'static {
     move |engine| {
         let mut module = Module::new();
         let _function = FuncRegistration::new("session_context")
             .in_global_namespace()
             .set_into_module(&mut module, move || -> Result<Dynamic, Box<EvalAltResult>> {
-                to_dynamic(ContextCopy {
+                let copy = serde_json::to_value(ContextCopy {
                     params: context.shared(),
                     toolsets: context.toolsets(),
                     roles: context.roles(),
                 })
+                .ok()
+                .ok_or_else(|| {
+                    Box::<EvalAltResult>::from("session_context: the context does not serialize")
+                })?;
+                to_dynamic(masked(&redactor, &copy))
             });
         let _registered = engine.register_global_module(Shared::new(module));
         Ok(())
+    }
+}
+
+/// A copy of `value` in which every declared secret is masked: in a text, in a key, and in a number whose text holds it.
+/// Booleans and nulls cannot hold a secret, which is at least six characters long.
+fn masked(redactor: &Redactor, value: &Value) -> Value {
+    match value {
+        Value::String(text) => Value::String(redactor.redact(text)),
+        Value::Number(number) => {
+            let text = number.to_string();
+            let redacted = redactor.redact(&text);
+            if redacted == text {
+                value.clone()
+            } else {
+                Value::String(redacted)
+            }
+        }
+        Value::Array(items) => Value::Array(items.iter().map(|item| masked(redactor, item)).collect()),
+        Value::Object(fields) => Value::Object(
+            fields
+                .iter()
+                .map(|(key, item)| (redactor.redact(key), masked(redactor, item)))
+                .collect(),
+        ),
+        Value::Null | Value::Bool(_) => value.clone(),
     }
 }
 
@@ -288,6 +335,7 @@ mod tests {
             context(),
             session(),
             cap_chars,
+            Arc::new(Redactor::new()),
         )
         .expect("the tool builds")
     }
@@ -306,15 +354,40 @@ mod tests {
         .expect("a valid toolset builds")
     }
 
-    /// Scratchpad over the grants of `toolsets`, with `session_context()` registered from `context`.
+    /// Scratchpad over the grants of `toolsets`, with `session_context()` registered from `context`, and no secret declared.
     fn pad(toolsets: &[Toolset], context: &ResolvedContext) -> Scratchpad {
+        pad_with(toolsets, context, Arc::new(Redactor::new()))
+    }
+
+    /// Scratchpad over the grants of `toolsets`, with `session_context()` registered from `context` and `redactor`.
+    fn pad_with(toolsets: &[Toolset], context: &ResolvedContext, redactor: Arc<Redactor>) -> Scratchpad {
         let grants =
             assemble(toolsets, &[], &BTreeMap::new(), context, &ScratchpadLimits::new()).into_grants();
         let engine = ScratchpadEngine::builder(ScratchpadLimits::new(), grants)
-            .with_registration(session_context_registration(context.clone()))
+            .with_registration(session_context_registration(context.clone(), redactor))
             .build()
             .expect("the engine builds");
         Scratchpad::new(Arc::new(engine))
+    }
+
+    /// A secret that no heuristic of `ToolsetContext` flags, declared to the redactor of the session.
+    const CANARY: &str = "p4ss-reelle-XYZ";
+
+    /// A redactor that masks the canary, as the host declares a secret of the session.
+    fn redactor_with_canary() -> Arc<Redactor> {
+        let mut redactor = Redactor::new();
+        redactor.add_secret(CANARY).expect("the canary is long enough");
+        Arc::new(redactor)
+    }
+
+    /// A resolved context whose shared parameter `api_token` holds the canary.
+    fn canary_context() -> ResolvedContext {
+        ToolsetContext::new("site".to_owned(), ContextLevel::Project)
+            .expect("a context name")
+            .with_parameter("api_token".to_owned(), json!(CANARY))
+            .expect("a plain parameter")
+            .resolve(Vec::<(String, String, serde_json::Value)>::new())
+            .expect("the context resolves")
     }
 
     async fn run(pad: &Scratchpad, script: &str) -> RunOutcome {
@@ -414,6 +487,7 @@ mod tests {
             context(),
             session(),
             8_000,
+            Arc::new(Redactor::new()),
         );
         assert!(
             matches!(refused, Err(ToolsetsError::InvalidSkill { .. })),
@@ -544,6 +618,230 @@ mod tests {
             !outcome.text().contains("prod-k8s"),
             "the reference of a role never comes out: {}",
             outcome.text()
+        );
+    }
+
+    // Scenario: un secret déclaré sous forme de nombre est masqué, un nombre sans secret reste un nombre
+    #[tokio::test(flavor = "multi_thread")]
+    async fn session_context_masks_a_secret_held_as_a_number_and_keeps_the_others() {
+        let mut redactor = Redactor::new();
+        redactor.add_secret("7351904").expect("the number is long enough");
+        let context = ToolsetContext::new("site".to_owned(), ContextLevel::Project)
+            .expect("a context name")
+            .with_parameter("pin".to_owned(), json!(7_351_904))
+            .expect("a plain parameter")
+            .with_parameter("replicas".to_owned(), json!(3))
+            .expect("a plain parameter")
+            .resolve(Vec::<(String, String, serde_json::Value)>::new())
+            .expect("the context resolves");
+        let pad = pad_with(&[], &context, Arc::new(redactor));
+        let outcome = run(&pad, "session_context()").await;
+        assert!(
+            !outcome.text().contains("7351904"),
+            "the number that is a declared secret never comes out: {}",
+            outcome.text()
+        );
+        assert!(
+            holds(&pad, "session_context().params.replicas + 1 == 4").await,
+            "a number that holds no secret stays a number"
+        );
+    }
+
+    // Scenario: un secret déclaré sous forme de clé est masqué
+    #[tokio::test(flavor = "multi_thread")]
+    async fn session_context_masks_a_declared_secret_used_as_a_key() {
+        let context = ToolsetContext::new("site".to_owned(), ContextLevel::Project)
+            .expect("a context name")
+            .with_parameter(CANARY.to_owned(), json!("visible"))
+            .expect("a plain parameter")
+            .resolve(Vec::<(String, String, serde_json::Value)>::new())
+            .expect("the context resolves");
+        let pad = pad_with(&[], &context, redactor_with_canary());
+        let outcome = run(&pad, "session_context()").await;
+        assert!(
+            !outcome.text().contains(CANARY),
+            "the declared secret never comes out, as a key either: {}",
+            outcome.text()
+        );
+    }
+
+    /// Runs `script` and tells whether it answers `true`. A script that fails does not hold.
+    async fn holds(pad: &Scratchpad, script: &str) -> bool {
+        let outcome = run(pad, script).await;
+        outcome.status() == RunStatus::Ok && outcome.text().trim() == "true"
+    }
+
+    /// One documented filler function of the toolset `ops`.
+    fn filler(index: usize) -> String {
+        format!("/// Filler {index}.\nfn filler_{index}() {{ {index} }}\n")
+    }
+
+    /// The toolset `ops`: the documented function `restart_pod`, and sixty filler functions, so that `find` reaches its cap.
+    fn ops_toolset() -> Toolset {
+        let fillers: String = (0..60).map(filler).collect();
+        toolset(
+            "ops",
+            &format!("/// Restarts a pod by name.\nfn restart_pod(name) {{ name }}\n{fillers}"),
+        )
+    }
+
+    // Scenario: un secret déclaré à la session n'apparaît jamais dans session_context()
+    #[tokio::test(flavor = "multi_thread")]
+    async fn session_context_masks_a_declared_secret() {
+        let pad = pad_with(&[], &canary_context(), redactor_with_canary());
+        let outcome = run(&pad, "session_context()").await;
+        assert_eq!(
+            outcome.status(),
+            RunStatus::Ok,
+            "the script runs: {}",
+            outcome.text()
+        );
+        assert!(
+            !outcome.text().contains(CANARY),
+            "the declared secret never comes out: {}",
+            outcome.text()
+        );
+        assert!(
+            outcome.text().contains("***"),
+            "the secret is masked where it was: {}",
+            outcome.text()
+        );
+    }
+
+    // Scenario: un secret déclaré n'apparaît jamais dans le texte d'un skill
+    #[test]
+    fn skill_tool_masks_a_declared_secret() {
+        let skill = Skill::new(
+            "leak".to_owned(),
+            "Token {{context.params.api_token}}".to_owned(),
+            "Body {{context.params.api_token}}".to_owned(),
+        )
+        .expect("a valid skill")
+        .with_annex("notes".to_owned(), format!("key {CANARY}"))
+        .expect("a valid annex");
+        let tool = SkillTool::new(
+            vec![("ops".to_owned(), skill)],
+            builtin(),
+            canary_context(),
+            session(),
+            8_000,
+            redactor_with_canary(),
+        )
+        .expect("the tool builds");
+        let list = tool.call(None, None).expect("the list is given");
+        let body = tool.call(Some("leak"), None).expect("the body is given");
+        let annex = tool
+            .call(Some("leak"), Some("notes"))
+            .expect("the annex is given");
+        for (what, text) in [("list", &list), ("body", &body), ("annex", &annex)] {
+            assert!(
+                !text.contains(CANARY),
+                "the {what} never carries the declared secret: {text}"
+            );
+        }
+        assert!(body.contains("***"), "the secret is masked where it was: {body}");
+    }
+
+    // Scenario: session_context donne les paramètres résolus par toolset, défauts compris
+    #[tokio::test(flavor = "multi_thread")]
+    async fn session_context_gives_the_resolved_parameters_of_each_toolset() {
+        let context = ToolsetContext::new("site".to_owned(), ContextLevel::Project)
+            .expect("a context name")
+            .with_override("ops".to_owned(), "region".to_owned(), json!("us"))
+            .expect("a plain override")
+            .resolve([("ops".to_owned(), "zone".to_owned(), json!("eu"))])
+            .expect("the defaults resolve");
+        let pad = pad(&[], &context);
+        assert!(
+            holds(&pad, r#"session_context().toolsets.ops.region == "us""#).await,
+            "the override of the toolset is given"
+        );
+        assert!(
+            holds(&pad, r#"session_context().toolsets.ops.zone == "eu""#).await,
+            "the default of the toolset is given"
+        );
+    }
+
+    // Scenario: chaque affirmation du skill intégré sur le scratchpad est vraie
+    #[tokio::test(flavor = "multi_thread")]
+    async fn built_in_claims_hold_in_the_scratchpad() {
+        let pad = pad(&[ops_toolset()], &context());
+        let first = run(&pad, "let kept = 7; kept * 2").await;
+        assert_eq!(first.status(), RunStatus::Ok, "the script runs: {}", first.text());
+        assert!(
+            first.text().contains("14"),
+            "the value of the last statement is the result: {}",
+            first.text()
+        );
+        let second = run(&pad, "kept + 1").await;
+        assert!(
+            second.text().contains('8'),
+            "`let` persists to the next run of the session: {}",
+            second.text()
+        );
+        let printed = run(&pad, "print(\"first-line\"); 42").await;
+        assert!(
+            matches!(
+                (printed.text().find("first-line"), printed.text().find("42")),
+                (Some(text), Some(result)) if text < result
+            ),
+            "the text printed comes back before the result: {}",
+            printed.text()
+        );
+        let claims = [
+            r#""kept" in vars().map(|variable| variable.name)"#,
+            r#""core" in modules().map(|entry| entry.kind)"#,
+            r#""format" in modules().map(|entry| entry.kind)"#,
+            r#""module" in modules().map(|entry| entry.kind)"#,
+            r#""pure" in modules().map(|entry| entry.name)"#,
+            r#""host" in modules().map(|entry| entry.name)"#,
+            r#""ops" in modules().map(|entry| entry.name)"#,
+            r#"functions("global").len() > 0"#,
+            r#"functions("script").len() == 0"#,
+            r#"functions("ops").len() == 61"#,
+            r#""restart_pod" in find("restart pod").map(|found| found.name)"#,
+            r#"find("restart nothing").len() == 0"#,
+            r#"find("ops").len() == 50"#,
+            "toolsets().len() == 1",
+            r#"rules().contains("Sandbox rules")"#,
+        ];
+        let mut failed = Vec::new();
+        for script in claims {
+            let held = holds(&pad, script).await;
+            failed.extend((!held).then_some(script));
+        }
+        assert!(failed.is_empty(), "the claims that do not hold: {failed:#?}");
+        for script in [r#"functions("nope")"#, r#"find("")"#] {
+            let refused = run(&pad, script).await;
+            assert_ne!(
+                refused.status(),
+                RunStatus::Ok,
+                "the claim that this call fails holds: {script}"
+            );
+        }
+    }
+
+    // Scenario: le texte du skill intégré décrit l'origine, le genre et la recherche
+    #[test]
+    fn built_in_body_describes_the_origins_the_kinds_and_the_search_rule() {
+        let body = builtin().body().to_owned();
+        for expected in [
+            "functions(\"global\")",
+            "functions(\"script\")",
+            "pure",
+            "format",
+            "host",
+            "every word",
+            "50",
+        ] {
+            assert!(
+                body.contains(expected),
+                "the built-in text names `{expected}`: {body}"
+            );
+        }
+        assert!(
+            !body.contains("contains the text"),
+            "the search is not a plain substring: {body}"
         );
     }
 }
