@@ -8,6 +8,7 @@ Owns:
   ./context_type.rs
 
 Exposes:
+  @ContextType::new_with_detector
   @ContextType
   @RoleSpec
   @FlatContextType
@@ -19,6 +20,7 @@ Exposes:
   @FlatContextType::optional_roles
 
 Accepts:
+  @ContextType::new_with_detector: les paramètres de @ContextType::new et un `&dyn SecretDetector` (../secret.sdd) qui juge les valeurs par défaut du schéma ; @ContextType::new utilise @DefaultSecretDetector.
   @ContextType::new: un nom, une version, un schéma de paramètres (`serde_json::Value`, objet JSON Schema, compilé une seule fois ici, et de 64 Kio au plus une fois sérialisé) ; constructeurs chaînés : rôles (@RoleSpec : nom, obligatoire ou optionnel) et types inclus (@TypeRequirement).
   @ContextType::flatten: une fonction de recherche d'un type par nom (le trait de stockage ou une table) ; rend un @FlatContextType.
   @ContextType::bump_since: une version précédente du même type.
@@ -125,9 +127,15 @@ Scenario: schéma d'un octet au-delà de 64 Kio refusé
   When le type est construit
   Then il échoue avec InvalidContextType
 
+Scenario: un détecteur de l'hôte juge les défauts d'un schéma
+  Given un schéma dont un défaut vaut `tok_abc` et un détecteur qui refuse `tok_`
+  When ContextType::new_with_detector le construit
+  Then il échoue, et @ContextType::new l'accepte (le défaut ne ressemble pas à un secret pour l'heuristique)
+
 Tasks:
   [x] #1 Tests puis implémentation.
       Validé le 2026-10-29 (validator, mutations manuelles) sous `SKIP=deny scripts/check`.
   [x] #3 Décidé le 2026-10-30 par le développeur principal : un champ ou un rôle qui passe d'optionnel à obligatoire est une rupture (majeure) ; l'inverse est mineur ; la valeur par défaut d'un paramètre est contrôlée par la même heuristique de secret que ./toolset_context.sdd ; `flatten` reçoit une fonction de recherche tant que le trait de ./store.sdd n'existe pas, sa signature sera reprise alors.
   [x] #2 Révisé pour la validation complète, décision du 2026-10-30 (voir ./toolsets.sdd #3) : un schéma de paramètres est compilé à la construction (refus si la compilation échoue, `$ref` distant compris) et conservé tel quel ; la vérification structurelle ne s'arrête plus à `required` et `properties` : chaque valeur présente est validée contre le schéma du type et des types inclus (voir Must). Livré le 2026-10-31 (correctif 2 et limite connue) : tests écrits, vus rouges avant la correction pour la borne de 64 Kio ; en attente de validation par le validateur.
   [x] #4 Correctif du 2026-10-31 (validation indépendante, décision D-b) : schéma compilé une seule fois (le validateur est conservé par le type et par @FlatContextType), borne de 64 Kio, `violations` sans erreur, limite de `collect_declared` documentée. Scenarios « schéma … 64 Kio » ci-dessus, tests vus rouges avant correction pour la borne ; la mise en cache n'a pas de comportement observable (pas de test rouge possible, couverte par la batterie existante). En attente de validation par le validateur.
+  [ ] #P5 @ContextType::new_with_detector (lot P5, 2026-10-31).

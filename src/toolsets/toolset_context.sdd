@@ -8,6 +8,8 @@ Owns:
   ./toolset_context.rs
 
 Exposes:
+  @ToolsetContext::with_secret_detector
+  @ToolsetContext::check
   @ToolsetContext
   @ContextLevel
   @ResolvedContext
@@ -17,6 +19,8 @@ Exposes:
   @ResolvedContext::roles
 
 Accepts:
+  @ToolsetContext::with_secret_detector: un `Arc<dyn SecretDetector>` (../secret.sdd) ; les appels suivants de `with_parameter`, `with_role`, `with_override` et `resolve` (valeurs par défaut) jugent avec lui (@DefaultSecretDetector sinon).
+  @ToolsetContext::check: un `&dyn SecretDetector` ; rend vrai si aucune valeur ni référence de rôle du contexte ne ressemble à un secret pour ce détecteur.
   @ToolsetContext::new: un nom et un @ContextLevel (`User`, `Project` ou `Session`) ; constructeurs chaînés : un paramètre (nom, valeur JSON), une liaison de rôle (nom du rôle, nom de la référence que l'hôte résout), une surcharge pour un toolset (nom du toolset, nom du paramètre, valeur).
   @ToolsetContext::resolve: les valeurs par défaut déclarées par les toolsets de l'agent (nom du toolset, nom du paramètre, valeur) ; rend un @ResolvedContext.
 
@@ -60,6 +64,11 @@ Scenario: la copie résolue est indépendante
   When l'une de ses valeurs est modifiée
   Then une seconde résolution rend encore la valeur d'origine
 
+Scenario: un détecteur de l'hôte juge paramètres, rôles et surcharges
+  Given un contexte muni d'un détecteur qui refuse `tok_`
+  When with_parameter, with_role et with_override reçoivent `tok_abc`, puis `sk-abc`
+  Then `tok_abc` est refusé par InvalidContext dans les trois cas et `sk-abc` accepté, et check rend les mêmes verdicts sur un contexte désérialisé
+
 Tasks:
   [x] #1 Tests puis implémentation.
       Validé le 2026-10-29 (validator, mutations manuelles) sous `SKIP=deny scripts/check`.
@@ -68,3 +77,4 @@ Tasks:
   [ ] #2 Posé : la détection de valeur ressemblant à un secret réutilise la liste de ../agents/provider.sdd (heuristique documentée, le contrôle réel reste à l'hôte, `agent-sessions#CON-3`) ; une fonction commune est à extraire quand les deux specs sont livrées.
       Décision modifiée : la détection de secret passe par un trait remplaçable par l'hôte, avec l'heuristique de `provider.sdd` comme implémentation par défaut ; la librairie ne l'impose pas à l'hôte. À spécifier et implémenter ; le même trait sert `provider.sdd`. (accord du développeur principal, 2026-10-31).
       Extraite (toolsets#6) : la détection vit dans `../secret.rs` (`looks_like_secret`, `pub(crate)`), appelée ici et par `../agents/provider.rs`.
+  [ ] #P5 @ToolsetContext::with_secret_detector et @ToolsetContext::check (lot P5, 2026-10-31) : la désérialisation applique @DefaultSecretDetector.

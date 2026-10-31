@@ -8,10 +8,14 @@ Owns:
   ./provider.rs
 
 Exposes:
+  @Provider::new_with_detector
+  @Provider::check
   @Provider
   @ProviderLevel
 
 Accepts:
+  @Provider::new_with_detector: les paramètres de @Provider::new et un `&dyn SecretDetector` (../secret.sdd) ; @Provider::new utilise @DefaultSecretDetector.
+  @Provider::check: un `&dyn SecretDetector` ; rend vrai si aucune référence du fournisseur ne ressemble à un secret pour ce détecteur.
   @Provider::new: le nom, le type de fournisseur (texte, p. ex. `openai`, `anthropic`, `ollama`), une référence d'adresse et une référence d'authentification optionnelle, et un @ProviderLevel (`User` ou `Project`).
 
 Returns:
@@ -52,8 +56,14 @@ Scenario: le Debug cache les références
   When il est formaté avec Debug
   Then les références n'apparaissent pas
 
+Scenario: un détecteur de l'hôte juge les références
+  Given un détecteur qui refuse le préfixe `tok_`
+  When Provider::new_with_detector reçoit une référence `tok_abc`, puis `sk-abc`
+  Then la première est refusée (None) et la seconde acceptée, et Provider::check rend les mêmes verdicts sur un fournisseur chargé
+
 Tasks:
   [x] #4 Tests manquants : préfixe `sk-` (dont `SK-`), blanc dans une référence, nom et type blancs, désérialisation JSON d'une référence en clair (refus). Rendre `sk-` insensible à la casse.
   [x] #1 Tests puis implémentation.
   [x] #3 Posé à l'implémentation : une référence est refusée si elle est vide, contient un blanc, un `://` suivi d'un `@`, ou commence par `sk-` ou `Bearer` (casse indifférente pour les deux, décidé) ; une URL sans identifiants est acceptée ; `kind` et `name` ne sont testés que sur le vide.
   [x] #2 Le critère « ressemble à un jeton » est heuristique (espace, `Bearer`, `sk-`, longueur) : décidé le 2026-10-27 : la liste actuelle est conservée, sans l'étendre ; le contrôle réel reste à l'hôte (CON-3).
+  [ ] #P5 @Provider::new_with_detector et @Provider::check (lot P5, 2026-10-31) : la désérialisation applique @DefaultSecretDetector.

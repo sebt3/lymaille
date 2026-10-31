@@ -8,11 +8,13 @@ Owns:
   ./toolset.rs
 
 Exposes:
+  @Toolset::with_secret_detector
   @Toolset
   @ParamDecl
   @RoleDecl
 
 Accepts:
+  @Toolset::with_secret_detector: un `Arc<dyn SecretDetector>` (../secret.sdd) ; les appels suivants de `with_param` jugent la valeur par défaut avec lui (@DefaultSecretDetector sinon).
   @Toolset::new: un nom (identifiant Rhai valide, il nomme le module), une description, une version (@vynil_core::Semver) et le texte source du module Rhai ; constructeurs chaînés : un skill, une exigence de type (@TypeRequirement), un paramètre (@ParamDecl : nom, schéma JSON, valeur par défaut optionnelle), un rôle MCP propre (@RoleDecl : nom, obligatoire ou optionnel), une dépendance (nom d'un module, jamais accordé au LLM par ce seul fait).
 
 Returns:
@@ -55,6 +57,11 @@ Scenario: nom de module invalide refusé
   When un toolset est construit avec lui
   Then il échoue avec InvalidToolset
 
+Scenario: un détecteur de l'hôte juge les valeurs par défaut
+  Given un toolset muni d'un détecteur qui refuse `tok_`
+  When with_param reçoit un défaut `tok_abc`, puis `sk-abc`
+  Then le premier est refusé par InvalidToolset et le second accepté
+
 Tasks:
   [x] #3 Test d'un nom de module qui est un mot réservé de Rhai (`fn`), relevé par le validateur le 2026-10-29.
       Validé le 2026-10-29 (validator, 12 mutants tués) sous `SKIP=deny scripts/check`.
@@ -64,3 +71,4 @@ Tasks:
       Validé le 2026-10-29 (validator, mutations manuelles) sous `SKIP=deny scripts/check`.
   [x] #4 `Debug` manuel de @Toolset qui élide le texte source du module (un `{:?}` ne doit pas le répandre), avec son test.
       Validé le 2026-10-29 (validator, 58 mutants dont 55 tués) sous `scripts/check` complet.
+  [ ] #P5 @Toolset::with_secret_detector (lot P5, 2026-10-31).
