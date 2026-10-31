@@ -86,6 +86,32 @@ fn summary_message(summary: &str, digest: Option<&Digest>) -> String {
     parts.join("\n\n")
 }
 
+/// Default summary prompt, given to the summarizer of the host.
+///
+/// It asks for the user's requests to be quoted verbatim, since they cannot be regenerated, and for the quotes of a
+/// previous summary to be kept.
+pub const DEFAULT_SUMMARY_PROMPT: &str = "You are summarizing the earlier part of a conversation between a user and an AI agent. The agent will continue working from your summary alone: it will not see the original messages.\n\n\
+Write a summary that lets the agent resume without loss, in these sections:\n\n\
+1. User requests \u{2014} Quote every request, instruction, correction and constraint the user gave, VERBATIM, in order, inside quotation marks. Never paraphrase them: they cannot be regenerated. Keep decisions the user made and anything they said to remember or avoid.\n\
+2. Current state \u{2014} What has been done, what is in progress, and the exact next step.\n\
+3. Findings \u{2014} Facts established (results, identifiers, names, values) that later steps depend on. Keep exact values; drop exploration that led nowhere.\n\
+4. Open items \u{2014} Unresolved questions, failures not yet understood, pending decisions.\n\n\
+Rules:\n\
+- Facts only. Do not invent, infer intent, or add advice.\n\
+- Keep tool results only as far as they changed the state or a decision; do not copy raw output.\n\
+- If a previous summary appears in the text, fold it in and keep its verbatim user quotes.\n\
+- Be concise; omit pleasantries and narration. Respond with the summary only.";
+
+/// Prompt to give to the summarizer: the override of the agent or of the host when it is not blank, otherwise
+/// [`DEFAULT_SUMMARY_PROMPT`].
+#[must_use]
+pub fn summary_prompt(custom: Option<&str>) -> &str {
+    match custom {
+        Some(text) if !text.trim().is_empty() => text,
+        _ => DEFAULT_SUMMARY_PROMPT,
+    }
+}
+
 /// Produces the summary of a session. The host implements it, usually with a model call: the crate provides no
 /// concrete summarizer. The returned future is `Send`.
 pub trait Summarizer: Send + Sync {
@@ -159,7 +185,9 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{CompactionStrategy as _, DefaultStrategy, Digest, Summarizer};
+    use super::{
+        CompactionStrategy as _, DEFAULT_SUMMARY_PROMPT, DefaultStrategy, Digest, Summarizer, summary_prompt,
+    };
     use crate::context::{ContextError, ContextResult, ReplayMode};
     use crate::session::{BoundaryKind, History, Message, Reasoning, ToolCall};
 
@@ -443,6 +471,74 @@ mod tests {
         assert_eq!(
             history, before,
             "the history given is unchanged after a successful compaction"
+        );
+    }
+
+    // Scenario: the default prompt demands verbatim quotation.
+    #[test]
+    fn default_prompt_demands_verbatim_quotation() {
+        let prompt = DEFAULT_SUMMARY_PROMPT;
+        assert!(
+            prompt.contains("VERBATIM"),
+            "the prompt demands verbatim quotation"
+        );
+        for section in ["User requests", "Current state", "Findings", "Open items"] {
+            assert!(
+                prompt.contains(section),
+                "the prompt names the section `{section}`"
+            );
+        }
+        for separation in [
+            "original messages.\n\nWrite a summary",
+            "in these sections:\n\n1. User requests",
+            "pending decisions.\n\nRules:",
+        ] {
+            assert!(
+                prompt.contains(separation),
+                "the prompt has a blank line at {separation:?}"
+            );
+        }
+        for consecutive in [
+            "\n2. Current state",
+            "\n3. Findings",
+            "\n4. Open items",
+            "\n- Facts only",
+        ] {
+            assert!(
+                prompt.contains(consecutive) && !prompt.contains(&format!("\n{consecutive}")),
+                "the line of {consecutive:?} follows the previous line without a blank line"
+            );
+        }
+        assert!(
+            prompt.contains(
+                "If a previous summary appears in the text, fold it in and keep its verbatim user quotes."
+            ),
+            "the prompt tells the summarizer to keep the verbatim quotes of a previous summary"
+        );
+    }
+
+    // Scenario: the override replaces the default, a blank override does not.
+    #[test]
+    fn override_replaces_the_default_but_a_blank_one_does_not() {
+        assert_eq!(
+            summary_prompt(Some("custom")),
+            "custom",
+            "a non-blank override is used"
+        );
+        assert_eq!(
+            summary_prompt(Some("")),
+            DEFAULT_SUMMARY_PROMPT,
+            "an empty override falls back to the default prompt"
+        );
+        assert_eq!(
+            summary_prompt(Some("   ")),
+            DEFAULT_SUMMARY_PROMPT,
+            "a blank override falls back to the default prompt"
+        );
+        assert_eq!(
+            summary_prompt(None),
+            DEFAULT_SUMMARY_PROMPT,
+            "no override gives the default prompt"
         );
     }
 }

@@ -317,9 +317,9 @@ mod tests {
     use crate::clock::{ManualClock, Timestamp};
     use crate::context::{Budget, ContextResult, DefaultStrategy, Digest, ReplayMode, Summarizer};
     use crate::delegation::{
-        DEFAULT_CORRECTIONS, DelegationError, DelegationResult, EventHub, InferenceLimiter, LaunchRequest,
-        LocalCounter, RequestCounter, ResultCollector, RunRecord, RunRegistry, SubagentLauncher,
-        SubagentOutcome, SubagentStatus, run_batch,
+        DEFAULT_BATCH_MAX_TURNS, DEFAULT_CORRECTIONS, DelegationError, DelegationResult, EventHub,
+        InferenceLimiter, LaunchRequest, LocalCounter, RequestCounter, ResultCollector, RunRecord,
+        RunRegistry, SubagentLauncher, SubagentOutcome, SubagentStatus, run_batch,
     };
     use crate::runtime::{RHAI_PAD_TOOL, TurnConfig, TurnRunner};
     use crate::scratchpad::{GrantedModule, Grants, Scratchpad, ScratchpadEngine, ScratchpadLimits};
@@ -548,7 +548,14 @@ mod tests {
                     seen,
                 };
                 let mut runner = batch_runner(request.session().as_str(), model, grants);
-                run_batch(&mut runner, request.task(), request.collector(), request.cancel()).await
+                run_batch(
+                    &mut runner,
+                    request.task(),
+                    request.collector(),
+                    request.cancel(),
+                    DEFAULT_BATCH_MAX_TURNS,
+                )
+                .await
             }
         }
     }

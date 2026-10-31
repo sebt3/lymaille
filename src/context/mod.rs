@@ -10,5 +10,7 @@ mod usage;
 pub use budget::Budget;
 pub use error::{ContextError, ContextResult};
 pub use replay::{ReplayMode, replayed_reasoning};
-pub use strategy::{CompactionStrategy, DefaultStrategy, Digest, Summarizer};
+pub use strategy::{
+    CompactionStrategy, DEFAULT_SUMMARY_PROMPT, DefaultStrategy, Digest, Summarizer, summary_prompt,
+};
 pub use usage::{UsageTracker, estimate_tokens};

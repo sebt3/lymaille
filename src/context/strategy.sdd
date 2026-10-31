@@ -12,16 +12,22 @@ Exposes:
   @CompactionStrategy
   @DefaultStrategy
   @Digest
+  @DEFAULT_SUMMARY_PROMPT
+  @summary_prompt
 
 Accepts:
   @Summarizer::summarize: un texte de transcription (la session à résumer, raisonnement rejoué compris) et, optionnellement, le digest.
   @CompactionStrategy::compact: l'historique courant (@History) et le @Digest.
+  @summary_prompt: un texte de surcharge optionnel (fourni par l'agent ou l'hôte).
   @Digest::new: le nombre de tâches ouvertes et le nombre de Memory.
 
 Returns:
   @Summarizer::summarize: le texte du résumé.
   @CompactionStrategy::compact: les messages qui ouvrent le nouveau segment, dans l'ordre : une frontière `Compaction` puis le résumé.
   @Digest::render: une ligne de texte anglais qui donne les deux nombres sans aucun contenu de todo ni de Memory.
+
+  @DEFAULT_SUMMARY_PROMPT: le prompt de résumé par défaut (constante de texte anglais), à donner au résumeur de l'hôte.
+  @summary_prompt: la surcharge si elle n'est pas vide ni blanche, sinon @DEFAULT_SUMMARY_PROMPT.
 
 Raises:
   @ContextError::PendingToolCall: l'historique se termine par un appel d'outil sans résultat.
@@ -37,6 +43,18 @@ Must:
   Aucune compaction ne tombe entre un appel d'outil et son résultat : un historique avec appel en attente est refusé avant tout appel au résumeur.
   @DefaultStrategy ne modifie pas l'historique reçu ; elle rend les nouveaux messages, l'appelant remplace l'historique.
   La compaction ne touche ni au scratchpad, ni à la todo, ni aux Memory : ces états ne sont pas des paramètres de la stratégie.
+  @DEFAULT_SUMMARY_PROMPT est exactement le texte ci-dessous, en anglais puisqu'il parle au résumeur. Il impose de citer textuellement les demandes de l'utilisateur, seule donnée non régénérable, de reprendre les citations d'un résumé précédent, et de ne rien inventer. La librairie n'appelle pas le résumeur : l'hôte s'en sert en construisant son @Summarizer ; @summary_prompt applique la surcharge de l'agent ou de l'hôte. Prompt de résumé par défaut décidé le 2026-10-27, texte validé le 2026-10-31 (le format de spec n'admet pas de ligne vide dans une entrée ; le texte porte une ligne vide, non écrite ci-dessous, avant « Write a summary », avant « 1. User requests » et avant « Rules: ») :
+    You are summarizing the earlier part of a conversation between a user and an AI agent. The agent will continue working from your summary alone: it will not see the original messages.
+    Write a summary that lets the agent resume without loss, in these sections:
+    1. User requests — Quote every request, instruction, correction and constraint the user gave, VERBATIM, in order, inside quotation marks. Never paraphrase them: they cannot be regenerated. Keep decisions the user made and anything they said to remember or avoid.
+    2. Current state — What has been done, what is in progress, and the exact next step.
+    3. Findings — Facts established (results, identifiers, names, values) that later steps depend on. Keep exact values; drop exploration that led nowhere.
+    4. Open items — Unresolved questions, failures not yet understood, pending decisions.
+    Rules:
+    - Facts only. Do not invent, infer intent, or add advice.
+    - Keep tool results only as far as they changed the state or a decision; do not copy raw output.
+    - If a previous summary appears in the text, fold it in and keep its verbatim user quotes.
+    - Be concise; omit pleasantries and narration. Respond with the summary only.
 
 Depends on:
   ./error.sdd
@@ -79,6 +97,16 @@ Scenario: l'échec du résumeur est signalé
   When compact est appelé
   Then il échoue avec Summarizer et l'historique donné est inchangé
 
+Scenario: le prompt par défaut impose la citation textuelle
+  Given @DEFAULT_SUMMARY_PROMPT
+  When on le lit
+  Then il contient `VERBATIM`, les quatre sections `User requests`, `Current state`, `Findings` et `Open items`, et la consigne de reprendre les citations d'un résumé précédent
+
+Scenario: la surcharge remplace le défaut, une surcharge vide non
+  Given une surcharge `custom`, puis `` et `   `, puis aucune
+  When @summary_prompt est appelé
+  Then il rend `custom` pour la première, et @DEFAULT_SUMMARY_PROMPT pour les trois autres
+
 Tasks:
   [x] #1 Tests (résumeur simulé) puis implémentation.
   [x] #4 Rendre les appels d'outil et le nom de l'outil de chaque résultat dans la transcription, et le Scenario « les appels d'outils et les noms d'outils sont dans la transcription » (défaut relevé au rapport du lot F2).
@@ -88,3 +116,4 @@ Tasks:
   [x] #2 Le rôle du message de résumé (utilisateur) et son gabarit (préambule) sont posés ici ; le prompt de résumé par défaut (citation verbatim des demandes de l'utilisateur, surchargeable) est décidé le 2026-10-27, voir ./context.sdd.
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
   [x] #3 Décidé le 2026-10-27 : le résumeur reçoit du texte et non des messages structurés.
+  [x] #7 @DEFAULT_SUMMARY_PROMPT et @summary_prompt (lot P3, texte validé le 2026-10-31) : tests puis implémentation ; clôt ./context.sdd #3 (reste le TBD de l'essai de bout en bout du rejeu du raisonnement, qui dépend de l'adaptateur `rig`).

@@ -27,8 +27,8 @@ const SUBAGENT_SOURCE: &str = "subagent";
 /// Name of the notice sent when a run is over, in the source `subagent`.
 const ENDED: &str = "ended";
 
-/// Number of turns a batch run may take without an accepted result (`agent-sessions/delegation#FR-4`).
-const BATCH_MAX_TURNS: u32 = 8;
+/// Default number of turns a batch run may take without an accepted result (`agent-sessions/delegation#FR-4`).
+pub const DEFAULT_BATCH_MAX_TURNS: u32 = 8;
 
 /// Fixed message given to a batch sub-agent whose turn ended without an accepted result.
 const REMINDER: &str = "No result has been accepted yet. Submit your result with the result::submit function; corrections are made in this same run.";
@@ -785,8 +785,8 @@ fn fail(collector: &ResultCollector, reason: &str) -> DelegationResult<()> {
 ///
 /// The first message of the sub-agent is `task`. After each turn that leaves the collector unconcluded, the fixed reminder
 /// asks for the result again, in the same run. The run stops when the collector is concluded, when a turn fails or is
-/// cancelled, or after `BATCH_MAX_TURNS` turns without a result. The outcome is the one of the collector: `Valid` needs
-/// an accepted result.
+/// cancelled, or after `max_turns` turns without a result. `max_turns` of `0` is treated as `1`;
+/// [`DEFAULT_BATCH_MAX_TURNS`] is the usual value. The outcome is the one of the collector: `Valid` needs an accepted result.
 ///
 /// # Errors
 ///
@@ -796,6 +796,7 @@ pub async fn run_batch<P, C, S>(
     task: &str,
     collector: &ResultCollector,
     cancel: &CancelHandle,
+    max_turns: u32,
 ) -> DelegationResult<SubagentOutcome>
 where
     P: InferenceProvider,
@@ -803,7 +804,7 @@ where
     S: SessionStore,
 {
     let mut message: &str = task;
-    for _turn in 0..BATCH_MAX_TURNS {
+    for _turn in 0..max_turns.max(1) {
         match runner
             .run_turn(message, cancel)
             .await
@@ -841,8 +842,9 @@ mod tests {
     use tokio::sync::Notify;
 
     use super::{
-        INTERRUPTED_REASON, LAUNCH_FAILED_REASON, LaunchRequest, NO_RESULT_IN_TURNS_REASON, NO_RESULT_REASON,
-        REMINDER, RunProgress, RunRecord, RunRegistry, SubagentLauncher, run_batch,
+        DEFAULT_BATCH_MAX_TURNS, INTERRUPTED_REASON, LAUNCH_FAILED_REASON, LaunchRequest,
+        NO_RESULT_IN_TURNS_REASON, NO_RESULT_REASON, REMINDER, RunProgress, RunRecord, RunRegistry,
+        SubagentLauncher, run_batch,
     };
     use super::{Normalized, resolve};
     use crate::agents::{
@@ -2744,9 +2746,15 @@ mod tests {
             probe: Arc::clone(&probe),
         };
         let mut runner = batch_runner("sub-batch_accepts_the_corrected_result_in_the_same_run", provider);
-        let outcome = run_batch(&mut runner, "the task", &collector, &CancelHandle::new())
-            .await
-            .expect("the batch runs");
+        let outcome = run_batch(
+            &mut runner,
+            "the task",
+            &collector,
+            &CancelHandle::new(),
+            DEFAULT_BATCH_MAX_TURNS,
+        )
+        .await
+        .expect("the batch runs");
         assert_eq!(
             outcome.status(),
             SubagentStatus::Valid,
@@ -2792,9 +2800,15 @@ mod tests {
             probe: Arc::clone(&probe),
         };
         let mut runner = batch_runner("sub-batch_fails_after_the_turn_limit_without_result", provider);
-        let outcome = run_batch(&mut runner, "the task", &collector, &CancelHandle::new())
-            .await
-            .expect("the batch runs");
+        let outcome = run_batch(
+            &mut runner,
+            "the task",
+            &collector,
+            &CancelHandle::new(),
+            DEFAULT_BATCH_MAX_TURNS,
+        )
+        .await
+        .expect("the batch runs");
         assert_eq!(
             outcome.status(),
             SubagentStatus::Failed,
@@ -2823,9 +2837,15 @@ mod tests {
             probe: Arc::clone(&probe),
         };
         let mut runner = batch_runner("sub-batch_stops_when_a_turn_fails", provider);
-        let outcome = run_batch(&mut runner, "the task", &collector, &CancelHandle::new())
-            .await
-            .expect("the batch runs");
+        let outcome = run_batch(
+            &mut runner,
+            "the task",
+            &collector,
+            &CancelHandle::new(),
+            DEFAULT_BATCH_MAX_TURNS,
+        )
+        .await
+        .expect("the batch runs");
         assert_eq!(
             outcome.status(),
             SubagentStatus::Failed,
@@ -2850,9 +2870,15 @@ mod tests {
         let mut runner = batch_runner("sub-batch_ends_as_cancelled_when_its_run_is_cancelled", provider);
         let cancel = CancelHandle::new();
         cancel.cancel();
-        let outcome = run_batch(&mut runner, "the task", &collector, &cancel)
-            .await
-            .expect("the batch runs");
+        let outcome = run_batch(
+            &mut runner,
+            "the task",
+            &collector,
+            &cancel,
+            DEFAULT_BATCH_MAX_TURNS,
+        )
+        .await
+        .expect("the batch runs");
         assert_eq!(
             outcome.status(),
             SubagentStatus::Cancelled,
@@ -2863,5 +2889,46 @@ mod tests {
             0,
             "the cancelled run makes no model call"
         );
+    }
+
+    // Scenario: le nombre maximal de tours d'un run batch est un paramètre
+    #[tokio::test]
+    async fn batch_turn_limit_is_a_parameter() {
+        for (max_turns, expected_calls) in [(2u32, 2usize), (0, 1)] {
+            let collector = batch_collector();
+            let probe = Arc::new(Probe::default());
+            let provider = Batch {
+                collector: Arc::clone(&collector),
+                probe: Arc::clone(&probe),
+            };
+            let mut runner = batch_runner(
+                &format!("sub-batch_turn_limit_is_a_parameter-{max_turns}"),
+                provider,
+            );
+            let outcome = run_batch(
+                &mut runner,
+                "the task",
+                &collector,
+                &CancelHandle::new(),
+                max_turns,
+            )
+            .await
+            .expect("the batch runs");
+            assert_eq!(
+                outcome.status(),
+                SubagentStatus::Failed,
+                "without a result the run is Failed (max_turns {max_turns})"
+            );
+            assert_eq!(
+                outcome.reason(),
+                Some(NO_RESULT_IN_TURNS_REASON),
+                "the reason names the turn limit (max_turns {max_turns})"
+            );
+            assert_eq!(
+                probe.calls.load(Ordering::SeqCst),
+                expected_calls,
+                "max_turns {max_turns} gives {expected_calls} model call(s); 0 is treated as 1"
+            );
+        }
     }
 }

@@ -15,6 +15,9 @@ pub use capacity::{InferenceLimiter, LocalCounter, Permit, RequestCounter, annou
 pub use error::{DelegationError, DelegationResult};
 pub use module::{MainAgent, delegate_module, result_module};
 pub use result::{DEFAULT_CORRECTIONS, ResultCollector, SubagentOutcome, SubagentStatus, Submission};
-pub use run::{LaunchRequest, RunHandle, RunProgress, RunRecord, RunRegistry, SubagentLauncher, run_batch};
+pub use run::{
+    DEFAULT_BATCH_MAX_TURNS, LaunchRequest, RunHandle, RunProgress, RunRecord, RunRegistry, SubagentLauncher,
+    run_batch,
+};
 pub use sources::{BUILTIN_SOURCES, EventHub, EventSource, Timer, TimerKind, TimerSource, WatchEvent};
 pub use watcher::{Notification, Triggered, Watcher, WatcherAction, WatcherSet};
