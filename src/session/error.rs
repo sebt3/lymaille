@@ -38,6 +38,13 @@ pub enum SessionError {
     /// A parent session was set on a session that is not of the sub-agent nature. Carries the session identifier.
     #[error("a parent session can only be set on a sub-agent session, not on session {0}")]
     NotSubSession(SessionId),
+    /// A native tool cannot be registered: its name is `rhai_pad`, or a native tool of this name is already registered.
+    /// Carries the name of the refused tool, which the host chose, never a value of the session.
+    #[error("invalid native tool `{name}`: its name is reserved or already registered")]
+    InvalidNativeTool {
+        /// Name of the refused tool.
+        name: String,
+    },
 }
 
 /// Result of the session module.
@@ -86,6 +93,12 @@ mod tests {
             (
                 SessionError::NotConfigSession(session),
                 "an inspection target can only be set on a configuration session, not on session s-1",
+            ),
+            (
+                SessionError::InvalidNativeTool {
+                    name: "rhai_pad".to_owned(),
+                },
+                "invalid native tool `rhai_pad`: its name is reserved or already registered",
             ),
         ];
         for (error, expected) in cases {

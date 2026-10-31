@@ -18,6 +18,7 @@ References:
   ../context/usage.sdd
   ../agents/inference.sdd
   ../scratchpad/run.sdd
+  ../session/native_tool.sdd
 
 Exposes:
   @TurnRunner
@@ -29,6 +30,7 @@ Exposes:
 Accepts:
   @TurnConfig::new: la @Clock partagée, le @Redactor, un @EventSink partagé, un @CancelHandle racine et la @Budget de la session ; constructeurs chaînés : `with_overrun` (durée après laquelle `Overrun` est émis, jamais d'interruption), `with_max_steps` (nombre maximal d'appels au modèle dans un tour, 200 par défaut), `with_agent` (nom de l'agent pour l'audit).
   @TurnRunner::new: un fournisseur d'inférence (@InferenceProvider, générique), une stratégie de compaction (@CompactionStrategy, générique), le @ResolvedProfile, le @SegmentContext (prompt système rendu et définitions des tools natifs), un @Scratchpad, un @SessionStore, un @SessionState de départ et une @TurnConfig.
+  @TurnRunner::with_native_tool: `&mut self` et un `Arc<dyn NativeTool>` (../session/native_tool.sdd) ; rend `Result<&mut Self, SessionError>`, chaînable avec `?` ; refuse le nom `rhai_pad` et un nom déjà enregistré par @SessionError::InvalidNativeTool, et le runner reste utilisable après un refus (décision du 2026-10-31).
   @TurnRunner::run_turn: le texte du message d'entrée et un @CancelHandle propre au tour ; asynchrone.
   @TurnRunner::inbox: aucun argument ; rend le @UserInbox de la session.
   @UserInbox::send: un texte ; ne bloque pas.
@@ -56,6 +58,9 @@ Must:
   L'annulation (handle du tour ou handle racine) est honorée avant chaque requête, pendant l'inférence (le futur est abandonné) et pendant un script (le @CancelHandle du run) ; l'issue est `Cancelled` et l'historique garde un état valide (aucun appel d'outil sans résultat).
   En fin de tour : les signaux du tour (@RunSignals) portent l'issue, le nombre d'erreurs Rhai et de corrections ; l'état (historique, segments, variables et fonctions du pad, compteurs de tokens) est écrit par @SessionStore::save.
   Aucun secret : réponses, erreurs d'inférence et sorties de script passent par le @Redactor avant l'historique, les événements et le modèle ; une erreur du modèle n'est jamais copiée dans l'historique.
+
+  Appel d'un tool natif enregistré par `with_native_tool` : la boucle l'appelle par son nom avec les arguments du modèle, sans passer par le scratchpad ; le texte rendu (ou l'erreur) est masqué par le @Redactor, borné par le plafond de rendu de la @Budget (`render_cap_chars`), puis ajouté à l'historique comme tout résultat d'outil. Un nom ni `rhai_pad` ni enregistré rend toujours un résultat d'erreur « unknown tool ». La boucle de tour ne dépend pas de `toolsets` : `skill` y entre par ce trait.
+  Les définitions que la requête envoie sont celles du @SegmentContext, assemblées par l'hôte à partir de @rhai_pad_definition (./definition.sdd) et de la définition de chaque tool natif ; la boucle ne les fabrique pas.
 
 Must not:
   Lire l'horloge système ou dormir en dehors de @Clock et de @CancelHandle::sleep ; ouvrir un fichier ou un processus.
@@ -157,9 +162,25 @@ Scenario: persistance en fin de tour
   When l'état est rechargé par identifiant
   Then il contient l'historique, les variables et les fonctions du pad du tour
 
+Scenario: un tool natif enregistré est appelé sans scratchpad
+  Given un tool natif de test `echo` enregistré, et un fournisseur scripté qui l'appelle avec `{"text": "a"}`
+  When le tour s'exécute
+  Then le résultat `a` est dans l'historique, aucun script n'a été exécuté, et le modèle reçoit la réponse finale
+
+Scenario: un tool natif ne rend jamais un secret déclaré
+  Given un tool natif dont la sortie contient un secret déclaré au @Redactor
+  When il est appelé
+  Then ni l'historique, ni les événements, ni le modèle ne reçoivent le secret
+
+Scenario: l'enregistrement d'un nom réservé ou en double est refusé
+  Given un tool natif nommé `rhai_pad`, puis deux tools natifs de même nom
+  When ils sont enregistrés
+  Then chaque enregistrement fautif est refusé et le premier tool valide reste appelable
+
 Tasks:
   [x] #1 Tests puis implémentation (lot R1), validé le 2026-10-30.
   [x] #2 Décidé le 2026-10-30 par le développeur principal : un tool inconnu rend un résultat d'erreur au modèle ; le tool `skill` (../toolsets/native.sdd, non livré) s'y branchera par un point d'extension ajouté avec ce domaine. À confirmer.
   [x] #3 Décidé le 2026-10-30 par le développeur principal : plafond d'itérations par tour de 200 par défaut (`agent-sessions/session#FR-4` ne fixe aucune limite ; sans plafond, un modèle qui boucle sur un outil ne s'arrêterait jamais). À confirmer.
   [x] #4 Décidé le 2026-10-30 par le développeur principal : le report du masquage des fragments (secret coupé entre deux fragments, ../session/event.sdd #6 et #7) retient les `longest_secret_len - 1` derniers caractères jusqu'au fragment suivant ou à la fin de la réponse. À confirmer.
   [x] #5 Décidé le 2026-10-30 par le développeur principal : `Overrun` est vérifié à la frontière d'itération et non par une minuterie concurrente, faute d'horloge asynchrone injectée ; un appel unique plus long que le délai le déclenche donc après son retour. À confirmer.
+  [x] #6 `with_native_tool` et le routage des tools natifs (point d'extension de #2) : tests puis implémentation, lot P1 ; décision d'architecture posée le 2026-10-31, `runtime` ne dépendant pas de `toolsets`, le trait est dans `session` (./native_tool.sdd).

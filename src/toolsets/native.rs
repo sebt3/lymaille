@@ -8,11 +8,11 @@ use std::sync::Arc;
 use rhai::serde::to_dynamic;
 use rhai::{Dynamic, Engine as RhaiEngine, EvalAltResult, FuncRegistration, Module, Shared};
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::{ResolvedContext, SessionMeta, Skill, ToolsetsError, ToolsetsResult, render_skill};
 use crate::scratchpad::{ScratchpadLimits, ScratchpadResult, limits_notice, truncate_middle};
-use crate::session::Redactor;
+use crate::session::{NativeTool, Redactor};
 
 /// Name of the built-in skill that teaches the `rhai_pad` tool.
 const BUILTIN_NAME: &str = "rhai-pad";
@@ -20,24 +20,62 @@ const BUILTIN_NAME: &str = "rhai-pad";
 /// Description of the built-in skill, as the model sees it in the list of skills.
 const BUILTIN_DESCRIPTION: &str = "Run a Rhai script in this session's scratchpad, and discover its functions, modules, toolsets, skills and limits.";
 
-/// Text of the built-in skill before the sandbox notice, in English since it speaks to the model. Each claim is checked by a
-/// test that runs it in the scratchpad (`built_in_claims_hold_in_the_scratchpad`).
-const BUILTIN_BODY: &str = "Use `rhai_pad` to run one Rhai script in this session's scratchpad. The value of the last statement is the result. \
-Variables declared with `let` persist to the next run of this session. Call the functions of a granted module as `module::function(arguments)`. \
-Text printed with `print` or `debug` comes back before the result.
+/// Text of the built-in skill before the examples, in English since it speaks to the model. Each claim is checked by a test
+/// that runs it in the scratchpad (`built_in_claims_hold_in_the_scratchpad`, `built_in_rhai_digest_and_final_value_claims_hold`).
+const BUILTIN_BODY: &str = "Use `rhai_pad` to run one Rhai script in this session's scratchpad.
+
+How a call works:
+- The result is the value of the last statement; a final `;` does not hide it (`1 + 1;` gives 2). A `let`, a loop, an `if` without `else` that is not taken, a `fn` definition and `print(...)` give `()`: end the script with the variable you want to read.
+- `let` variables and `fn` definitions persist to the next call of this session.
+- Text printed with `print` comes back before the result.
+- Call the functions of a granted module as `module::function(arguments)`.
+- An error comes back as text: fix the script and call again.
 
 Discover what is available before you write a script:
-- `vars()`: the variables of the scope at the start of this run, with their type and a preview of their value.
-- `modules()`: the granted modules and the groups of built-in functions (for example `pure`, `format` and `host`), each with its `kind` (`module`, `core`, `format` or `host`) and its number of functions.
-- `functions()`: every function you can call, with its signature and documentation. `functions(\"global\")` lists the built-in groups, `functions(\"script\")` the functions you defined in this session, and `functions(\"name\")` the functions of one granted module; any other name is an error.
-- `toolsets()`: the granted toolsets, with their descriptions.
+- `vars()`: the variables of the scope at the start of this run, as maps `#{name, type, preview}`.
+- `modules()`: the granted modules and the groups of built-in functions (for example `pure`, `format` and `host`), as maps `#{name, kind, functions}`; `kind` is `module`, `core`, `format` or `host` and `functions` is the number of functions.
+- `functions()`: every function you can call, as maps `#{path, signature, doc, origin}`. `functions(\"global\")` lists the built-in groups, `functions(\"script\")` the functions you defined in this session, and `functions(\"name\")` the functions of one granted module; any other name is an error.
+- `toolsets()`: the granted toolsets, as maps `#{name, description}`.
 - `skills()`: the granted skills, with their descriptions. Read the text of a skill with the `skill` tool, not with a script.
-- `find(\"words\")`: the functions, granted modules, toolsets and skills that hold every word of the query, in any case, in their name, path, signature, documentation or description. The exact names come first; at most 50 results are returned.
+- `find(\"words\")`: the functions, granted modules, toolsets and skills that hold every word of the query, in any case, in their name, path, signature, documentation or description, as maps `#{kind, name, path, text}`. The exact names come first; at most 50 results are returned.
 - `rules()`: the sandbox rules and the limits.
 
-`session_context()` returns a copy of the toolset context of this session: `params` holds the shared parameters, `toolsets` holds the resolved parameters of each toolset, and `roles` holds the names of the bound roles. Changing the copy does not change the context.
+`session_context()` returns a copy of the toolset context of this session: `params` holds the shared parameters, `toolsets` holds the resolved parameters of each toolset, and `roles` holds the names of the bound roles. Changing the copy does not change the context. A `fn` can call it too.
+
+Rhai in brief (`functions()` and `find(\"words\")` tell the rest):
+- `let x = 1;` declares, `x = x + 1;` assigns; an unknown variable is an error.
+- Strings: `\"text\"`, or backticks with interpolation: `pod-${name}`.
+- Arrays: `[1, 2]`, `a[0]`, `a.len()`, `a.push(3)`, `a.map(|v| v * 2)`, `a.filter(|v| v > 1)`.
+- Maps: `#{name: \"web\", n: 1}`, `m.name` or `m[\"n\"]`, `m.keys()`.
+- Closures: `|v| expr` sees the variables of the scope and may call your `fn`; it is lost when the session is restored.
+- Loops: `for v in list { }`, `for i in 0..3 { }`, `while cond { }`.
+- Functions: `fn add(a, b) { a + b }` returns its last expression and cannot see scope variables.
+- Errors: `try { } catch (e) { }` is a statement, not a value: assign inside it (`msg = e;`) and read the variable after.
+- `()` is the empty value.
 
 ";
+
+/// First example call of the built-in skill: a variable and a `fn`.
+const FIRST_EXAMPLE: &str = "let names = [\"web\", \"api\"];
+fn label(name) { `pod-${name}` }
+names.map(|n| label(n))";
+
+/// Result of the first example call, as the skill states it.
+const FIRST_RESULT: &str = "[\"pod-web\",\"pod-api\"]";
+
+/// Second example call of the built-in skill: it uses the variable and the `fn` of the first.
+const SECOND_EXAMPLE: &str = "names.push(\"db\");
+let labels = names.map(|n| label(n));
+labels";
+
+/// Result of the second example call, as the skill states it.
+const SECOND_RESULT: &str = "[\"pod-web\",\"pod-api\",\"pod-db\"]";
+
+/// Name of the `skill` tool.
+const SKILL_TOOL: &str = "skill";
+
+/// Description of the `skill` tool, read by the model. It is in English because it speaks to the model.
+const SKILL_TOOL_DESCRIPTION: &str = "Read the skills granted to this session. With no argument, lists them (name and description). With `name`, returns the text of that skill; with `name` and `document`, one of its annex documents. Read `rhai-pad` first.";
 
 /// A granted skill as the `skill` tool holds it: the toolset it belongs to, when it has one, and the skill.
 #[derive(Debug)]
@@ -101,6 +139,10 @@ impl SkillTool {
     ///
     /// Returns [`ToolsetsError::InvalidSkill`] for an unknown skill or document, the message listing the existing names,
     /// and [`ToolsetsError::Template`] when a description or a body does not render.
+    #[expect(
+        clippy::same_name_method,
+        reason = "the typed call of the spec and the `NativeTool::call` of the turn loop share a name; the second delegates to the first"
+    )]
     pub fn call(&self, name: Option<&str>, document: Option<&str>) -> ToolsetsResult<String> {
         match (name, document) {
             (None, None) => self.list(),
@@ -256,6 +298,43 @@ fn masked(redactor: &Redactor, value: &Value) -> Value {
     }
 }
 
+/// Definition of the `skill` tool for the inference request.
+///
+/// It is a flat JSON object with `name`, `description` and `parameters`, the schema of an object whose properties `name`
+/// and `document` are strings, none of them required.
+///
+/// The value is constant: two calls give the same value.
+#[must_use]
+pub fn skill_definition() -> Value {
+    json!({
+        "name": SKILL_TOOL,
+        "description": SKILL_TOOL_DESCRIPTION,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Name of the skill to read."},
+                "document": {"type": "string", "description": "Name of an annex document of that skill."}
+            }
+        }
+    })
+}
+
+impl NativeTool for SkillTool {
+    fn name(&self) -> &str {
+        SKILL_TOOL
+    }
+
+    fn definition(&self) -> Value {
+        skill_definition()
+    }
+
+    fn call(&self, arguments: &Value) -> String {
+        let text = |key: &str| arguments.get(key).and_then(Value::as_str);
+        self.call(text("name"), text("document"))
+            .unwrap_or_else(|error| error.to_string())
+    }
+}
+
 /// Builds the built-in skill that teaches the `rhai_pad` tool.
 ///
 /// It covers the introspection and the limits of the scratchpad; its text cites the sandbox notice of `limits`.
@@ -265,7 +344,12 @@ fn masked(redactor: &Redactor, value: &Value) -> Value {
 /// Returns [`ToolsetsError::InvalidSkill`] or [`ToolsetsError::SkillTooLarge`] when the skill does not build, or when its
 /// text does not fit the render cap of `limits`.
 pub fn builtin_rhai_pad_skill(limits: &ScratchpadLimits) -> ToolsetsResult<Skill> {
-    let body = format!("{BUILTIN_BODY}{}", limits_notice(limits));
+    let body = format!(
+        "{BUILTIN_BODY}Example, first call:\n```\n{FIRST_EXAMPLE}\n```\nResult: {FIRST_RESULT}\n\n\
+         Example, second call (it uses the variable and the `fn` of the first):\n```\n{SECOND_EXAMPLE}\n```\n\
+         Result: {SECOND_RESULT}\n\n{}",
+        limits_notice(limits)
+    );
     let skill = Skill::new(BUILTIN_NAME.to_owned(), BUILTIN_DESCRIPTION.to_owned(), body)?;
     skill.check_size(u64::try_from(limits.render_cap_chars()).unwrap_or(u64::MAX))?;
     Ok(skill)
@@ -279,10 +363,15 @@ mod tests {
     use serde_json::json;
     use vynil_core::Semver;
 
-    use super::{SkillTool, builtin_rhai_pad_skill, session_context_registration};
+    use super::{
+        FIRST_EXAMPLE, FIRST_RESULT, SECOND_EXAMPLE, SECOND_RESULT, SkillTool, builtin_rhai_pad_skill,
+        session_context_registration, skill_definition,
+    };
     use crate::clock::{ManualClock, Timestamp};
-    use crate::scratchpad::{RunEnv, RunOutcome, RunStatus, Scratchpad, ScratchpadEngine, ScratchpadLimits};
-    use crate::session::{CancelHandle, Redactor};
+    use crate::scratchpad::{
+        GrantedSkill, RunEnv, RunOutcome, RunStatus, Scratchpad, ScratchpadEngine, ScratchpadLimits,
+    };
+    use crate::session::{CancelHandle, NativeTool, Redactor};
     use crate::toolsets::{
         ContextLevel, ResolvedContext, SessionMeta, Skill, Toolset, ToolsetContext, ToolsetsError, assemble,
     };
@@ -842,6 +931,243 @@ mod tests {
         assert!(
             !body.contains("contains the text"),
             "the search is not a plain substring: {body}"
+        );
+    }
+
+    // Scenario: skill appelé comme tool natif
+    #[test]
+    fn skill_is_called_as_a_native_tool() {
+        let tool = tool();
+        let native: &dyn NativeTool = &tool;
+        assert_eq!(native.name(), "skill", "the tool is called `skill`");
+        assert_eq!(
+            native.definition(),
+            skill_definition(),
+            "its definition is the canonical one"
+        );
+        let body = native.call(&json!({"name": "rhai-pad"}));
+        assert_eq!(
+            Some(body.as_str()),
+            tool.call(Some("rhai-pad"), None).ok().as_deref(),
+            "a name gives the rendered body"
+        );
+        let list = native.call(&json!({}));
+        assert!(
+            list.contains("- deploy: Deploy to prod") && list.contains("- rhai-pad:"),
+            "no argument gives the list: {list}"
+        );
+        let unknown = native.call(&json!({"name": "nope"}));
+        assert!(
+            unknown.contains("nope") && unknown.contains("deploy") && unknown.contains("rhai-pad"),
+            "an unknown name gives an error text that lists the existing skills: {unknown}"
+        );
+        let annex = native.call(&json!({"name": "deploy", "document": "queries"}));
+        assert_eq!(annex, "PromQL text", "a name and a document give the annex");
+    }
+
+    #[test]
+    fn skill_definition_is_a_flat_definition_with_the_canonical_description() {
+        let definition = skill_definition();
+        assert_eq!(definition["name"], json!("skill"));
+        assert_eq!(
+            definition["description"],
+            json!(
+                "Read the skills granted to this session. With no argument, lists them (name and description). With `name`, returns the text of that skill; with `name` and `document`, one of its annex documents. Read `rhai-pad` first."
+            ),
+            "the description is the one of the spec"
+        );
+        let parameters = &definition["parameters"];
+        assert_eq!(parameters["type"], json!("object"));
+        assert_eq!(parameters["properties"]["name"]["type"], json!("string"));
+        assert_eq!(parameters["properties"]["document"]["type"], json!("string"));
+        assert!(
+            parameters
+                .get("required")
+                .is_none_or(|required| required == &json!([])),
+            "no parameter is required: {parameters}"
+        );
+        assert_eq!(skill_definition(), definition, "the definition is constant");
+    }
+
+    // Scenario: les exemples du skill intégré s'exécutent
+    #[tokio::test(flavor = "multi_thread")]
+    async fn built_in_examples_run_one_after_the_other() {
+        let pad = pad(&[], &context());
+        let first = run(&pad, FIRST_EXAMPLE).await;
+        assert_eq!(
+            first.status(),
+            RunStatus::Ok,
+            "the first call runs: {}",
+            first.text()
+        );
+        assert_eq!(first.text().trim(), FIRST_RESULT, "the result the text announces");
+        let second = run(&pad, SECOND_EXAMPLE).await;
+        assert_eq!(
+            second.status(),
+            RunStatus::Ok,
+            "the second call runs: {}",
+            second.text()
+        );
+        assert_eq!(
+            second.text().trim(),
+            SECOND_RESULT,
+            "the result the text announces"
+        );
+        assert!(
+            SECOND_EXAMPLE.contains("names") && SECOND_EXAMPLE.contains("label("),
+            "the second call uses the variable and the `fn` of the first"
+        );
+        let body = builtin().body().to_owned();
+        for shown in [FIRST_EXAMPLE, FIRST_RESULT, SECOND_EXAMPLE, SECOND_RESULT] {
+            assert!(body.contains(shown), "the skill shows `{shown}`: {body}");
+        }
+        assert!(
+            FIRST_EXAMPLE.lines().count() <= 4 && SECOND_EXAMPLE.lines().count() <= 4,
+            "the examples are short"
+        );
+    }
+
+    // Scenario: chaque affirmation du skill intégré sur le scratchpad est vraie (valeur finale, abrégé de Rhai)
+    #[tokio::test(flavor = "multi_thread")]
+    async fn built_in_rhai_digest_and_final_value_claims_hold() {
+        let pad = pad(&[ops_toolset()], &context());
+        let claims = [
+            // variables
+            "let q = 4; q = q + 1; q == 5",
+            // strings and interpolation
+            "let who = \"pod\"; `a ${who}` == \"a pod\"",
+            // arrays
+            "let arr = [1, 2]; arr.push(3); arr[0] == 1 && arr.len() == 3",
+            "[1, 2, 3].map(|v| v * 2) == [2, 4, 6]",
+            "[1, 2, 3].filter(|v| v > 1) == [2, 3]",
+            // maps
+            "let m = #{name: \"web\", n: 1}; m.name == \"web\" && m[\"n\"] == 1 && m.keys().len() == 2",
+            // closures see the variables of the scope, and may call a fn
+            "let k = 10; [1, 2].map(|v| v + k) == [11, 12]",
+            "fn twice(n) { n * 2 } [1, 2].map(|v| twice(v)) == [2, 4]",
+            // loops
+            "let t = 0; for v in [1, 2, 3] { t += v; } for i in 0..3 { t += i; } t == 9",
+            "let w = 0; while w < 3 { w += 1; } w == 3",
+            // fn returns its last expression
+            "fn add(a, b) { a + b } add(1, 2) == 3",
+            // try / catch is a statement: keep the value in a variable
+            "let msg = \"\"; try { functions(\"nope\"); } catch (e) { msg = `failed: ${e}`; } msg.contains(\"failed\")",
+            "let kept = \"none\"; try { throw \"boom\"; } catch (e) { kept = e; } kept == \"boom\"",
+            // result shapes of the discovery functions
+            "modules().all(|e| \"name\" in e && \"kind\" in e && \"functions\" in e)",
+            "functions(\"ops\").all(|e| \"path\" in e && \"signature\" in e && \"doc\" in e && \"origin\" in e)",
+            "find(\"restart pod\").all(|e| \"kind\" in e && \"name\" in e && \"path\" in e && \"text\" in e)",
+            "find(\"restart pod\")[0].path == \"ops::restart_pod\"",
+            "toolsets().all(|e| \"name\" in e && \"description\" in e)",
+            "let seen = vars(); true",
+            // session_context() from a script and from a fn of the script
+            "session_context().params.cluster == \"prod\"",
+            "fn cluster() { session_context().params.cluster } cluster() == \"prod\"",
+            "session_context().roles.contains(\"k8s\") && session_context().toolsets.ops.region == \"us\"",
+        ];
+        let semicolon = run(&pad, "1 + 1;").await;
+        assert_eq!(
+            semicolon.text().trim(),
+            "2",
+            "a final `;` does not hide the value of the last statement"
+        );
+        for script in [
+            "let a = 1;",
+            "for i in 0..2 { }",
+            "if false { 1 }",
+            "fn unit() { 1 }",
+            "print(\"x\");",
+        ] {
+            let outcome = run(&pad, script).await;
+            assert!(
+                outcome.status() == RunStatus::Ok && outcome.text().trim_end().ends_with("()"),
+                "this statement gives `()`: {script}: {}",
+                outcome.text()
+            );
+        }
+        let mut failed = Vec::new();
+        for script in claims {
+            let outcome = run(&pad, script).await;
+            let held = outcome.status() == RunStatus::Ok && outcome.text().trim() == "true";
+            failed.extend((!held).then_some((script, outcome.text().to_owned())));
+        }
+        assert!(failed.is_empty(), "the claims that do not hold: {failed:#?}");
+        for script in ["unknown_variable = 3", "let i = 1; fn bad() { i + 1 } bad()"] {
+            let refused = run(&pad, script).await;
+            assert_ne!(refused.status(), RunStatus::Ok, "this call fails: {script}");
+        }
+    }
+
+    // Scenario: skill appelé comme tool natif (le skill rhai-pad est lisible par le tool, et ses affirmations sur le tool existent)
+    #[test]
+    fn rhai_pad_skill_is_readable_through_the_skill_tool_and_names_the_digest() {
+        let body = tool().call(Some("rhai-pad"), None).expect("the skill is read");
+        for expected in [
+            "session_context()",
+            "try {",
+            "catch (e)",
+            "`pod-${",
+            "#{",
+            "|v|",
+            "while",
+            "for ",
+            "functions()",
+            "find(",
+        ] {
+            assert!(body.contains(expected), "the skill names `{expected}`: {body}");
+        }
+    }
+
+    // Scenario: chaque affirmation du skill intégré sur le scratchpad est vraie (colonnes de `vars()`, `skills()`, appel de module, coupure du milieu)
+    #[tokio::test(flavor = "multi_thread")]
+    async fn built_in_claims_on_vars_skills_module_calls_and_truncation_hold() {
+        let limits = ScratchpadLimits::new().with_render_cap_chars(300);
+        let grants = assemble(&[ops_toolset()], &[], &BTreeMap::new(), &context(), &limits)
+            .into_grants()
+            .with_skill(
+                GrantedSkill::new("deploy", "Deploy to production", None).expect("a valid granted skill"),
+            )
+            .expect("the skill is granted");
+        let engine = ScratchpadEngine::builder(limits, grants)
+            .with_registration(session_context_registration(context(), Arc::new(Redactor::new())))
+            .build()
+            .expect("the engine builds");
+        let pad = Scratchpad::new(Arc::new(engine));
+        // `vars()`: columns `name`, `type` and `preview`, in the next run
+        let declared = run(&pad, "let n = 3; let s = \"hello\"; n").await;
+        assert_eq!(declared.status(), RunStatus::Ok, "{}", declared.text());
+        for claim in [
+            r#"vars().filter(|v| v.name == "n").map(|v| v.type + ":" + v.preview) == ["i64:3"]"#,
+            r#"vars().filter(|v| v.name == "s").map(|v| v.type + ":" + v.preview) == ["string:hello"]"#,
+            // `skills()`: name, description and toolset
+            r#"skills().map(|k| k.name + ":" + k.description) == ["deploy:Deploy to production"]"#,
+            "skills()[0].toolset == ()",
+            // `module::function(arguments)`
+            r#"ops::restart_pod("x") == "x""#,
+        ] {
+            assert!(holds(&pad, claim).await, "this claim does not hold: {claim}");
+        }
+        // the middle of a result over the render cap is replaced by a notice
+        let long = run(
+            &pad,
+            "let big = \"\"; for i in 0..200 { big += \"abcdefghij\"; } big",
+        )
+        .await;
+        let text = long.text();
+        assert!(text.starts_with("abcdefghij"), "the start is kept: {text}");
+        assert!(
+            text.contains("output truncated"),
+            "the notice replaces the middle: {text}"
+        );
+        assert!(
+            text.chars().count() <= 300,
+            "the output stays under the cap: {}",
+            text.chars().count()
+        );
+        assert!(
+            builtin()
+                .body()
+                .contains("the middle of a longer result is replaced by a notice")
         );
     }
 }

@@ -1,0 +1,38 @@
+Spec: native_tool
+
+Purpose:
+  Trait d'un tool natif que la boucle de tour peut appeler sans Rhai (le tool `skill`, `agent-sessions/toolsets#FR-18`), posé dans `session` pour que `runtime` et `toolsets` s'y rejoignent sans dépendre l'un de l'autre
+    (`agent-sessions/session#FR-4`, `agent-sessions#BO-2`).
+
+Owns:
+  ./native_tool.rs
+
+Exposes:
+  @NativeTool
+
+Accepts:
+  @NativeTool::name: aucun argument.
+  @NativeTool::definition: aucun argument.
+  @NativeTool::call: les arguments de l'appel, une valeur JSON.
+
+Returns:
+  @NativeTool::name: le nom du tool tel que le modèle l'appelle.
+  @NativeTool::definition: la définition du tool pour la requête d'inférence : un objet JSON `name`, `description`, `parameters` (schéma JSON), de forme plate comme celle de `rhai_pad`.
+  @NativeTool::call: le texte rendu au modèle, ou le texte d'une erreur que la boucle de tour rend au modèle comme résultat d'outil (jamais une panique).
+
+Must:
+  Le trait est synchrone, `Send` et `Sync` : un tool natif n'attend ni réseau ni disque.
+  Le texte rendu par `call` est déjà masqué par le @Redactor de la session par l'implémenteur ; la boucle de tour le masque encore, par défense en profondeur.
+  Le nom d'un tool natif ne peut pas être celui de `rhai_pad` : la boucle de tour refuse l'enregistrement (voir ../runtime/turn.sdd).
+  Aucune E/S, aucune panique.
+
+Depends on:
+  serde_json
+
+Scenario: un tool natif de test répond par son nom et sa définition
+  Given un double qui implémente @NativeTool
+  When sa définition est lue
+  Then elle porte `name`, `description` et `parameters`, et `name` vaut celui que rend `name()`
+
+Tasks:
+  [x] #1 Tests puis implémentation, déclaration dans ./mod.rs et ré-export dans ../lib.rs.

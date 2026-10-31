@@ -10,11 +10,13 @@ Owns:
 Exposes:
   @SkillTool
   @SkillTool::call
+  @skill_definition
   @session_context_registration
   @builtin_rhai_pad_skill
 
 Accepts:
   @SkillTool::new: les @Skill accordés (avec leur toolset), le skill intégré, un @ResolvedContext, un @SessionMeta, le plafond de rendu et le @Redactor de la session, partagé en `Arc<Redactor>` (décision du 2026-10-31, D-c).
+  @skill_definition: aucun argument.
   @SkillTool::call: aucun argument (liste), un nom (corps rendu) ou un nom et un nom de document (document annexe).
   @session_context_registration: un @ResolvedContext et le @Redactor de la session (`Arc<Redactor>`) ; rend une étape d'enregistrement (@EngineBuilder::with_registration, ../scratchpad/engine.sdd).
 
@@ -33,6 +35,9 @@ Must:
   Aucune panique, aucune E/S.
   Un secret déclaré au @Redactor de la session n'apparaît jamais dans un texte que `skill` rend (liste, corps, document) ni dans la copie que `session_context()` donne : les textes, les clés et les nombres qui contiennent le secret sont masqués (décision du 2026-10-31, D-c). Le @Redactor est partagé en `Arc` : ses secrets sont fixés avant la construction du registre et du tool ; un secret déclaré plus tard n'est pas vu.
   Le texte du skill intégré n'affirme que ce que le scratchpad fait : chaque affirmation est vérifiée en exécutant le script qu'elle décrit (`built_in_claims_hold_in_the_scratchpad`), y compris les groupes `pure`, `format` et `host` de `modules()`, `functions("global")`, `functions("script")`, `functions("<module>")`, et la recherche de `find` (tous les mots, cinquante résultats au plus).
+
+  @SkillTool implémente @NativeTool (../session/native_tool.sdd) : `name` rend `skill`, `definition` rend @skill_definition, `call` lit les arguments JSON `name` et `document` (tous deux optionnels) et rend le texte de `SkillTool::call`, l'erreur de skill inconnu comprise, comme texte d'erreur du résultat d'outil. @skill_definition rend la définition plate `name`, `description`, `parameters` (propriétés `name` et `document`, de type chaîne, aucune obligatoire) ; la `description` est, en anglais : `Read the skills granted to this session. With no argument, lists them (name and description). With `name`, returns the text of that skill; with `name` and `document`, one of its annex documents. Read `rhai-pad` first.`
+  Le corps du skill intégré `rhai-pad` (texte anglais) comprend, dans cet ordre : le fonctionnement d'un appel (valeur du dernier statement, état qui persiste) ; la découverte (`vars`, `modules`, `functions`, `toolsets`, `skills`, `find`, `rules`) ; `session_context()` ; un abrégé de Rhai d'une douzaine de lignes pour un modèle qui connaît Rhai approximativement (variables, chaînes à interpolation, tableaux, maps, closures (perdues à la restauration de session), boucles, `fn`, `try`/`catch`, `()`), qui renvoie à `functions()` et `find()` pour le reste ; un premier appel et un second appel d'exemple, le second utilisant une variable et une `fn` du premier ; le bloc @limits_notice. Chaque exemple et chaque affirmation de l'abrégé s'exécute dans un test (`built_in_claims_hold_in_the_scratchpad`), la sémantique du `;` final comprise : elle n'est écrite qu'après avoir été mesurée.
 
 Depends on:
   ./skill.sdd
@@ -100,6 +105,16 @@ Scenario: le texte du skill intégré décrit l'origine, le genre et la recherch
   When on le lit
   Then il nomme `functions("global")` et `functions("script")`, les groupes `pure`, `format` et `host`, la recherche par tous les mots et la limite de cinquante résultats
 
+Scenario: skill appelé comme tool natif
+  Given un @SkillTool et un appel JSON `{"name": "rhai-pad"}`, puis `{}`, puis `{"name": "nope"}`
+  When `call` du trait @NativeTool est appelé
+  Then le corps, la liste et le texte d'erreur qui nomme les skills existants sont rendus
+
+Scenario: les exemples du skill intégré s'exécutent
+  Given le premier et le second appel d'exemple du skill, et un scratchpad vide
+  When ils s'exécutent l'un après l'autre
+  Then le second voit la variable et la `fn` du premier, et chaque résultat annoncé par le texte se vérifie
+
 Tasks:
   [x] #1 Tests puis implémentation, vérifié le 2026-10-30.
       Livré le 2026-10-30 (implémentation, à valider par le développeur principal). Écarts et choix posés, à relire :
@@ -111,5 +126,6 @@ Tasks:
       - la liste sans argument rend aussi le corps de chaque skill (la description et le corps passent par le même rendu) : un corps qui ne se rend pas fait échouer la liste ;
       - @builtin_rhai_pad_skill refuse un texte qui dépasse le plafond de rendu (`SkillTooLarge`) ;
       - signatures : `SkillTool::new(granted: Vec<(String, Skill)>, builtin, context, session, cap_chars: usize)`, `call(name: Option<&str>, document: Option<&str>)`, `session_context_registration(context) -> impl FnOnce(&mut RhaiEngine)`, `builtin_rhai_pad_skill(limits) -> ToolsetsResult<Skill>`.
-  [?] #2 Texte exact du skill intégré sur `rhai_pad` : à rédiger avec le code ; le bloc @limits_notice de ../scratchpad/introspect.sdd est cité (`introspect.sdd` #6). Révisé le 2026-10-31 (correctif 7) : chaque affirmation est testée en l'exécutant ; la phrase « the host stops a runaway loop » ne vient pas de ce texte mais de `limits_notice` (../scratchpad/introspect.sdd, hors du périmètre de cette tâche) : à reformuler là-bas, ce que le modèle ne peut pas déclencher lui-même.
+  [x] #2 Texte exact du skill intégré sur `rhai_pad` : à rédiger avec le code ; le bloc @limits_notice de ../scratchpad/introspect.sdd est cité (`introspect.sdd` #6). Révisé le 2026-10-31 (correctif 7) : chaque affirmation est testée en l'exécutant ; la phrase « the host stops a runaway loop » ne vient pas de ce texte mais de `limits_notice` (../scratchpad/introspect.sdd, hors du périmètre de cette tâche) : à reformuler là-bas, ce que le modèle ne peut pas déclencher lui-même.
   [x] #3 Correctif du 2026-10-31 (validation indépendante, décision D-c) : `session_context()` et `skill` reçoivent le @Redactor de la session et masquent leur sortie (Scenarios « un secret déclaré … » ci-dessus) ; le constructeur de @SkillTool prend six paramètres, ce qui dépasse le seuil `too-many-arguments` du harnais : `#[expect(clippy::too_many_arguments)]` avec raison, à valider (un type public qui regrouperait les paramètres élargirait la surface publique). Tests : les textes du skill et la copie de session vus rouges avant correction ; les clés, les nombres et le texte du skill intégré ajoutés après, vus verts ; mutants manuels tués. En attente de validation par le validateur.
+  [x] #4 Lot P2 (décisions du 2026-10-31) : @SkillTool implémente @NativeTool, @skill_definition, réécriture du corps du skill intégré (abrégé de Rhai, deux appels d'exemple, nombres lisibles dans @limits_notice) ; clôt #2 avec ../scratchpad/introspect.sdd #7.

@@ -25,6 +25,7 @@ Structure:
   ./state.rs: état persisté
   ./store.rs: trait de stockage et stockage mémoire
   ./notice.rs: messages système de restauration
+  ./native_tool.rs: trait d'un tool natif appelé sans Rhai
 
 Owns:
   ./mod.rs
@@ -50,6 +51,7 @@ References:
   ./state.sdd
   ./store.sdd
   ./notice.sdd
+  ./native_tool.sdd
 
 Must:
   Ne réaliser aucune E/S : la persistance passe par @SessionStore, implémenté par l'hôte (`agent-sessions/session#FR-1`).

@@ -40,7 +40,7 @@ pub use modules::{
 };
 #[cfg(feature = "mcp-http")]
 pub use modules::{McpAuth, McpClientConfig, McpHeaders, RmcpConnector};
-pub use runtime::{RHAI_PAD_TOOL, TurnConfig, TurnOutput, TurnRunner, UserInbox};
+pub use runtime::{RHAI_PAD_TOOL, TurnConfig, TurnOutput, TurnRunner, UserInbox, rhai_pad_definition};
 pub use scratchpad::{
     CandidateSet, Catalog, CoreGroup, EngineBuilder, FunctionDescriptor, FunctionEntry, FunctionSource,
     GrantedModule, GrantedSkill, GrantedToolset, Grants, InspectionPad, InspectionTarget,
@@ -54,10 +54,10 @@ pub use scratchpad::{
 pub use session::{
     AgentRef, Backoff, BoundaryKind, CancelHandle, Event, EventKind, EventSink, FormatVersion, History,
     InMemoryStore, InspectionTargetRef, Label, LabelAuthor, LabelTarget, Labels, McpInput, McpRecord,
-    Message, ModelSnapshot, NullSink, Outcome, Provenance, Reasoning, RecordingSink, Redactor, RunId,
-    RunSignals, ScriptInput, ScriptRecord, Segment, SegmentContext, SessionError, SessionId, SessionKind,
-    SessionResult, SessionState, SessionStore, SleepOutcome, TaggedValue, TokenCounters, ToolCall, TurnGate,
-    TurnId, TurnPermit, restore_notices,
+    Message, ModelSnapshot, NativeTool, NullSink, Outcome, Provenance, Reasoning, RecordingSink, Redactor,
+    RunId, RunSignals, ScriptInput, ScriptRecord, Segment, SegmentContext, SessionError, SessionId,
+    SessionKind, SessionResult, SessionState, SessionStore, SleepOutcome, TaggedValue, TokenCounters,
+    ToolCall, TurnGate, TurnId, TurnPermit, restore_notices,
 };
 pub use toolsets::{
     Assembled, Bump, ConfigEnv, ConfigStores, ContextLevel, ContextStore, ContextType, ContextTypeStore,
@@ -67,4 +67,5 @@ pub use toolsets::{
     ToolsetsError, ToolsetsResult, TypeRequirement, VersionWarning, assemble, builtin_rhai_pad_skill,
     check_context, check_creation_rule, check_declared_version, check_template, config_registration,
     delegable_subagents, extract_contract, render_prompt, render_skill, session_context_registration,
+    skill_definition,
 };

@@ -3,7 +3,7 @@
 //! compacted before a request, the turn can be cancelled, and the state is saved at the end of the turn
 //! (`agent-sessions/session#FR-4` to `FR-7`, `AC-3`, `AC-9`). See `src/runtime/turn.sdd`.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::num::NonZeroU64;
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 use std::time::Duration;
@@ -17,11 +17,11 @@ use crate::agents::{
 };
 use crate::clock::{Clock, Timestamp};
 use crate::context::{Budget, CompactionStrategy, UsageTracker, estimate_tokens, replayed_reasoning};
-use crate::scratchpad::{RunEnv, RunStatus, Scratchpad};
+use crate::scratchpad::{RunEnv, RunStatus, Scratchpad, truncate_middle};
 use crate::session::{
-    Backoff, BoundaryKind, CancelHandle, Event, EventKind, EventSink, History, Message, Outcome, Reasoning,
-    Redactor, RunSignals, Segment, SegmentContext, SessionResult, SessionState, SessionStore, SleepOutcome,
-    TokenCounters, ToolCall, TurnGate, TurnId,
+    Backoff, BoundaryKind, CancelHandle, Event, EventKind, EventSink, History, Message, NativeTool, Outcome,
+    Reasoning, Redactor, RunSignals, Segment, SegmentContext, SessionError, SessionResult, SessionState,
+    SessionStore, SleepOutcome, TokenCounters, ToolCall, TurnGate, TurnId,
 };
 
 /// Name of the native tool that runs a script in the scratchpad of the session.
@@ -509,6 +509,7 @@ pub struct TurnRunner<P, C, S> {
     emitter: Emitter,
     tokens: Tokens,
     agent: String,
+    natives: BTreeMap<String, Arc<dyn NativeTool>>,
 }
 
 impl<P, C, S> std::fmt::Debug for TurnRunner<P, C, S> {
@@ -568,7 +569,24 @@ impl<P: InferenceProvider, C: CompactionStrategy, S: SessionStore> TurnRunner<P,
             emitter,
             tokens,
             agent,
+            natives: BTreeMap::new(),
         }
+    }
+
+    /// Registers a native tool: the turn loop calls it by its name, with the arguments of the model, without the scratchpad.
+    /// Chainable with `?`, and the runner stays usable after a refusal.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError::InvalidNativeTool`] when the name is `rhai_pad` or a native tool of this name is already
+    /// registered; the runner is then unchanged.
+    pub fn with_native_tool(&mut self, tool: Arc<dyn NativeTool>) -> SessionResult<&mut Self> {
+        let name = tool.name().to_owned();
+        if name == RHAI_PAD_TOOL || self.natives.contains_key(&name) {
+            return Err(SessionError::InvalidNativeTool { name });
+        }
+        let _previous = self.natives.insert(name, tool);
+        Ok(self)
     }
 
     /// Returns the inbox of the session.
@@ -955,14 +973,32 @@ impl<P: InferenceProvider, C: CompactionStrategy, S: SessionStore> TurnRunner<P,
         cancelled
     }
 
-    /// Runs one tool call.
+    /// Runs one tool call: `rhai_pad` in the scratchpad, a registered native tool without it, any other name is an error.
     async fn execute(&mut self, run: &mut TurnRun, name: &str, arguments: &Value) -> ToolOutput {
-        if name != RHAI_PAD_TOOL {
-            return ToolOutput::error(format!("unknown tool `{name}`"));
+        if name == RHAI_PAD_TOOL {
+            return match arguments.get("script").and_then(Value::as_str) {
+                Some(script) => self.run_script(run, script).await,
+                None => ToolOutput::error(MISSING_SCRIPT.to_owned()),
+            };
         }
-        match arguments.get("script").and_then(Value::as_str) {
-            Some(script) => self.run_script(run, script).await,
-            None => ToolOutput::error(MISSING_SCRIPT.to_owned()),
+        self.natives.get(name).map_or_else(
+            || ToolOutput::error(format!("unknown tool `{name}`")),
+            |tool| self.run_native(tool.as_ref(), arguments),
+        )
+    }
+
+    /// Runs a native tool: its text, or its error text, is masked by the redactor, then capped by the render cap of the
+    /// budget, as the output of a script is.
+    fn run_native(&self, tool: &dyn NativeTool, arguments: &Value) -> ToolOutput {
+        let masked = self.config.redactor.redact(&tool.call(arguments));
+        let cap = usize::try_from(self.config.budget.render_cap_chars()).unwrap_or(usize::MAX);
+        let rendered = truncate_middle(&masked, cap);
+        ToolOutput {
+            text: rendered.text().to_owned(),
+            original_chars: rendered
+                .truncated()
+                .then(|| u64::try_from(rendered.original_chars()).unwrap_or(u64::MAX)),
+            cancelled: false,
         }
     }
 
@@ -1008,9 +1044,9 @@ mod tests {
     };
     use crate::scratchpad::{Grants, Scratchpad, ScratchpadEngine, ScratchpadLimits};
     use crate::session::{
-        AgentRef, BoundaryKind, CancelHandle, EventKind, InMemoryStore, Message, ModelSnapshot, Outcome,
-        Reasoning, RecordingSink, Redactor, Segment, SegmentContext, SessionError, SessionId, SessionResult,
-        SessionState, SessionStore, TaggedValue, ToolCall, TurnId,
+        AgentRef, BoundaryKind, CancelHandle, EventKind, InMemoryStore, Message, ModelSnapshot, NativeTool,
+        Outcome, Reasoning, RecordingSink, Redactor, Segment, SegmentContext, SessionError, SessionId,
+        SessionResult, SessionState, SessionStore, TaggedValue, ToolCall, TurnId,
     };
 
     // --- doubles -------------------------------------------------------------------------------------------------
@@ -2014,6 +2050,191 @@ mod tests {
         assert!(
             !format!("{:?}", kinds(&parts)).contains("tok-123456"),
             "no secret in the events"
+        );
+    }
+
+    /// A native tool of the tests: it answers its `text` argument, or `fixed` when one is given.
+    struct Native {
+        name: &'static str,
+        fixed: Option<String>,
+    }
+
+    impl Native {
+        fn echo(name: &'static str) -> Arc<Self> {
+            Arc::new(Self { name, fixed: None })
+        }
+
+        fn fixed(name: &'static str, text: &str) -> Arc<Self> {
+            Arc::new(Self {
+                name,
+                fixed: Some(text.to_owned()),
+            })
+        }
+    }
+
+    impl NativeTool for Native {
+        fn name(&self) -> &str {
+            self.name
+        }
+
+        fn definition(&self) -> Value {
+            json!({"name": self.name, "description": "a test tool", "parameters": {"type": "object"}})
+        }
+
+        fn call(&self, arguments: &Value) -> String {
+            self.fixed.as_ref().map_or_else(
+                || {
+                    arguments
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned()
+                },
+                Clone::clone,
+            )
+        }
+    }
+
+    /// The contents of the tool results of the history, in order.
+    fn tool_results(
+        runner: &TurnRunner<impl InferenceProvider, Strategy, Arc<InMemoryStore>>,
+    ) -> Vec<String> {
+        roles(runner)
+            .into_iter()
+            .filter_map(tool_result_parts)
+            .map(|(_, _, content)| content)
+            .collect()
+    }
+
+    // Scenario: un tool natif enregistré est appelé sans scratchpad
+    #[tokio::test]
+    async fn native_tool_is_called_without_scratchpad() {
+        let provider = Arc::new(ScriptedProvider::new(vec![
+            call_tool("c1", "echo", json!({"text": "a"})),
+            say("done"),
+        ]));
+        let (mut runner, parts) = assemble(Arc::clone(&provider), Options::named("t-native-echo"));
+        assert!(
+            runner.with_native_tool(Native::echo("echo")).is_ok(),
+            "the native tool is registered"
+        );
+        let output = run(&mut runner, "go").await;
+        assert_eq!(output.outcome(), Outcome::Valid, "the turn is valid");
+        assert_eq!(
+            tool_results(&runner),
+            vec!["a".to_owned()],
+            "the result is in the history"
+        );
+        assert!(
+            !kinds(&parts)
+                .iter()
+                .any(|kind| matches!(kind, EventKind::Script(_))),
+            "no script ran"
+        );
+        assert_eq!(output.response(), "done", "the model receives the final answer");
+    }
+
+    // Scenario: un tool natif ne rend jamais un secret déclaré
+    #[tokio::test]
+    async fn native_tool_never_returns_a_declared_secret() {
+        let mut redactor = Redactor::new();
+        redactor.add_secret("tok-123456").expect("secret");
+        let provider = Arc::new(ScriptedProvider::new(vec![
+            call_tool("c1", "leak", json!({})),
+            say("done"),
+        ]));
+        let options = Options {
+            redactor,
+            ..Options::named("t-native-secret")
+        };
+        let (mut runner, parts) = assemble(Arc::clone(&provider), options);
+        assert!(
+            runner
+                .with_native_tool(Native::fixed("leak", "Bearer tok-123456"))
+                .is_ok(),
+            "the native tool is registered"
+        );
+        let output = run(&mut runner, "go").await;
+        assert_eq!(output.outcome(), Outcome::Valid, "the turn is valid");
+        let results = tool_results(&runner);
+        assert!(
+            results.first().is_some_and(|text| text.starts_with("Bearer ")),
+            "the masked result is in the history: {results:?}"
+        );
+        let state_text = runner.state().to_json().expect("json");
+        assert!(!state_text.contains("tok-123456"), "no secret in the history");
+        let requests = provider.requests();
+        let second = requests.get(1).expect("second request");
+        assert!(
+            !format!("{:?}", second.messages()).contains("tok-123456"),
+            "no secret in what the model receives"
+        );
+        assert!(
+            !format!("{:?}", kinds(&parts)).contains("tok-123456"),
+            "no secret in the events"
+        );
+    }
+
+    // Scenario: l'enregistrement d'un nom réservé ou en double est refusé
+    #[tokio::test]
+    async fn refused_registrations_keep_the_first_valid_tool() {
+        let provider = Arc::new(ScriptedProvider::new(vec![
+            call_tool("c1", "echo", json!({})),
+            say("done"),
+        ]));
+        let (mut runner, _parts) = assemble(Arc::clone(&provider), Options::named("t-native-refused"));
+        let reserved = runner.with_native_tool(Native::fixed(RHAI_PAD_TOOL, "x")).err();
+        assert!(
+            matches!(&reserved, Some(SessionError::InvalidNativeTool { name }) if name == RHAI_PAD_TOOL),
+            "the reserved name is refused: {reserved:?}"
+        );
+        assert!(
+            runner.with_native_tool(Native::fixed("echo", "first")).is_ok(),
+            "the first tool is registered"
+        );
+        let duplicate = runner.with_native_tool(Native::fixed("echo", "second")).err();
+        assert!(
+            matches!(&duplicate, Some(SessionError::InvalidNativeTool { name }) if name == "echo"),
+            "the duplicate name is refused: {duplicate:?}"
+        );
+        let output = run(&mut runner, "go").await;
+        assert_eq!(output.outcome(), Outcome::Valid, "the turn is valid");
+        assert_eq!(
+            tool_results(&runner),
+            vec!["first".to_owned()],
+            "the first valid tool is still callable"
+        );
+    }
+
+    // Must (turn.sdd) : le texte d'un tool natif est borné par le plafond de rendu de la Budget
+    #[tokio::test]
+    async fn native_output_is_capped_by_the_budget_render_cap() {
+        let provider = Arc::new(ScriptedProvider::new(vec![
+            call_tool("c1", "long", json!({})),
+            say("done"),
+        ]));
+        let options = Options {
+            budget: Budget::new(100_000, 100, 1000, 200),
+            ..Options::named("t-native-cap")
+        };
+        let (mut runner, _parts) = assemble(Arc::clone(&provider), options);
+        let long = "abcdefghij".repeat(60);
+        assert!(
+            runner.with_native_tool(Native::fixed("long", &long)).is_ok(),
+            "the native tool is registered"
+        );
+        let output = run(&mut runner, "go").await;
+        assert_eq!(output.outcome(), Outcome::Valid, "the turn is valid");
+        let results = tool_results(&runner);
+        let result = results.first().expect("the result is in the history");
+        assert!(result.chars().count() <= 200, "the result is capped: {result}");
+        assert!(
+            result.starts_with("abcdefghij"),
+            "the start of the output is kept: {result}"
+        );
+        assert!(
+            result.contains("output truncated"),
+            "a notice marks the cut: {result}"
         );
     }
 

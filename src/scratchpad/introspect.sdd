@@ -63,7 +63,7 @@ Must:
   Les fonctions définies par le LLM se lisent à chaque appel depuis l'état partagé (accès `Public` seulement ; les `private` ne se listent pas), avec leurs commentaires `///` comme documentation.
   @Catalog est construit une fois à la construction du moteur ; seul l'état partagé de @IntrospectionSource change ensuite. L'état partagé est protégé par un verrou dont l'empoisonnement est récupéré (jamais de panique).
   `find` : la requête est découpée en mots (séparés par des blancs) ; un élément correspond quand chaque mot apparaît, sans tenir compte de la casse, dans son chemin, sa signature, sa documentation ou sa description. Les résultats sont triés : correspondance exacte du nom ou du chemin d'abord, puis nom contenant le mot, puis le reste, puis ordre alphabétique du chemin ; au plus 50 résultats. Une requête vide ou blanche est une erreur de script. La recherche porte sur les fonctions, modules, toolsets et skills accordés, jamais sur un élément non accordé (`agent-sessions/scratchpad#AC-2`).
-  @limits_notice rend un texte anglais court qui contient, au minimum : les fonctions définies par `fn` ne voient pas les variables du scope mais reçoivent leurs arguments (et lisent le ToolsetContext par `session_context()`) ; une closure ou un pointeur de fonction n'est pas persisté, définir une `fn` ; `const` n'existe pas ; aucune limite d'opérations ni de durée, un script qui boucle n'est arrêté que par l'annulation de l'hôte (le modèle ne peut pas la déclencher) ; le plafond de rendu en caractères et les plafonds de mémoire de la session (valeurs de ./limits.sdd) ; un résultat tronqué se réduit en extrayant la partie utile avec les fonctions de ./format.sdd. Le skill intégré de `toolsets` (`agent-sessions/toolsets#FR-18`) l'embarque.
+  @limits_notice rend un texte anglais court qui contient, au minimum : les fonctions définies par `fn` ne voient pas les variables du scope mais reçoivent leurs arguments (et lisent le ToolsetContext par `session_context()`) ; une closure ou un pointeur de fonction fonctionne dans la session mais est perdu à la restauration (il n'est pas persisté), définir une `fn` pour ce qu'il faut garder ; `const` n'existe pas ; aucune limite d'opérations ni de durée : le modèle borne lui-même ses boucles, il ne peut pas interrompre un script (seule l'annulation de l'hôte l'arrête, et il ne la déclenche pas) ; le plafond de rendu en caractères et les plafonds de mémoire de la session (valeurs de ./limits.sdd, écrites lisiblement : `16 MiB`, `1 000 000`, `100 000`) ; un résultat tronqué se réduit en extrayant la partie utile avec les fonctions de ./format.sdd. Le skill intégré de `toolsets` (`agent-sessions/toolsets#FR-18`) l'embarque.
   Les fonctions d'introspection n'écrivent ni ne lisent rien d'autre que cet état : pas de E/S, pas d'horloge.
 
 Scenario: la recherche rend les fonctions et les skills limités aux modules accordés
@@ -136,7 +136,7 @@ Scenario: l'introspection est indépendante du verrou de l'état partagé
 Scenario: les règles énoncent chaque plafond de mémoire à sa place
   Given des plafonds avec un plafond de tableau de 7 et un plafond de table de 9
   When les règles sont lues
-  Then le texte dit `strings up to 16777216 bytes, arrays up to 7 elements, maps up to 9 entries`
+  Then le texte dit `strings up to 16 MiB, arrays up to 7 elements, maps up to 9 entries`
 
 Scenario: la documentation garde une ligne par commentaire
   Given une fonction de module accordé documentée par deux commentaires `///`
@@ -158,7 +158,7 @@ Tasks:
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
   [x] #5 Les champs lus dans le JSON de métadonnées de Rhai (`name`, `signature`, `numParams`, `docComments`) sont ceux que le spike a observés de façon partielle (`spikes/rhai-1-25`, S6 ne lit que la présence des noms et des commentaires). À confirmer par un test dès l'implémentation ; la structure des modules imbriqués (`modules` par nom) aussi.
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
-  [!] #6 Le texte exact du skill intégré sur `rhai_pad` (`agent-sessions/scratchpad#FR-9`) relève de `toolsets` ; ce fichier fournit le bloc @limits_notice qu'il peut embarquer ou citer. À valider quand `toolsets` sera spécifié.
+  [x] #6 Le texte exact du skill intégré sur `rhai_pad` (`agent-sessions/scratchpad#FR-9`) relève de `toolsets` ; ce fichier fournit le bloc @limits_notice qu'il peut embarquer ou citer. À valider quand `toolsets` sera spécifié.
   [x] #7 Lot E2 : @Origin::Host désigne les fermetures d'enregistrement (genre `host`). Le groupe `host` de `vynil-core`
       (`get_env`, `log_*`) est @Origin::Core("host"). Les deux se lisent `host` dans `modules()`, faute de nom distinct : à
       trancher par le développeur principal.
@@ -180,3 +180,4 @@ Tasks:
       `#[cfg_attr(not(test), expect(dead_code))]` tant que ./engine.rs ne les enregistre pas. Ces annotations sont à retirer
       alors, sinon `unfulfilled_lint_expectations`.
       Fait : aucun `expect(dead_code)` ne subsiste dans `src` (constaté le 2026-10-29).
+  [x] #7 Décisions du 2026-10-31 : reformuler la phrase sur le script qui boucle (le modèle borne ses boucles) et écrire les plafonds de mémoire lisiblement ; tests de @limits_notice ajustés. Fait partie du lot P2 (../toolsets/native.sdd #4).

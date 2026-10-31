@@ -18,6 +18,7 @@ Accepts:
   @Budget::check_user_message: la taille `SYS` et celle du message en tokens.
 
 Returns:
+  @Budget::render_cap_chars: le plafond de rendu d'une sortie d'outil en caractères, tel que reçu par @Budget::new (les tools natifs de la boucle de tour s'en servent).
   @Budget::render_cap_tokens: `T`, le plafond de rendu converti en tokens, arrondi au supérieur, au moins 1 si le plafond n'est pas nul.
   @Budget::needs_compaction: vrai si `MAX - PROMPT - SESSION - 2R - T < 0`.
   @Budget::check_startup, @Budget::check_user_message: succès ou @ContextError.
@@ -88,3 +89,4 @@ Tasks:
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
   [x] #2 Les tailles `MAX`, `PROMPT` et `R` viennent du profil de modèle (domaine `agents`) ; ce fichier les reçoit en nombres.
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #4 Accesseur `render_cap_chars` pour le plafond de rendu des tools natifs (décision du 2026-10-31, lot P1) ; l'hôte règle @Budget et les @ScratchpadLimits à la même valeur. Test : la valeur reçue à la construction est rendue.

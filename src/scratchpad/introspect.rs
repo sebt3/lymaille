@@ -643,23 +643,50 @@ fn text(value: &str) -> Dynamic {
 
 /// Text of the limits of the sandbox that the LLM reads through `rules()` and through the skill of the toolsets.
 ///
-/// It names what a `fn` cannot see, what is not kept between calls, what does not exist, the output cap and the memory
-/// limits, and it states that nothing limits the duration of a script.
+/// It names what a `fn` cannot see, what a restore loses, what does not exist, the output cap and the memory limits
+/// (written readably: `16 MiB`, `1 000 000`), and it states that nothing limits the duration of a script, that the model
+/// bounds its own loops and cannot interrupt one.
 #[must_use]
 pub fn limits_notice(limits: &ScratchpadLimits) -> String {
     format!(
         "Sandbox rules: a function defined with `fn` cannot see the variables of the scope; pass them as arguments. \
-         Its toolset context is read with `session_context()`. A closure or a function pointer is not kept between calls: \
-         define a `fn` instead. `const` does not exist; use `let`. No operation limit and no duration limit apply: a long script \
-         is allowed, and a runaway script is stopped only by the host's cancellation. The output is capped at {} characters: \
-         the middle of a longer result is replaced by a \
-         notice, so store the result in a variable and extract the useful part with the `fmt_*` functions. Memory: strings up \
-         to {} bytes, arrays up to {} elements, maps up to {} entries.",
+         Its toolset context is read with `session_context()`. A closure or a function pointer works within the session \
+         but is lost when the session is restored: define a `fn` for anything you must keep. `const` does not exist; use \
+         `let`. No operation limit and no duration limit apply: bound your own loops: you cannot interrupt a script, \
+         only the cancellation of the host stops one, and you cannot trigger it. The output is capped at {} characters: \
+         the middle of a longer result is replaced by a notice, so store the result in a variable and extract the useful \
+         part with the `fmt_*` functions. Memory: strings up to {}, arrays up to {} elements, maps up to {} entries.",
         limits.render_cap_chars(),
-        limits.max_string_bytes(),
-        limits.max_array_len(),
-        limits.max_map_len(),
+        readable_bytes(limits.max_string_bytes()),
+        grouped(limits.max_array_len()),
+        grouped(limits.max_map_len()),
     )
+}
+
+/// A count with a space between thousands: `1 000 000`.
+fn grouped(count: usize) -> String {
+    let digits = count.to_string();
+    let mut reversed = String::with_capacity(digits.len().saturating_mul(2));
+    for (position, digit) in digits.chars().rev().enumerate() {
+        if position > 0 && position % 3 == 0 {
+            reversed.push(' ');
+        }
+        reversed.push(digit);
+    }
+    reversed.chars().rev().collect()
+}
+
+/// A size in bytes as a round number of `MiB` or `KiB` when it is one, else in grouped bytes.
+fn readable_bytes(bytes: usize) -> String {
+    [(1024 * 1024, "MiB"), (1024, "KiB")]
+        .into_iter()
+        .find_map(
+            |(size, unit)| match (bytes.checked_div(size), bytes.checked_rem(size)) {
+                (Some(count), Some(0)) if count > 0 => Some(format!("{} {unit}", grouped(count))),
+                _ => None,
+            },
+        )
+        .unwrap_or_else(|| format!("{} bytes", grouped(bytes)))
 }
 
 /// Registers the introspection functions on an engine. Each is documented with its parameter names; they read the shared
@@ -1070,16 +1097,24 @@ mod tests {
         );
         assert!(text.contains("`const` does not exist"), "const: {text}");
         assert!(
-            text.contains("A closure or a function pointer is not kept between calls"),
-            "closures are not persisted: {text}"
-        );
-        assert!(
             text.contains("No operation limit and no duration limit apply"),
             "no operation limit and no duration limit: {text}"
         );
         assert!(
-            text.contains("a runaway script is stopped only by the host's cancellation"),
-            "only the host's cancellation stops a runaway script, the model cannot: {text}"
+            text.contains("bound your own loops: you cannot interrupt a script"),
+            "the model bounds its own loops and cannot interrupt a script: {text}"
+        );
+        assert!(
+            text.contains("only the cancellation of the host stops one, and you cannot trigger it"),
+            "only the host's cancellation stops a script, and the model cannot trigger it: {text}"
+        );
+        assert!(
+            !text.contains("runaway") && !text.contains("closure or a function pointer is not kept"),
+            "the old phrases are gone: {text}"
+        );
+        assert!(
+            text.contains("A closure or a function pointer works within the session but is lost when the session is restored"),
+            "closures work in the session and are lost at restore: {text}"
         );
         assert!(
             text.contains("capped at 8000 characters"),
@@ -1096,8 +1131,43 @@ mod tests {
             .expect("the limits are not zero");
         let text = limits_notice(&limits);
         assert!(
-            text.contains("strings up to 16777216 bytes, arrays up to 7 elements, maps up to 9 entries"),
+            text.contains("strings up to 16 MiB, arrays up to 7 elements, maps up to 9 entries"),
             "the memory limits, in order: {text}"
+        );
+    }
+
+    // Scenario: les règles énoncent chaque plafond de mémoire à sa place (valeurs par défaut lisibles)
+    #[test]
+    fn rules_write_the_default_memory_limits_readably() {
+        let text = limits_notice(&ScratchpadLimits::new());
+        assert!(
+            text.contains(
+                "strings up to 16 MiB, arrays up to 1 000 000 elements, maps up to 100 000 entries"
+            ),
+            "the default limits are readable: {text}"
+        );
+    }
+
+    #[test]
+    fn rules_write_a_byte_limit_that_is_not_a_round_size_in_bytes() {
+        let kib = ScratchpadLimits::new()
+            .with_max_string_bytes(3 * 1024)
+            .expect("not zero");
+        assert!(
+            limits_notice(&kib).contains("strings up to 3 KiB,"),
+            "a round KiB size"
+        );
+        let odd = ScratchpadLimits::new()
+            .with_max_string_bytes(1500)
+            .expect("not zero");
+        assert!(
+            limits_notice(&odd).contains("strings up to 1 500 bytes,"),
+            "any other size in bytes"
+        );
+        let small = ScratchpadLimits::new().with_max_array_len(999).expect("not zero");
+        assert!(
+            limits_notice(&small).contains("arrays up to 999 elements"),
+            "no separator below a thousand"
         );
     }
 

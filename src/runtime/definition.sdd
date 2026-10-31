@@ -1,0 +1,41 @@
+Spec: definition
+
+Purpose:
+  Définition canonique du tool `rhai_pad` que la librairie fournit à l'hôte, pour que chaque hôte (application, cli) envoie le même texte au modèle
+    (`agent-sessions#BO-2`, `agent-sessions/scratchpad#FR-9`).
+
+Owns:
+  ./definition.rs
+
+Exposes:
+  @rhai_pad_definition
+
+Accepts:
+  @rhai_pad_definition: aucun argument.
+
+Returns:
+  @rhai_pad_definition: la définition JSON de `rhai_pad`, de forme plate : `name` (`rhai_pad`, la constante @RHAI_PAD_TOOL de ./turn.sdd), `description` et `parameters`, un schéma d'objet à une propriété obligatoire `script` de type chaîne.
+
+Must:
+  Le texte de `description` est celui-ci, en anglais puisqu'il parle au modèle :
+    Run one Rhai script in this session's persistent scratchpad. Returns what the script printed, then the value of its last statement. `let` variables and `fn` definitions persist between calls; closures and function pointers work within a session but are lost when it is restored (define a `fn` for anything you must keep), `const` does not exist, and a `fn` cannot see scope variables (pass arguments; read the toolset context with `session_context()`). Granted modules are called as `module::function(args)`. Discovery built-ins: `vars()`, `modules()`, `functions("name")`, `toolsets()`, `skills()`, `find("words")`, `rules()`. Output over the cap is cut in the middle: keep results in variables and extract with the `fmt_*` functions. Errors come back as text: fix the script and call again. Read the `rhai-pad` skill with the `skill` tool before your first script.
+  Le texte de `description` du paramètre `script` est : `The Rhai script to run.`
+  Chaque affirmation de la description se vérifie en exécutant le script qu'elle décrit, comme celles du skill intégré (../toolsets/native.sdd) ; la `description` tient en moins de 350 tokens estimés au ratio par défaut de @Budget (borne relevée le 2026-10-31 ; elle en fait environ 311) ; la définition complète, schéma compris, en fait environ 417 et n'est pas bornée.
+  La définition est constante : deux appels rendent la même valeur. Aucune E/S, aucune panique.
+
+Depends on:
+  ./turn.sdd
+  serde_json
+
+Scenario: la définition est complète et stable
+  Given l'appel de @rhai_pad_definition
+  When le résultat est lu deux fois
+  Then `name` vaut `rhai_pad`, `parameters.required` vaut `["script"]`, et les deux lectures sont égales
+
+Scenario: chaque affirmation de la description est vraie
+  Given la description et un scratchpad
+  When chaque affirmation (valeur du dernier statement, `let` et `fn` persistants, closure utilisable dans la session et exclue de l'état sauvegardé, `fn` qui ne voit pas le scope, `const` absent, `session_context()`, fonctions d'introspection nommées) est exécutée
+  Then chacune se vérifie
+
+Tasks:
+  [x] #1 Tests puis implémentation, déclaration dans ./mod.rs et ré-export dans ../lib.rs.

@@ -50,6 +50,13 @@ impl Budget {
         })
     }
 
+    /// Returns the render cap of a tool output in characters, as given to [`Budget::new`]. The native tools of the turn
+    /// loop cap their output with it.
+    #[must_use]
+    pub const fn render_cap_chars(&self) -> u64 {
+        self.render_cap_chars
+    }
+
     /// Returns `T`, the render cap converted to tokens, rounded up.
     #[must_use]
     pub fn render_cap_tokens(&self) -> u64 {
@@ -269,6 +276,13 @@ mod tests {
             ),
             "a message one token over the room must fail with MessageTooLarge, got {refused:?}"
         );
+    }
+
+    // Scenario-free task #4 (context/budget.sdd): the value received at construction is the value read back.
+    #[test]
+    fn render_cap_chars_is_the_value_given_to_new() {
+        assert_eq!(Budget::new(10_000, 500, 1000, 8000).render_cap_chars(), 8000);
+        assert_eq!(Budget::new(10_000, 500, 1000, 0).render_cap_chars(), 0);
     }
 
     #[test]
