@@ -139,5 +139,6 @@ Scenario: aller-retour des minuteurs
 
 Tasks:
   [x] #1 Tests puis implémentation (lot D3), validé le 2026-10-30.
-  [?] #2 Posé : les sources `subagent`, `mcp` et `workspace` sont alimentées par `notify` (le registre des runs, le connecteur MCP et le module de Memory/todo l'appellent) ; ce fichier ne les branche pas lui-même aux modules de ../modules/. À confirmer.
+  [x] #2 Posé : les sources `subagent`, `mcp` et `workspace` sont alimentées par `notify` (le registre des runs, le connecteur MCP et le module de Memory/todo l'appellent) ; ce fichier ne les branche pas lui-même aux modules de ../modules/. À confirmer.
+      Validé le 2026-10-31 (accord du développeur principal).
     Décision du lot D3 (2026-10-30, développeur principal) : `subagent`, `mcp` et `workspace` sont alimentées par `notify` sans enregistrement, ce qui répond à la question ci-dessus pour ces trois sources ; `timer` n'est pas alimenté par `notify` mais par le minuteur rattaché (@EventHub::attach_timers) ; `notify("timer", ...)` est refusé. Reste à confirmer côté modules : que le registre des runs, le connecteur MCP et le module de Memory/todo appellent bien `notify`. Marqueur `[?]` laissé à l'orchestrateur.

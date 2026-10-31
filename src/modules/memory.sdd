@@ -88,5 +88,7 @@ Scenario: le stockage garde la forme sérialisée
 Tasks:
   [x] #1 Tests puis implémentation.
       Validé le 2026-10-30 (validator, mutations manuelles) sous `scripts/check` complet.
-  [?] #2 Posé : la portée utilisateur et la portée projet sont des textes que l'hôte fournit à la construction des modules (`agent-sessions/modules#FR-2` donne « niveau et identifiant » comme clé sans dire ce qui qualifie l'utilisateur et le projet). À confirmer.
-  [?] #3 Posé : l'identifiant d'une Memory ne contient pas de blanc ; pas d'autre contrainte de charset ni de longueur. À confirmer.
+  [x] #2 Posé : la portée utilisateur et la portée projet sont des textes que l'hôte fournit à la construction des modules (`agent-sessions/modules#FR-2` donne « niveau et identifiant » comme clé sans dire ce qui qualifie l'utilisateur et le projet). À confirmer.
+      Validé le 2026-10-31 (accord du développeur principal).
+  [x] #3 Posé : l'identifiant d'une Memory ne contient pas de blanc ; pas d'autre contrainte de charset ni de longueur. À confirmer.
+      Validé le 2026-10-31 (accord du développeur principal).

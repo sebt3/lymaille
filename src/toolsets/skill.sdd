@@ -92,4 +92,5 @@ Tasks:
       - un champ inconnu est ignoré ; `allowed-tools` est ignoré (`Scenario: allowed-tools est ignoré`).
       - décision du 2026-10-31 (correctif 4 et D-a) : un YAML null pour `name` ou `description` est refusé, `license: ~` donne `None` ; un texte de plus de 256 Kio est refusé avant analyse. Tests écrits, vus rouges pour le null (la chaîne `null` était acceptée comme nom) et pour la borne, puis verts ; en attente de validation par le validateur.
       Les refus (nom invalide, description blanche, frontmatter absent, YAML illisible, métadonnée en double) passent aussi sur le stub : ce sont des garde-fous, la preuve rouge est le scénario de lecture valide.
-  [?] #3 « Contexte le plus long permis » (FR-18) : la taille rendue dépend des valeurs du contexte, inconnues à l'enregistrement. Posé : le contrôle porte sur le gabarit brut sans marge, et un dépassement au rendu est tronqué par @truncate_middle ; à confirmer.
+  [x] #3 « Contexte le plus long permis » (FR-18) : la taille rendue dépend des valeurs du contexte, inconnues à l'enregistrement. Posé : le contrôle porte sur le gabarit brut sans marge, et un dépassement au rendu est tronqué par @truncate_middle ; à confirmer.
+      Validé le 2026-10-31 (accord du développeur principal).

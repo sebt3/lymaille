@@ -76,6 +76,9 @@ Tasks:
       Validé le 2026-10-29 (validator, mutations manuelles) sous `scripts/check` complet.
   [x] #4 `Debug` manuel de @InMemoryToolsets qui élide le texte source des modules (même règle que ./toolset.sdd #4).
       Validé le 2026-10-29 (validator, 58 mutants dont 55 tués) sous `scripts/check` complet.
-  [?] #5 Posés par l'implémentation, à confirmer : le plafond de rendu des skills est fourni à la construction (`InMemoryToolsets::new(render_cap_chars)`) ; `activate` sans brouillon rend `InvalidToolset` ; @put_type vérifie la relecture et ne détecte pas les cycles d'inclusion (ils le sont par `flatten`, les types pouvant arriver dans n'importe quel ordre).
-  [?] #2 Posé : l'activation d'un brouillon est une méthode d'@InMemoryToolsets seulement ; le trait que l'hôte implémente la laisse à son propre système (`FR-8`).
-  [?] #3 Posé : l'historique des versions actives (restauration d'un segment sur la définition d'origine, `agent-sessions/toolsets#FR-16`) est l'affaire de la session (segment figé), non de ce stockage.
+  [x] #5 Posés par l'implémentation, à confirmer : le plafond de rendu des skills est fourni à la construction (`InMemoryToolsets::new(render_cap_chars)`) ; `activate` sans brouillon rend `InvalidToolset` ; @put_type vérifie la relecture et ne détecte pas les cycles d'inclusion (ils le sont par `flatten`, les types pouvant arriver dans n'importe quel ordre).
+      Validé le 2026-10-31 (accord du développeur principal).
+  [x] #2 Posé : l'activation d'un brouillon est une méthode d'@InMemoryToolsets seulement ; le trait que l'hôte implémente la laisse à son propre système (`FR-8`).
+      Validé le 2026-10-31 (accord du développeur principal).
+  [x] #3 Posé : l'historique des versions actives (restauration d'un segment sur la définition d'origine, `agent-sessions/toolsets#FR-16`) est l'affaire de la session (segment figé), non de ce stockage.
+      Validé le 2026-10-31 (accord du développeur principal).

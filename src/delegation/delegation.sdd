@@ -44,4 +44,5 @@ Tasks:
       lot D1 ./error.sdd ; lot D2 ./capacity.sdd (dépend de D1) ; lot D3 ./sources.sdd (D1) ; lot D4 ./watcher.sdd (D1, D3) ; lot D5 ./result.sdd (D1) ;
       lot D6 ./run.sdd (D1, D3, D5, et ../runtime/turn.sdd livré, voir ../runtime/runtime.sdd #1) ; lot D7 ./module.sdd (D2, D5, D6).
       Dépendance à ajouter : aucune (tokio, jsonschema, rhai, serde_json sont présents ; vérifier les features de `tokio` dans /Cargo.toml : `rt`, `sync`, `time`, `macros`).
-  [?] #2 `agent-sessions/delegation#FR-7` : l'annulation d'un run se propage aux sous-agents en cours par la hiérarchie de @CancelHandle::child (déjà livrée) ; confirmer que cela suffit sans mécanisme de plus.
+  [x] #2 `agent-sessions/delegation#FR-7` : l'annulation d'un run se propage aux sous-agents en cours par la hiérarchie de @CancelHandle::child (déjà livrée) ; confirmer que cela suffit sans mécanisme de plus.
+      Validé le 2026-10-31 (accord du développeur principal).

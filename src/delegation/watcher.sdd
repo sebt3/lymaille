@@ -119,6 +119,9 @@ Scenario: le contenu de l'événement n'est pas dans la notification
 
 Tasks:
   [x] #1 Tests puis implémentation (lot D4), validé le 2026-10-30.
-  [?] #2 Posé : un plafond d'opérations de 10 000 pour un prédicat (la valeur n'est pas fixée par le DSD). À confirmer.
-  [?] #4 Posé (lot D4) : `print` et `debug` d'un prédicat sont neutralisés (crochets sans effet sur le moteur du prédicat) ; l'absence d'écriture dans le tampon d'un run ouvert sur le même fil n'est pas testée ici : `RunScope` est de visibilité `pub(in crate::scratchpad)`, inaccessible depuis `delegation`. Test à placer dans `scratchpad`, ou visibilité à élargir.
-  [?] #3 Posé : l'injection d'une notification dans le tour suivant est faite par l'appelant (hôte ou boucle de tour) qui lit @Triggered ; ce fichier ne touche ni l'historique ni @UserInbox. À confirmer.
+  [x] #2 Posé : un plafond d'opérations de 10 000 pour un prédicat (la valeur n'est pas fixée par le DSD). À confirmer.
+      Validé le 2026-10-31 (accord du développeur principal).
+  [x] #4 Posé (lot D4) : `print` et `debug` d'un prédicat sont neutralisés (crochets sans effet sur le moteur du prédicat) ; l'absence d'écriture dans le tampon d'un run ouvert sur le même fil n'est pas testée ici : `RunScope` est de visibilité `pub(in crate::scratchpad)`, inaccessible depuis `delegation`. Test à placer dans `scratchpad`, ou visibilité à élargir.
+      Validé le 2026-10-31 (accord du développeur principal). Le test d'absence d'écriture dans le tampon d'un run ouvert se place dans `scratchpad`, sans élargir la visibilité de `RunScope`.
+  [x] #3 Posé : l'injection d'une notification dans le tour suivant est faite par l'appelant (hôte ou boucle de tour) qui lit @Triggered ; ce fichier ne touche ni l'historique ni @UserInbox. À confirmer.
+      Validé le 2026-10-31 (accord du développeur principal).

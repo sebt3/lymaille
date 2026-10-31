@@ -77,4 +77,5 @@ Tasks:
   [x] #4 Passer le nom du toolset à @render_skill et recouvrir `context.params` des paramètres de ce toolset (décision du 2026-10-29), avec un Scenario « skill sees its toolset parameters ».
       Validé le 2026-10-29 (validator, 58 mutants dont 55 tués) sous `scripts/check` complet.
   [x] #5 Décidé le 2026-10-30 par le développeur principal : @check_template ne vérifie que la syntaxe ; une variable absente n'est détectée qu'au rendu (mode strict). Un contrôle à blanc avec des données d'essai est une évolution, hors 0.1.
-  [?] #3 Posé : la date de début est un texte fourni par l'hôte (`SessionMeta`), non lue ici (`agent-sessions#NFR-1`).
+  [x] #3 Posé : la date de début est un texte fourni par l'hôte (`SessionMeta`), non lue ici (`agent-sessions#NFR-1`).
+      Validé le 2026-10-31 (accord du développeur principal).
