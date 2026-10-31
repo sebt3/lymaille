@@ -1,0 +1,806 @@
+#!/usr/bin/env python3
+# Mutation check of one Rust file, the canary mechanism of spikes/lint-harness applied to the tests.
+#
+# Usage:
+#   scripts/mutants [options] <file.rs> [test-filter]
+#   scripts/mutants --self-test
+#
+#   <file.rs>      production file to mutate; its crate is the nearest ancestor directory holding a Cargo.toml
+#   [test-filter]  passed to `cargo test --lib`; without it every test runs. The selected tests must pass unmutated.
+#
+# Options:
+#   --dry-run          list the mutants, touch nothing, run nothing
+#   --max N            run only the first N mutants; the report then says that it is a sample
+#   --timeout SECONDS  ceiling per mutant, compilation included (default 300); a timeout counts as killed
+#   --allow-survivors  report the survivors without failing (exit 0)
+#   --self-test        check this script on a throwaway crate (its CANARY markers say what must happen)
+#
+# What is mutated: production code only. Comments, string and char literals, attributes, `use` lines and every
+# #[cfg(test)] item are never touched. Operators are matched on rustfmt spacing (` >= `, ` + `...), so generic `<`,
+# `>` and `->` are left alone. Families:
+#   comparaison   ` >= ` ` > ` ` <= ` ` < `  replaced by the neighbour of the family (`>` gives `>=`, `>=` gives `>`)
+#   égalité       ` == ` ` != `
+#   booléen       true <-> false
+#   arithmétique  binary ` + ` <-> ` - `
+#   constante     integer literal, value + 1 and - 1 (suffix kept)
+#   retour        `return x;` replaced by `drop(x);` (the early exit is removed); `return;` replaced by `;`
+#   affectation   a whole statement `lhs = rhs;` or `lhs op= rhs;` replaced by `drop(rhs);`
+#
+# Each mutant runs alone: the file is written, `cargo test --lib <filter>` runs in the crate in the foreground (one
+# cargo at a time, no background process), then the file is restored by sha256 before the next mutant. Results:
+#   TUÉ             a test failed, the process aborted, or the timeout ran out
+#   SURVIVANT       every selected test still passes: the tests do not see the change
+#   NE COMPILE PAS  the mutant does not build (the workspace lints deny many things); counted apart, never as killed
+#   NON LANCÉ       beyond --max
+# The file is restored after each mutant and on every exit, Ctrl-C (SIGINT) and SIGTERM/SIGHUP included. A SIGKILL
+# cannot be trapped: then copy the backup printed at the start back over the file (cp <backup> <file>).
+# Exit status: 0 no survivor; 1 survivors; 2 usage error or unusable baseline; 3 restoration failed; 130 interrupted.
+# CARGO_TARGET_DIR is honoured when set in the environment. --self-test always uses its own temporary target.
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import os
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass
+from pathlib import Path
+
+KILLED = "TUÉ"
+SURVIVED = "SURVIVANT"
+NOT_COMPILED = "NE COMPILE PAS"
+NOT_RUN = "NON LANCÉ"
+TIMED_OUT = "(délai)"
+
+DEFAULT_TIMEOUT = 300.0
+SELF_TEST_TIMEOUT = 15.0
+EXIT_OK = 0
+EXIT_SURVIVORS = 1
+EXIT_USAGE = 2
+EXIT_RESTORE = 3
+EXIT_INTERRUPTED = 130
+
+
+class UsageError(Exception):
+    """A problem that stops the run before or between mutants: arguments, no crate, a baseline that is not green."""
+
+
+class RestoreError(Exception):
+    """The file under test could not be brought back to its original bytes. Nothing else is trusted after this."""
+
+
+class Interrupted(BaseException):
+    """Raised by the SIGTERM and SIGHUP handlers, so that they unwind exactly like Ctrl-C."""
+
+
+@dataclass(frozen=True)
+class Mutant:
+    """One textual change of the production code: `text[start:end]` becomes `replacement`."""
+
+    line: int
+    operator: str
+    description: str
+    start: int
+    end: int
+    replacement: str
+
+
+@dataclass(frozen=True)
+class Result:
+    """The outcome of one mutant: its status and the test that killed it (or a marker such as `(délai)`)."""
+
+    mutant: Mutant
+    status: str
+    killer: str
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Lexing: blank out comments and literals, keeping every offset and every newline.
+# ---------------------------------------------------------------------------------------------------------------------
+
+
+def _is_ident(char: str) -> bool:
+    return char.isalnum() or char == "_"
+
+
+def _block_comment_end(src: str, begin: int) -> int:
+    """Offset just after the (possibly nested) block comment starting at `begin`."""
+    depth = 0
+    index = begin
+    while index < len(src):
+        if src.startswith("/*", index):
+            depth += 1
+            index += 2
+        elif src.startswith("*/", index):
+            depth -= 1
+            index += 2
+            if depth == 0:
+                return index
+        else:
+            index += 1
+    return len(src)
+
+
+def _raw_string_end(src: str, begin: int) -> int | None:
+    """Offset just after the raw string literal starting at `begin` (`r"..."`, `r#"..."#`, `br"..."`), if any."""
+    if src.startswith("br", begin):
+        index = begin + 2
+    elif src[begin] == "r":
+        index = begin + 1
+    else:
+        return None
+    hashes = 0
+    while index < len(src) and src[index] == "#":
+        hashes += 1
+        index += 1
+    if index >= len(src) or src[index] != '"':
+        return None
+    closing = '"' + "#" * hashes
+    found = src.find(closing, index + 1)
+    return len(src) if found < 0 else found + len(closing)
+
+
+def _string_end(src: str, begin: int) -> int:
+    """Offset just after the normal string literal whose opening quote is at `begin`."""
+    index = begin + 1
+    while index < len(src) and src[index] != '"':
+        index += 2 if src[index] == "\\" else 1
+    return min(index + 1, len(src))
+
+
+def _char_end(src: str, begin: int) -> int | None:
+    """Offset just after the char literal at `begin`, or None when the quote opens a lifetime or a label."""
+    if begin + 1 < len(src) and src[begin + 1] == "\\":
+        closing = src.find("'", begin + 3)
+        return len(src) if closing < 0 else closing + 1
+    if begin + 2 < len(src) and src[begin + 2] == "'":
+        return begin + 3
+    return None
+
+
+def code_mask(src: str) -> str:
+    """Return `src` with comments, strings and char literals replaced by spaces; newlines and offsets are kept."""
+    out = list(src)
+
+    def blank(begin: int, end: int) -> None:
+        for index in range(begin, end):
+            if out[index] != "\n":
+                out[index] = " "
+
+    index = 0
+    while index < len(src):
+        end: int | None = None
+        if src.startswith("//", index):
+            newline = src.find("\n", index)
+            end = len(src) if newline < 0 else newline
+        elif src.startswith("/*", index):
+            end = _block_comment_end(src, index)
+        elif src[index] in "rb" and (index == 0 or not _is_ident(src[index - 1])):
+            end = _raw_string_end(src, index)
+        if end is None and src[index] == '"':
+            end = _string_end(src, index)
+        if end is None and src[index] == "'":
+            end = _char_end(src, index)
+        if end is None:
+            index += 1
+            continue
+        blank(index, end)
+        index = max(end, index + 1)
+    return "".join(out)
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Generation of the mutants.
+# ---------------------------------------------------------------------------------------------------------------------
+
+_TEST_ATTRIBUTE = re.compile(r"#\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]")
+_ITEM_START = re.compile(r"[{;]")
+_SKIPPED_LINE_STARTS = ("#[", "#!", "use ", "pub use ", "pub(crate) use ", "extern ", "mod ")
+
+_COMPARE = re.compile(r"(?<= )(>=|<=|>|<)(?= )")
+_COMPARE_SWAP = {">=": ">", "<=": "<", ">": ">=", "<": "<="}
+_EQUALITY = re.compile(r"(?<= )(==|!=)(?= )")
+_EQUALITY_SWAP = {"==": "!=", "!=": "=="}
+_BOOLEAN = re.compile(r"\b(true|false)\b")
+_ARITHMETIC = re.compile(r"(?<= )([+-])(?= )")
+_LITERAL = re.compile(r"(?<![\w.])(\d[\d_]*)(_?[iu](?:8|16|32|64|128|size))?(?![\w.])")
+_RETURN = re.compile(r"\breturn\b([^;]*);")
+_ASSIGN = re.compile(r"^(\s*)(\*?[A-Za-z_][\w.]*(?:\[[^\]]*\])?)\s*(\+=|-=|=)(?!=)\s*([^;]+?)\s*;(?=\s*$)")
+
+
+def _test_regions(code: str) -> list[tuple[int, int]]:
+    """Spans of the `#[cfg(test)]` items (attribute included), found on the masked code."""
+    regions: list[tuple[int, int]] = []
+    for attribute in _TEST_ATTRIBUTE.finditer(code):
+        opener = _ITEM_START.search(code, attribute.end())
+        if opener is None:
+            regions.append((attribute.start(), len(code)))
+        elif opener.group() == ";":
+            regions.append((attribute.start(), opener.end()))
+        else:
+            regions.append((attribute.start(), _matching_brace(code, opener.start())))
+    return regions
+
+
+def _matching_brace(code: str, opening: int) -> int:
+    depth = 0
+    for index in range(opening, len(code)):
+        if code[index] == "{":
+            depth += 1
+        elif code[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return index + 1
+    return len(code)
+
+
+def _line_mutations(code: str, original: str) -> list[tuple[int, int, str, str, str]]:
+    """Mutations of one masked line, as (start, end, operator, description, replacement), offsets relative to the line.
+
+    `code` is the masked line, which decides where the tokens are; `original` gives the text that is copied verbatim.
+    """
+    found: list[tuple[int, int, str, str, str]] = []
+    for match in _COMPARE.finditer(code):
+        token = match.group(1)
+        found.append((match.start(), match.end(), "comparaison", f"{token} → {_COMPARE_SWAP[token]}",
+                      _COMPARE_SWAP[token]))
+    for match in _EQUALITY.finditer(code):
+        token = match.group(1)
+        found.append((match.start(), match.end(), "égalité", f"{token} → {_EQUALITY_SWAP[token]}",
+                      _EQUALITY_SWAP[token]))
+    for match in _BOOLEAN.finditer(code):
+        other = "false" if match.group(1) == "true" else "true"
+        found.append((match.start(), match.end(), "booléen", f"{match.group(1)} → {other}", other))
+    for match in _ARITHMETIC.finditer(code):
+        token = match.group(1)
+        other = "-" if token == "+" else "+"
+        found.append((match.start(), match.end(), "arithmétique", f"{token} → {other}", other))
+    for match in _LITERAL.finditer(code):
+        digits = match.group(1)
+        suffix = match.group(2) or ""
+        value = int(digits.replace("_", ""))
+        for new_value in [value + 1, *([value - 1] if value > 0 else [])]:
+            found.append((match.start(), match.end(), "constante", f"{value} → {new_value}",
+                          f"{new_value}{suffix}"))
+    for match in _RETURN.finditer(code):
+        expression = original[match.start(1):match.end(1)].strip()
+        replacement = f"drop({expression});" if expression else ";"
+        found.append((match.start(), match.end(), "retour", "return supprimé", replacement))
+    statement = _ASSIGN.match(code)
+    if statement is not None:
+        target = original[statement.start(2):statement.end(2)]
+        value = original[statement.start(4):statement.end(4)].strip()
+        found.append((statement.start(2), statement.end(), "affectation",
+                      f"affectation de {target} supprimée", f"drop({value});"))
+    return found
+
+
+def generate(text: str) -> list[Mutant]:
+    """Every mutant of the production code of `text`, in file order. Nothing is mutated inside a comment, a literal,
+    an attribute, a `use` line or a `#[cfg(test)]` item."""
+    code = code_mask(text)
+    regions = _test_regions(code)
+    mutants: list[Mutant] = []
+    offset = 0
+    for number, code_line in enumerate(code.split("\n"), start=1):
+        begin = offset
+        offset += len(code_line) + 1
+        if code_line.lstrip().startswith(_SKIPPED_LINE_STARTS):
+            continue
+        original_line = text[begin:begin + len(code_line)]
+        for start, end, operator, description, replacement in _line_mutations(code_line, original_line):
+            absolute = begin + start
+            if any(first <= absolute < last for first, last in regions):
+                continue
+            mutants.append(Mutant(number, operator, description, absolute, begin + end, replacement))
+    mutants.sort(key=lambda mutant: (mutant.start, mutant.end, mutant.replacement))
+    unique: list[Mutant] = []
+    for mutant in mutants:
+        if not unique or (unique[-1].start, unique[-1].end, unique[-1].replacement) != (
+            mutant.start,
+            mutant.end,
+            mutant.replacement,
+        ):
+            unique.append(mutant)
+    return unique
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Running cargo and restoring the file.
+# ---------------------------------------------------------------------------------------------------------------------
+
+_PASSED = re.compile(r"test result: ok\. (\d+) passed")
+_FAILED = re.compile(r"^test (\S+) \.\.\. FAILED$", re.MULTILINE)
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _text(data: bytes | None) -> str:
+    return (data or b"").decode("utf-8", "replace")
+
+
+def _tail(output: str, lines: int = 40) -> str:
+    return "\n".join(output.splitlines()[-lines:])
+
+
+def _cargo_env() -> dict[str, str]:
+    env = dict(os.environ)
+    env["CARGO_TERM_COLOR"] = "never"
+    return env
+
+
+def _kill_group(process: subprocess.Popen[bytes]) -> None:
+    """SIGKILL the process group of `process` (cargo and the test binary it started), then reap the leader."""
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except OSError:
+        pass  # the group is already gone
+    process.wait()
+
+
+def _run_cargo(crate: Path, test_filter: str | None, timeout: float, env: dict[str, str]) -> tuple[int | None, str]:
+    """Run `cargo test --lib` in its own process group. Returns (exit code, output); the code is None on timeout."""
+    command = ["cargo", "test", "--lib", *([test_filter] if test_filter else [])]
+    process = subprocess.Popen(
+        command,
+        cwd=crate,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    try:
+        output, _ = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_group(process)
+        output, _ = process.communicate()
+        return None, _text(output)
+    except BaseException:
+        _kill_group(process)
+        process.communicate()
+        raise
+    return process.returncode, _text(output)
+
+
+def _baseline(crate: Path, test_filter: str | None, timeout: float, env: dict[str, str]) -> None:
+    """The unmutated file must pass, and the filter must select at least one test, or nothing below means anything."""
+    code, output = _run_cargo(crate, test_filter, timeout, env)
+    if code is None:
+        raise UsageError("baseline: cargo test timed out on the unmutated file")
+    if code != 0:
+        raise UsageError(f"baseline: the unmutated file does not pass its tests (exit {code})\n{_tail(output)}")
+    passed = _PASSED.search(output)
+    if passed is None or int(passed.group(1)) == 0:
+        raise UsageError(f"baseline: the filter {test_filter!r} selects no test")
+
+
+def _classify(code: int | None, output: str) -> tuple[str, str]:
+    """Status and killer of one mutant run."""
+    if code is None:
+        return KILLED, TIMED_OUT
+    if "could not compile" in output and "test result:" not in output:
+        return NOT_COMPILED, "—"
+    if code == 0:
+        return SURVIVED, "—"
+    failed = _FAILED.search(output)
+    return KILLED, failed.group(1) if failed else "(processus interrompu)"
+
+
+class SourceFile:
+    """The file under test. Its original bytes are kept in memory and restored by sha256."""
+
+    def __init__(self, path: Path, original: bytes) -> None:
+        self.path = path
+        self.original = original
+        self.digest = _sha256(original)
+
+    def write(self, data: bytes) -> None:
+        self.path.write_bytes(data)
+
+    def restore(self) -> None:
+        if _sha256(self.path.read_bytes()) != self.digest:
+            self.path.write_bytes(self.original)
+        if _sha256(self.path.read_bytes()) != self.digest:
+            raise RestoreError(f"{self.path} is not back to its original bytes")
+
+
+def _execute(
+    source: SourceFile,
+    text: str,
+    mutants: Sequence[Mutant],
+    crate: Path,
+    test_filter: str | None,
+    timeout: float,
+    env: dict[str, str],
+    limit: int | None,
+    report: Callable[[int, int, Result], None],
+) -> list[Result]:
+    """Run the mutants one at a time, restoring the file after each one (and on any exception)."""
+    _baseline(crate, test_filter, timeout, env)
+    selected = list(mutants if limit is None else mutants[:limit])
+    results: list[Result] = []
+    for index, mutant in enumerate(selected, start=1):
+        mutated = text[:mutant.start] + mutant.replacement + text[mutant.end:]
+        try:
+            source.write(mutated.encode("utf-8"))
+            code, output = _run_cargo(crate, test_filter, timeout, env)
+        finally:
+            source.restore()
+        status, killer = _classify(code, output)
+        result = Result(mutant, status, killer)
+        results.append(result)
+        report(index, len(selected), result)
+    return results
+
+
+@contextmanager
+def _interrupt_as_exception() -> Iterator[None]:
+    """Turn SIGTERM and SIGHUP into an exception, so that the restoration runs as it does on Ctrl-C."""
+
+    def raise_interrupted(signum: int, _frame: object) -> None:
+        raise Interrupted(signum)
+
+    previous = {number: signal.signal(number, raise_interrupted) for number in (signal.SIGTERM, signal.SIGHUP)}
+    try:
+        yield
+    finally:
+        for number, handler in previous.items():
+            signal.signal(number, handler if handler is not None else signal.SIG_DFL)
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Command line.
+# ---------------------------------------------------------------------------------------------------------------------
+
+
+def _decode(data: bytes, name: str) -> str:
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise UsageError(f"{name}: not UTF-8") from error
+
+
+def _crate_root(path: Path) -> Path:
+    for directory in path.parents:
+        if (directory / "Cargo.toml").is_file():
+            return directory
+    raise UsageError(f"{path}: no Cargo.toml above this file")
+
+
+def _print_list(mutants: Sequence[Mutant], display: str, limit: int | None) -> None:
+    for index, mutant in enumerate(mutants, start=1):
+        marker = "" if limit is None or index <= limit else "  (beyond --max)"
+        print(f"{index:>4}  {display}:{mutant.line}  {mutant.operator}: {mutant.description}{marker}")
+    print(f"{len(mutants)} mutants generated, nothing run (--dry-run)")
+
+
+def _print_table(results: Sequence[Result], display: str) -> None:
+    rows = [("#", "fichier:ligne", "mutation", "résultat", "test qui a tué")]
+    for index, result in enumerate(results, start=1):
+        mutant = result.mutant
+        rows.append((
+            str(index),
+            f"{display}:{mutant.line}",
+            f"{mutant.operator}: {mutant.description}",
+            result.status,
+            result.killer,
+        ))
+    widths = [max(len(row[column]) for row in rows) for column in range(len(rows[0]))]
+    for row in rows:
+        print("  ".join(cell.ljust(widths[column]) for column, cell in enumerate(row)).rstrip())
+
+
+def _summary(results: Sequence[Result], generated: int, display: str, allow_survivors: bool) -> int:
+    count = {status: sum(1 for result in results if result.status == status) for status in
+             (KILLED, SURVIVED, NOT_COMPILED, NOT_RUN)}
+    timeouts = sum(1 for result in results if result.killer == TIMED_OUT)
+    print()
+    print(f"{display}: {generated} mutants generated, {len(results) - count[NOT_RUN]} run, {count[NOT_RUN]} not run")
+    print(f"  {KILLED}: {count[KILLED]} (of which {timeouts} by timeout)")
+    print(f"  {SURVIVED}: {count[SURVIVED]}")
+    print(f"  {NOT_COMPILED}: {count[NOT_COMPILED]} (counted apart, never as killed)")
+    if count[SURVIVED]:
+        print("survivors: the tests do not see these changes, see the table above")
+        return EXIT_OK if allow_survivors else EXIT_SURVIVORS
+    return EXIT_OK
+
+
+def _check_file(args: argparse.Namespace) -> int:
+    path = Path(args.file).resolve()
+    if not path.is_file():
+        raise UsageError(f"{args.file}: no such file")
+    original = path.read_bytes()
+    text = _decode(original, args.file)
+    mutants = generate(text)
+    if args.dry_run:
+        _print_list(mutants, args.file, args.max)
+        return EXIT_OK
+    crate = _crate_root(path)
+    backup_dir = Path(tempfile.mkdtemp(prefix="mutants-backup-"))
+    backup = backup_dir / path.name
+    backup.write_bytes(original)
+    print(f"backup of {args.file} (restore by hand with cp if the process was killed with SIGKILL): {backup}")
+    print(f"{len(mutants)} mutants generated in {args.file}, crate {crate}", flush=True)
+
+    def report(index: int, total: int, result: Result) -> None:
+        mutant = result.mutant
+        suffix = f" ({result.killer})" if result.status == KILLED else ""
+        print(f"[{index}/{total}] {args.file}:{mutant.line} {mutant.operator}: {mutant.description} "
+              f"-> {result.status}{suffix}", flush=True)
+
+    source = SourceFile(path, original)
+    restore_failed = False
+    try:
+        with _interrupt_as_exception():
+            results = _execute(source, text, mutants, crate, args.test_filter, args.timeout, _cargo_env(),
+                               args.max, report)
+        source.restore()
+    except RestoreError:
+        restore_failed = True
+        raise
+    finally:
+        if not restore_failed:
+            shutil.rmtree(backup_dir, ignore_errors=True)
+    not_run = [Result(mutant, NOT_RUN, "—") for mutant in mutants[len(results):]]
+    all_results = [*results, *not_run]
+    print()
+    _print_table(all_results, args.file)
+    return _summary(all_results, len(mutants), args.file, args.allow_survivors)
+
+
+def _positive_int(value: str) -> int:
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return number
+
+
+def _positive_float(value: str) -> float:
+    number = float(value)
+    if number <= 0:
+        raise argparse.ArgumentTypeError("must be positive")
+    return number
+
+
+def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog="scripts/mutants", description="Mutation check of one Rust file.")
+    parser.add_argument("file", nargs="?", help="Rust file to mutate (production code only)")
+    parser.add_argument("test_filter", nargs="?", help="filter passed to `cargo test --lib`")
+    parser.add_argument("--dry-run", action="store_true", help="list the mutants, run nothing")
+    parser.add_argument("--max", type=_positive_int, help="run only the first N mutants")
+    parser.add_argument("--timeout", type=_positive_float, default=DEFAULT_TIMEOUT,
+                        help="ceiling per mutant in seconds (default %(default)s)")
+    parser.add_argument("--allow-survivors", action="store_true", help="exit 0 even with survivors")
+    parser.add_argument("--self-test", action="store_true", help="check this script on its canary crate")
+    args = parser.parse_args(argv)
+    if not args.self_test and args.file is None:
+        parser.error("a Rust file is required (or --self-test)")
+    return args
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Self-test: a throwaway crate with deliberate faults, the same mechanism as the canaries of spikes/lint-harness.
+# ---------------------------------------------------------------------------------------------------------------------
+
+CANARY_MANIFEST = """[package]
+name = "mutants_canary"
+version = "0.0.0"
+edition = "2024"
+
+[workspace]
+"""
+
+CANARY_SOURCE = """//! Canary crate of `scripts/mutants --self-test`. The faults are deliberate: each marker names a mutant that the
+//! self-test expects. Lines tagged FORBIDDEN and the test module must never be mutated.
+
+/// [FORBIDDEN] Documentation with a >= 10 and 1 + 1 must never be mutated.
+pub const LABEL: &str = "[FORBIDDEN] a >= 10, 1 + 1, true, return 3";
+
+pub fn is_zero(x: u32) -> bool {
+    x == 0 // CANARY:eq
+}
+
+pub fn sum(a: u32, b: u32) -> u32 {
+    a + b // CANARY:arith
+}
+
+pub fn ten() -> u32 {
+    10 // CANARY:const
+}
+
+pub fn flag() -> bool {
+    true // CANARY:bool
+}
+
+pub fn early(x: u32) -> u32 {
+    if x > 5 { // CANARY:cmp-early
+        return 7; // CANARY:return-early
+    }
+    2
+}
+
+pub fn assigned(seed: u32) -> u32 {
+    let mut out = seed;
+    out = 2; // CANARY:assign
+    out
+}
+
+pub fn tail_return() -> u32 {
+    return 3; // CANARY:return-tail
+}
+
+pub fn above_five(x: u32) -> bool {
+    x > 5 // CANARY:weak
+}
+
+pub fn countdown(start: u32) -> u32 {
+    let mut n = start;
+    while n > 0 {
+        n -= 1; // CANARY:loop
+    }
+    n
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strong_checks() {
+        assert!(is_zero(0));
+        assert!(!is_zero(1));
+        assert_eq!(sum(2, 3), 5);
+        assert_eq!(ten(), 10);
+        assert!(flag());
+        assert_eq!(early(5), 2);
+        assert_eq!(early(6), 7);
+        assert_eq!(assigned(9), 2);
+        assert_eq!(tail_return(), 3);
+        assert_eq!(countdown(3), 0);
+    }
+
+    #[test]
+    fn weak_checks() {
+        assert!(above_five(9));
+        assert!(!above_five(1));
+    }
+}
+"""
+
+# (marker, operator, expected status, a substring the killer must contain). The weak checks leave the two mutants of
+# `above_five` alive: the boundary 5 is never tested. The loop mutant only dies by timeout.
+CANARY_EXPECTED: tuple[tuple[str, str, str, str], ...] = (
+    ("CANARY:eq", "égalité", KILLED, "strong_checks"),
+    ("CANARY:arith", "arithmétique", KILLED, "strong_checks"),
+    ("CANARY:const", "constante", KILLED, "strong_checks"),
+    ("CANARY:bool", "booléen", KILLED, "strong_checks"),
+    ("CANARY:cmp-early", "comparaison", KILLED, "strong_checks"),
+    ("CANARY:return-early", "retour", KILLED, "strong_checks"),
+    ("CANARY:assign", "affectation", KILLED, "strong_checks"),
+    ("CANARY:return-tail", "retour", NOT_COMPILED, "—"),
+    ("CANARY:loop", "affectation", KILLED, TIMED_OUT),
+    ("CANARY:weak", "comparaison", SURVIVED, "—"),
+    ("CANARY:weak", "constante", SURVIVED, "—"),
+)
+
+
+def _line_of(text: str, marker: str) -> int:
+    hits = [number for number, line in enumerate(text.split("\n"), start=1) if marker in line]
+    if len(hits) != 1:
+        raise UsageError(f"canary marker {marker} must appear on exactly one line, found {len(hits)}")
+    return hits[0]
+
+
+def _check_generation(text: str, mutants: Sequence[Mutant]) -> list[str]:
+    forbidden = {number for number, line in enumerate(text.split("\n"), start=1) if "[FORBIDDEN]" in line}
+    attribute = _TEST_ATTRIBUTE.search(code_mask(text))
+    if attribute is not None:
+        first = text[:attribute.start()].count("\n") + 1
+        forbidden |= set(range(first, text.count("\n") + 2))
+    return [
+        f"mutant on a forbidden line {mutant.line}: {mutant.operator} {mutant.description}"
+        for mutant in mutants
+        if mutant.line in forbidden
+    ]
+
+
+def _check_results(text: str, results: Sequence[Result]) -> list[str]:
+    failures: list[str] = []
+    for marker, operator, status, killer_hint in CANARY_EXPECTED:
+        line = _line_of(text, marker)
+        matching = [result for result in results if result.mutant.line == line and result.mutant.operator == operator]
+        if not matching:
+            failures.append(f"no {operator} mutant generated on {marker}")
+        for result in matching:
+            if result.status != status:
+                failures.append(f"{marker} {operator} {result.mutant.description}: expected {status}, "
+                                f"got {result.status}")
+            if killer_hint not in result.killer:
+                failures.append(f"{marker} {operator} {result.mutant.description}: killer {result.killer!r}, "
+                                f"expected to contain {killer_hint!r}")
+    expected_survivors = {
+        (_line_of(text, marker), operator)
+        for marker, operator, status, _ in CANARY_EXPECTED
+        if status == SURVIVED
+    }
+    actual_survivors = {(result.mutant.line, result.mutant.operator) for result in results if result.status == SURVIVED}
+    if actual_survivors != expected_survivors:
+        failures.append(f"survivors {sorted(actual_survivors)} differ from the expected "
+                        f"{sorted(expected_survivors)}")
+    return failures
+
+
+def _self_test() -> int:
+    work = Path(tempfile.mkdtemp(prefix="mutants-selftest-"))
+    failures: list[str] = []
+    try:
+        crate = work / "canary"
+        (crate / "src").mkdir(parents=True)
+        (crate / "Cargo.toml").write_text(CANARY_MANIFEST, encoding="utf-8")
+        path = crate / "src" / "lib.rs"
+        path.write_text(CANARY_SOURCE, encoding="utf-8")
+        original = path.read_bytes()
+        text = _decode(original, "canary")
+        env = _cargo_env()
+        env["CARGO_TARGET_DIR"] = str(work / "target")
+        mutants = generate(text)
+        failures += _check_generation(text, mutants)
+        source = SourceFile(path, original)
+        results: list[Result] = []
+        try:
+            with _interrupt_as_exception():
+                results = _execute(source, text, mutants, crate, None, SELF_TEST_TIMEOUT, env, None,
+                                   lambda _index, _total, _result: None)
+        except UsageError as error:
+            failures.append(str(error))
+        if path.read_bytes() != original:
+            failures.append("the canary file was not restored")
+        failures += _check_results(text, results)
+    except UsageError as error:
+        failures.append(str(error))
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    if failures:
+        for failure in failures:
+            print(f"self-test FAILED: {failure}", file=sys.stderr)
+        return EXIT_SURVIVORS
+    killed = sum(1 for result in results if result.status == KILLED)
+    survived = sum(1 for result in results if result.status == SURVIVED)
+    not_compiled = sum(1 for result in results if result.status == NOT_COMPILED)
+    print(f"self-test ok: {len(results)} mutants on the canary, {killed} killed, {survived} survivors as expected, "
+          f"{not_compiled} not compiling (counted apart)")
+    return EXIT_OK
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = _parse_args(argv)
+    try:
+        if args.self_test:
+            with _interrupt_as_exception():
+                return _self_test()
+        return _check_file(args)
+    except UsageError as error:
+        print(f"mutants: {error}", file=sys.stderr)
+        return EXIT_USAGE
+    except RestoreError as error:
+        print(f"mutants: RESTORATION FAILED: {error}; copy the backup printed above over the file", file=sys.stderr)
+        return EXIT_RESTORE
+    except (KeyboardInterrupt, Interrupted):
+        print("mutants: interrupted; the file under test has been restored", file=sys.stderr)
+        return EXIT_INTERRUPTED
+
+
+if __name__ == "__main__":
+    sys.exit(main())
