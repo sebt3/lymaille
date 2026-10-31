@@ -192,17 +192,23 @@ Exigences envisagées, à qualifier à l'ouverture du lot :
 - **PW-4 :** exécution déterministe vis-à-vis de la relecture du moteur durable de miryad-core (Restate) : l'exécution du script et la sauvegarde de
   l'instantané forment une seule opération journalisée, de sorte qu'une relecture rende le résultat journalisé sans réexécuter le script ni ses
   appels MCP.
-- **PW-5 :** un pad est séquentiel : un second step du même workflow qui demande le pad pendant qu'un script s'exécute est refusé ou mis en file
-  (comme le verrou de tour d'une session).
+- **PW-5 :** un pad est séquentiel : un second step du même workflow qui demande le pad pendant qu'un script s'exécute est refusé avec une
+  erreur explicite, jamais mis en file (comme le verrou de tour d'une session).
 
-Questions ouvertes :
+Décisions (2026-10-31) :
 
-- **TBD :** nature `Workflow` dans `SessionState` ou format d'instantané propre au pad ? (Préférence : la nature, pour ne pas inventer un second format.)
-- **TBD :** pad séquentiel par refus ou par file d'attente ?
-- **TBD :** le kind de step `rhai` de miryad-core (qui utilise `Script::new_bare` de `vynil-core` et les conventions `import_run` et `import_template`) reste
-  inchangé ; un kind de step distinct porte le pad. Le moteur du pad est plus strict (`import` fermé, pas de `const`, les `fn` ne voient pas le scope) : les
-  deux ne sont pas interchangeables, à confirmer par le développeur principal.
-- **TBD :** à qui revient la résolution des références d'authentification MCP pour un workflow (l'hôte, comme pour une session) ?
+- **Décidé :** l'état du pad se persiste sous la nature `Workflow` de `SessionState`, pas sous un format d'instantané propre au pad.
+    - **Source:** user instruction, 2026-10-31
+- **Décidé :** pad séquentiel par refus, pas par file d'attente (PW-5).
+    - **Source:** user instruction, 2026-10-31
+- **Décidé :** le kind de step `rhai` de miryad-core reste inchangé ; un kind distinct (nom à choisir à l'ouverture du lot, côté miryad-core)
+  porte le pad. Le moteur du pad est plus strict (`import` fermé, pas de `const`, les `fn` ne voient pas le scope) : les deux ne sont pas
+  interchangeables.
+    - **Source:** user instruction, 2026-10-31
+- **Décidé :** la résolution des références d'authentification MCP d'un workflow revient à l'hôte, comme pour une session.
+    - **Source:** user instruction, 2026-10-31
+- **Décidé :** le pad de workflow est hors du périmètre 0.1 de `lymaille` ; il reste une extension réservée.
+    - **Source:** user instruction, 2026-10-31
 
 Source: user instruction, 2026-10-30
 

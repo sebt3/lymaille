@@ -10,7 +10,7 @@ remplacer l'inférence actuelle de vanyline et à fournir à miryad-core des ét
 Statut du document : cadrage initial complet au 2026-10-24. Les points restants sont marqués `TBD`, dans les Open Issues
 ou dans la Solution concernée.
 
-Avancement de la réalisation au 2026-10-31 : les sept Solutions ont leurs specs `.sdd` et sont implémentées (`session`, `context-window`, `scratchpad`, `agents`, `toolsets`, `modules`, `delegation`, plus la boucle de tour dans `src/runtime/` ; voir la section « Réalisation SpecDD » de chacune). Ce qui manque pour assembler le tout : la restauration d'une session de bout en bout (`session` FR-3, AC-2 : les pièces existent, aucun assemblage ne les relie), l'adaptateur `rig`, le manifeste de projet, le module de création de toolsets, le prompt de résumé par défaut, la décision sur la section « pad de workflow » (extension réservée, `scratchpad.md`), et l'essai de bout en bout du rejeu du raisonnement contre un vrai modèle.
+Avancement de la réalisation au 2026-10-31 : les sept Solutions ont leurs specs `.sdd` et sont implémentées (`session`, `context-window`, `scratchpad`, `agents`, `toolsets`, `modules`, `delegation`, plus la boucle de tour dans `src/runtime/` ; voir la section « Réalisation SpecDD » de chacune). Ce qui manque pour assembler le tout : la restauration d'une session de bout en bout (`session` FR-3, AC-2 : les pièces existent, aucun assemblage ne les relie), l'adaptateur `rig`, le manifeste de projet, le module de création de toolsets, le prompt de résumé par défaut, et l'essai de bout en bout du rejeu du raisonnement contre un vrai modèle.
 
 ## Objectif et problème
 
@@ -438,6 +438,9 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
   erreur et un événement classés « dépassement de contexte ».
 
 ## Open Issues
+
+- **Décidé:** le pad de workflow (`scratchpad.md`, extension réservée) est hors du périmètre 0.1 ; ses quatre questions sont tranchées dans `scratchpad.md` (nature `Workflow`, refus, kind de step distinct, authentification MCP à l'hôte).
+    - **Source:** user instruction, 2026-10-31
 
 - **Décidé:** la librairie n'est publiée (0.1, fin de `publish = false`) que lorsque ce DSD est complet : aucun cas d'usage n'est
   livré partiellement, hors idées non finalisées.
