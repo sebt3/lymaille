@@ -41,4 +41,5 @@ Tasks:
       derrière une feature Cargo `rig`, activée par défaut, qui implémente @InferenceProvider ; la crate reste testable sans la feature. À spécifier dans une spec fille.
   [!] #3 Projet (FR-4 : manifeste d'agents, de toolsets, de ContextType et de ToolsetContext) : dépend de `toolsets` ; non spécifié ici.
   [x] #4 Décidé le 2026-10-27 : FR-3 est maintenu ; la sérialisation frontmatter + corps utilise `yaml_serde` (`serde_yaml` est archivé). ./definition.sdd livre la sérialisation JSON.
-  [ ] #5 Spécifier et livrer la sérialisation frontmatter + corps d'une définition d'agent (`yaml_serde`).
+  [x] #5 Spécifier et livrer la sérialisation frontmatter + corps d'une définition d'agent (`yaml_serde`).
+      Spec posée dans ./definition.sdd #18 (`to_text` / `from_text`) le 2026-10-31 ; à valider avant de cocher.

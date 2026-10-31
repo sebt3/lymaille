@@ -97,6 +97,7 @@ impl SkillTool {
             (None, Some(document)) => Err(ToolsetsError::InvalidSkill {
                 name: document.to_owned(),
                 reason: "a document is read from a named skill",
+                known: Vec::new(),
             }),
         }
     }
@@ -121,10 +122,11 @@ impl SkillTool {
     fn annex(&self, name: &str, document: &str) -> ToolsetsResult<String> {
         let entry = self.entry(name)?;
         let Some(text) = entry.skill.annex(document) else {
-            let known: Vec<&str> = entry.skill.annexes().keys().map(String::as_str).collect();
+            let known: Vec<String> = entry.skill.annexes().keys().cloned().collect();
             return Err(ToolsetsError::InvalidSkill {
-                name: format!("{name}/{document} (known documents: {})", known.join(", ")),
+                name: document.to_owned(),
                 reason: "unknown annex document",
+                known,
             });
         };
         Ok(self.capped(text))
@@ -132,12 +134,10 @@ impl SkillTool {
 
     /// The granted skill of this name. The error lists the names of the granted skills.
     fn entry(&self, name: &str) -> ToolsetsResult<&Entry> {
-        self.entries.get(name).ok_or_else(|| {
-            let known: Vec<&str> = self.entries.keys().map(String::as_str).collect();
-            ToolsetsError::InvalidSkill {
-                name: format!("{name} (known skills: {})", known.join(", ")),
-                reason: "unknown skill name",
-            }
+        self.entries.get(name).ok_or_else(|| ToolsetsError::InvalidSkill {
+            name: name.to_owned(),
+            reason: "unknown skill name",
+            known: self.entries.keys().cloned().collect(),
         })
     }
 
@@ -168,6 +168,7 @@ fn insert_entry(
         return Err(ToolsetsError::InvalidSkill {
             name,
             reason: "a skill of this name is granted twice",
+            known: Vec::new(),
         });
     }
     let _previous = entries.insert(name, Entry { toolset, skill });
@@ -361,19 +362,20 @@ mod tests {
     fn unknown_skill_lists_the_names() {
         let tool = tool();
         match tool.call(Some("nope"), None) {
-            Err(ToolsetsError::InvalidSkill { name, .. }) => {
-                assert!(name.contains("nope"), "the requested name is named: {name}");
-                assert!(name.contains("deploy"), "the existing names are listed: {name}");
-                assert!(name.contains("rhai-pad"), "the built-in name is listed: {name}");
+            Err(ToolsetsError::InvalidSkill { name, known, .. }) => {
+                assert_eq!(name, "nope", "the name carries only the requested name");
+                assert_eq!(
+                    known,
+                    ["deploy", "rhai-pad"],
+                    "the existing names are listed apart, in name order"
+                );
             }
             other => panic!("an unknown skill must fail with InvalidSkill, got {other:?}"),
         }
         match tool.call(Some("deploy"), Some("nope")) {
-            Err(ToolsetsError::InvalidSkill { name, .. }) => {
-                assert!(
-                    name.contains("queries"),
-                    "the existing documents are listed: {name}"
-                );
+            Err(ToolsetsError::InvalidSkill { name, known, .. }) => {
+                assert_eq!(name, "nope", "the name carries only the requested document");
+                assert_eq!(known, ["queries"], "the existing documents are listed apart");
             }
             other => panic!("an unknown document must fail with InvalidSkill, got {other:?}"),
         }

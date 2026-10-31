@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use serde::de::{MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use super::{ToolsetsError, ToolsetsResult};
@@ -13,6 +14,15 @@ use super::{ToolsetsError, ToolsetsResult};
 const NAME_MAX_CHARS: usize = 64;
 /// Largest number of characters of a skill description.
 const DESCRIPTION_MAX_CHARS: usize = 1024;
+/// Line that opens and closes the frontmatter of a `SKILL.md` text.
+const FENCE: &str = "---";
+/// Name that a refusal of a parsed text carries in place of a value of the file.
+const PARSED_NAME: &str = "<SKILL.md>";
+/// Reason of a text without a closed frontmatter.
+const FRONTMATTER_MISSING: &str = "the frontmatter is missing or is not closed by a `---` line";
+/// Reason of a frontmatter that is not YAML with the expected fields.
+const FRONTMATTER_UNREADABLE: &str =
+    "the frontmatter is not readable YAML with a name, a description and string metadata";
 
 /// Skill: a body of instructions with its metadata and its annex documents. The body and the description are templates,
 /// rendered by the template module; a skill grants no capability.
@@ -40,12 +50,14 @@ impl Skill {
             return Err(ToolsetsError::InvalidSkill {
                 name,
                 reason: "the name must hold 1 to 64 lowercase ASCII letters, digits or hyphens",
+                known: Vec::new(),
             });
         }
         if description.trim().is_empty() || description.chars().count() > DESCRIPTION_MAX_CHARS {
             return Err(ToolsetsError::InvalidSkill {
                 name,
                 reason: "the description must hold 1 to 1024 characters and must not be blank",
+                known: Vec::new(),
             });
         }
         Ok(Self {
@@ -73,6 +85,35 @@ impl Skill {
         self
     }
 
+    /// Reads a `SKILL.md` text: a frontmatter of YAML between two `---` lines, then the body, which is the text after
+    /// the closing line (that line and its line break removed, nothing else changed). The fields `name`, `description`,
+    /// `license`, `compatibility` and `metadata` (a table of strings) are read; every other field is ignored, `allowed-tools`
+    /// included.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ToolsetsError::InvalidSkill`] when the frontmatter is missing or not closed, when it is not readable YAML
+    /// with those fields, when a metadata key is declared twice, or when the name or the description is refused. A refusal
+    /// names the file (`<SKILL.md>`), never a value of the text.
+    pub fn parse(text: &str) -> ToolsetsResult<Self> {
+        let (frontmatter, body) =
+            split_frontmatter(text).ok_or_else(|| parsed_refusal(FRONTMATTER_MISSING))?;
+        let record: Frontmatter = yaml_serde::from_str(&frontmatter)
+            .ok()
+            .ok_or_else(|| parsed_refusal(FRONTMATTER_UNREADABLE))?;
+        let mut skill = Self::new(record.name, record.description, body).map_err(hide_name)?;
+        if let Some(license) = record.license {
+            skill = skill.with_license(license);
+        }
+        if let Some(compatibility) = record.compatibility {
+            skill = skill.with_compatibility(compatibility);
+        }
+        for (key, value) in record.metadata.map(|pairs| pairs.0).unwrap_or_default() {
+            skill = skill.with_metadata(key, value).map_err(hide_name)?;
+        }
+        Ok(skill)
+    }
+
     /// Adds a metadata entry.
     ///
     /// # Errors
@@ -84,6 +125,7 @@ impl Skill {
             return Err(ToolsetsError::InvalidSkill {
                 name: self.name,
                 reason: "a metadata key is declared twice",
+                known: Vec::new(),
             });
         }
         let _previous = self.metadata.insert(key, value);
@@ -101,12 +143,14 @@ impl Skill {
             return Err(ToolsetsError::InvalidSkill {
                 name,
                 reason: "the annex name is empty",
+                known: Vec::new(),
             });
         }
         if self.annexes.contains_key(&name) {
             return Err(ToolsetsError::InvalidSkill {
                 name,
                 reason: "an annex of this name is declared twice",
+                known: Vec::new(),
             });
         }
         let _previous = self.annexes.insert(name, text);
@@ -221,6 +265,85 @@ impl<'de> Deserialize<'de> for Skill {
             built = built.with_annex(name, text).map_err(fail)?;
         }
         Ok(built)
+    }
+}
+
+/// The frontmatter of a `SKILL.md` text. Unknown fields are ignored: `allowed-tools` grants nothing.
+#[derive(Deserialize)]
+struct Frontmatter {
+    name: String,
+    description: String,
+    license: Option<String>,
+    compatibility: Option<String>,
+    metadata: Option<MetadataPairs>,
+}
+
+/// The metadata of a frontmatter, in the order of the file, with a key declared twice kept as twice, so that
+/// [`Skill::with_metadata`] refuses it instead of replacing it in silence.
+struct MetadataPairs(Vec<(String, String)>);
+
+impl<'de> Deserialize<'de> for MetadataPairs {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_map(PairsVisitor)
+    }
+}
+
+/// Visitor that reads every entry of a metadata table, duplicates included.
+struct PairsVisitor;
+
+impl<'de> Visitor<'de> for PairsVisitor {
+    type Value = MetadataPairs;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a table of strings")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let mut pairs = Vec::new();
+        while let Some(pair) = map.next_entry::<String, String>()? {
+            pairs.push(pair);
+        }
+        Ok(MetadataPairs(pairs))
+    }
+}
+
+/// Splits a `SKILL.md` text into its frontmatter and its body. The opening `---` line must be the first line; the
+/// frontmatter runs to the first following `---` line, and the body is what follows that line. CRLF line endings are
+/// accepted. Returns `None` when the frontmatter is missing or not closed.
+fn split_frontmatter(text: &str) -> Option<(String, String)> {
+    let lines: Vec<&str> = text.split_inclusive('\n').collect();
+    let (opening, rest) = lines.split_first()?;
+    if line_text(opening) != FENCE {
+        return None;
+    }
+    let closing = rest.iter().position(|line| line_text(line) == FENCE)?;
+    let (frontmatter, after) = rest.split_at_checked(closing)?;
+    let body: String = after.iter().skip(1).copied().collect();
+    Some((frontmatter.concat(), body))
+}
+
+/// The text of a line without its line break, LF or CRLF.
+fn line_text(line: &str) -> &str {
+    let without_newline = line.strip_suffix('\n').unwrap_or(line);
+    without_newline.strip_suffix('\r').unwrap_or(without_newline)
+}
+
+/// A refusal raised while reading a parsed text names the file, not the skill: the name of the skill may be the very value
+/// that is refused, and a message never carries a value of the text.
+fn hide_name(error: ToolsetsError) -> ToolsetsError {
+    if let ToolsetsError::InvalidSkill { reason, .. } = error {
+        parsed_refusal(reason)
+    } else {
+        error
+    }
+}
+
+/// The refusal of a parsed text: an invalid skill named after the file, with a fixed reason.
+fn parsed_refusal(reason: &'static str) -> ToolsetsError {
+    ToolsetsError::InvalidSkill {
+        name: PARSED_NAME.to_owned(),
+        reason,
+        known: Vec::new(),
     }
 }
 
@@ -371,6 +494,170 @@ mod tests {
             matches!(result, Err(ToolsetsError::InvalidSkill { .. })),
             "an annex without a name is refused"
         );
+    }
+
+    /// A complete `SKILL.md`: the frontmatter between two `---` lines, then the body.
+    const SKILL_FILE: &str = "---\nname: grafana\ndescription: Query the dashboards\nlicense: BSD-3-Clause\ncompatibility: any Rhai scratchpad\nmetadata:\n  owner: team\n---\nUse the dashboards.\n\nSecond paragraph.\n";
+
+    // Scenario: valid skill file is parsed
+    #[test]
+    fn valid_skill_file_is_parsed() {
+        let parsed = Skill::parse(SKILL_FILE).expect("a valid SKILL.md must parse");
+        assert_eq!(parsed.name(), "grafana");
+        assert_eq!(parsed.description(), "Query the dashboards");
+        assert_eq!(parsed.license(), Some("BSD-3-Clause"));
+        assert_eq!(parsed.compatibility(), Some("any Rhai scratchpad"));
+        assert_eq!(parsed.metadata().get("owner").map(String::as_str), Some("team"));
+        assert_eq!(
+            parsed.body(),
+            "Use the dashboards.\n\nSecond paragraph.\n",
+            "the body is the text after the frontmatter"
+        );
+    }
+
+    #[test]
+    fn body_keeps_later_rule_lines_and_crlf_endings() {
+        let rule = Skill::parse("---\nname: grafana\ndescription: d\n---\nabove\n---\nbelow\n")
+            .expect("a body may hold a `---` line after the closing one");
+        assert_eq!(rule.body(), "above\n---\nbelow\n");
+        let crlf = Skill::parse("---\r\nname: grafana\r\ndescription: d\r\n---\r\nbody\r\n")
+            .expect("CRLF line endings parse");
+        assert_eq!(
+            crlf.body(),
+            "body\r\n",
+            "the closing line and its line break are removed"
+        );
+        let empty = Skill::parse("---\nname: grafana\ndescription: d\n---").expect("an empty body parses");
+        assert_eq!(
+            empty.body(),
+            "",
+            "a closing line at the end of the text leaves an empty body"
+        );
+    }
+
+    // Scenario: allowed-tools is ignored
+    #[test]
+    fn allowed_tools_is_ignored() {
+        let plain = Skill::parse("---\nname: grafana\ndescription: d\n---\nbody\n").expect("parses");
+        let granted =
+            Skill::parse("---\nname: grafana\ndescription: d\nallowed-tools: [rhai_pad, shell]\n---\nbody\n")
+                .expect("the frontmatter with allowed-tools parses");
+        assert_eq!(
+            granted, plain,
+            "allowed-tools grants no capability: the skill is the same"
+        );
+    }
+
+    #[test]
+    fn unknown_frontmatter_fields_are_tolerated() {
+        let plain = Skill::parse("---\nname: grafana\ndescription: d\n---\nbody\n").expect("parses");
+        let extra = Skill::parse("---\nname: grafana\ndescription: d\nauthor: someone\n---\nbody\n")
+            .expect("an unknown field parses");
+        assert_eq!(extra, plain, "an unknown field changes nothing");
+    }
+
+    // Scenario: invalid name refused (for a parsed file)
+    #[test]
+    fn invalid_name_refused_when_parsed() {
+        for name in ["Grafana", "a b", ""] {
+            let text = format!("---\nname: \"{name}\"\ndescription: d\n---\nbody\n");
+            assert!(
+                matches!(Skill::parse(&text), Err(ToolsetsError::InvalidSkill { .. })),
+                "the parsed name `{name}` must fail with InvalidSkill"
+            );
+        }
+    }
+
+    #[test]
+    fn blank_description_refused_when_parsed() {
+        assert!(
+            matches!(
+                Skill::parse("---\nname: grafana\ndescription: \"  \"\n---\nbody\n"),
+                Err(ToolsetsError::InvalidSkill { .. })
+            ),
+            "a blank description is refused when parsed"
+        );
+    }
+
+    #[test]
+    fn missing_or_unclosed_frontmatter_refused() {
+        for text in [
+            "name: grafana\ndescription: d\nbody\n",
+            "---\nname: grafana\ndescription: d\nbody\n",
+        ] {
+            assert!(
+                matches!(Skill::parse(text), Err(ToolsetsError::InvalidSkill { .. })),
+                "a text without a closed frontmatter must fail with InvalidSkill: {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn frontmatter_must_open_the_text() {
+        let text = "intro line\nname: grafana\ndescription: d\n---\nbody\n";
+        assert!(
+            matches!(Skill::parse(text), Err(ToolsetsError::InvalidSkill { .. })),
+            "a `---` line that is not the first line does not open a frontmatter"
+        );
+    }
+
+    // Scenario: refusals never carry the content of the file
+    #[test]
+    fn malformed_frontmatter_refused_without_its_content() {
+        let text = "---\nname: [FILE-CONTENT-SECRET\ndescription: d\n---\nbody\n";
+        match Skill::parse(text) {
+            Err(error @ ToolsetsError::InvalidSkill { .. }) => {
+                assert!(
+                    !error.to_string().contains("FILE-CONTENT-SECRET"),
+                    "the refusal must not carry the file: {error}"
+                );
+            }
+            other => panic!("malformed YAML must fail with InvalidSkill, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn invalid_name_refusal_never_echoes_the_name() {
+        match Skill::parse("---\nname: Grafana-NAME-SECRET\ndescription: d\n---\nbody\n") {
+            Err(error @ ToolsetsError::InvalidSkill { .. }) => assert!(
+                !error.to_string().contains("NAME-SECRET"),
+                "the refusal of a file must not echo a value of the file: {error}"
+            ),
+            other => panic!("an invalid name must fail with InvalidSkill, got {other:?}"),
+        }
+    }
+
+    // Task #2 decision: metadata is a table of strings; a duplicate key is refused, never replaced in silence.
+    #[test]
+    fn duplicate_metadata_key_refused_when_parsed() {
+        assert!(
+            matches!(
+                Skill::parse(
+                    "---\nname: grafana\ndescription: d\nmetadata:\n  owner: a\n  owner: b\n---\nbody\n"
+                ),
+                Err(ToolsetsError::InvalidSkill { .. })
+            ),
+            "a metadata key declared twice is refused"
+        );
+    }
+
+    #[test]
+    fn metadata_value_that_is_a_list_or_a_table_refused() {
+        for value in ["[a, b]", "{ nested: x }"] {
+            let text = format!("---\nname: grafana\ndescription: d\nmetadata:\n  tags: {value}\n---\nbody\n");
+            assert!(
+                matches!(Skill::parse(&text), Err(ToolsetsError::InvalidSkill { .. })),
+                "metadata is a table of strings, `{value}` is refused"
+            );
+        }
+    }
+
+    #[test]
+    fn metadata_scalar_is_read_as_its_text() {
+        let parsed =
+            Skill::parse("---\nname: grafana\ndescription: d\nmetadata:\n  version: 1.0\n---\nbody\n")
+                .expect("a scalar parses as its text");
+        assert_eq!(parsed.metadata().get("version").map(String::as_str), Some("1.0"));
     }
 
     // Scenario: oversized body refused

@@ -19,19 +19,27 @@ Exposes:
   @SandboxLimits::max_array_len
   @SandboxLimits::max_map_len
   @AgentDefinition::fingerprint
+  @AgentDefinition::to_text
+  @AgentDefinition::from_text
 
 Accepts:
   @AgentDefinition::new: l'identifiant, la nature (@AgentKind : `Work`, `Config` ou `Sub`), le prompt système (gabarit texte) et le nom du profil de modèle, puis des constructeurs chaînés : paramètres d'échantillonnage, modules, toolsets, @SandboxLimits (délai de script, plafond de rendu en caractères, et trois plafonds de mémoire optionnels), nom de la stratégie de contexte, sous-agents délégables (agent de travail), schéma JSON de sortie (sous-agent).
   @AgentDefinition::validate: aucun argument.
   @SandboxLimits::with_max_string_bytes, @SandboxLimits::with_max_array_len, @SandboxLimits::with_max_map_len: un entier non signé (`u64`) par plafond de mémoire (octets pour la chaîne, éléments pour le tableau, entrées pour la table) ; zéro est accepté par le constructeur et refusé par @AgentDefinition::validate.
 
+  @AgentDefinition::to_text: aucun argument (la définition) ; un texte `AGENT.md` : frontmatter YAML entre deux lignes `---`, puis le prompt système comme corps.
+  @AgentDefinition::from_text: un texte de ce format.
+
 Returns:
+  @AgentDefinition::to_text: le texte `---`, les champs de la définition sauf `prompt` en YAML (clés triées), `---`, puis le prompt exactement, sans ajout ni retrait.
+  @AgentDefinition::from_text: la définition relue ; un champ inconnu du frontmatter est ignoré.
   @AgentDefinition::fingerprint: une chaîne hexadécimale de 16 caractères, empreinte stable de la définition.
   @AgentDefinition::validate: succès ou @AgentsError::InvalidDefinition.
   @SandboxLimits::max_string_bytes, @SandboxLimits::max_array_len, @SandboxLimits::max_map_len: `None` quand le plafond est absent (le défaut de `scratchpad/limits` s'applique alors), sinon la valeur posée.
 
 Raises:
   @AgentsError::InvalidDefinition: un sous-agent ou un agent de configuration qui déclare des sous-agents délégables ; un agent de travail ou de configuration qui déclare un schéma de sortie ; un module réservé à la configuration (`toolset_creator`, `inspect`, `contexts`, `sessions`) accordé à un agent de travail ou à un sous-agent ; un identifiant, un prompt ou un nom de profil vide ; un sous-agent délégable égal à l'agent lui-même ou en double ; une liste de toolsets ou de modules qui contient un doublon ; un plafond de mémoire du sandbox posé à zéro.
+  @AgentsError::InvalidDefinition, identifiant `<AGENT.md>` et raison fixe : frontmatter absent ou non fermé, YAML illisible, champ de mauvais type, champ `prompt` dans le frontmatter (le prompt est le corps, choix posé le 2026-10-31 à valider : un doublon refusé plutôt qu'écrasé en silence). Le message ne porte jamais le prompt ni une valeur du texte.
 
 Must:
   Le modèle se désigne par un nom de profil : la définition n'a aucun champ de fournisseur.
@@ -40,12 +48,18 @@ Must:
   Un sous-agent ne délègue pas (`agent-sessions#BR-6`) ; seul un agent de travail a des sous-agents délégables. Un agent de configuration ne délègue pas et reçoit seul les modules réservés à la configuration (`agent-sessions#BR-8`).
   Les capacités sont exactement celles de la définition (`agent-sessions#BR-2`) : aucune valeur par défaut n'accorde un module ou un toolset ; les listes absentes sont vides. La définition ne porte aucun droit de Memory : l'accès à un niveau se décide par les toolsets (`agent-sessions/modules#FR-4`).
   Se sérialise et se désérialise à l'identique ; aucun champ ne porte de secret.
+  Le texte ne porte aucune clé de fournisseur (`agents#FR-8`) : le profil seul.
+  `from_text(to_text(d))` est identique à `d` et a la même empreinte. Les plafonds de mémoire absents n'apparaissent pas dans le texte, comme dans le JSON.
+  Le prompt est le corps exact : aucun `trim`, aucune ligne ajoutée. Seule la première ligne `---` après le frontmatter ferme ce dernier ; une ligne `---` dans le corps reste dans le prompt.
+  Le texte doit s'ouvrir par la ligne `---` ; les fins de ligne CRLF sont acceptées à la relecture et le prompt garde les siennes.
+  Le découpage du frontmatter reprend celui de `../toolsets/skill.rs` (`Skill::parse`) par copie : à factoriser dans un module partagé si un troisième texte apparaît.
 
 Depends on:
   ./error.sdd
   ./profile.sdd
   serde
   serde_json
+  yaml_serde (décidé le 2026-10-31, ../toolsets/toolsets.sdd #2)
 
 Tasks:
   [x] #6 Tests manquants : l'empreinte change pour chaque champ de la liste du Must (prompt, profil, toolsets, modules, délai et plafond de sandbox, sous-agents délégables, schéma de sortie, aussi id, nature, paramètres, stratégie de contexte) ;
@@ -75,6 +89,7 @@ Tasks:
   [x] #17 Prose en retard sur la nature : `Accepts` (« sous-agents délégables (principal) »), rustdoc de `with_delegable` et de `delegable()` dans definition.rs, rustdoc de `delegable_subagents` dans ../toolsets/compat.rs (« main agent »).
       Validé le 2026-10-29 (implémentation vérifiée par mutations de l'auteur), validation par le validator groupée avec T6.
       Prose corrigée (Accepts, rustdocs) le 2026-10-29 ; validé.
+  [ ] #18 Sérialisation texte (frontmatter YAML + prompt en corps) : `to_text` et `from_text`, avec les Scenarios de fin de ce fichier ; tests rouges puis implémentation, à valider.
 
 Scenario: model by profile name only
   Given a definition built with profile `strix-qwen`
@@ -165,3 +180,34 @@ Scenario: configuration agent with its modules is valid
   Given une définition de nature Config qui accorde `toolset_creator`, `inspect`, `contexts` et `sessions`
   When elle est validée
   Then elle réussit
+
+
+Scenario: définition aller-retour texte
+  Given une définition de nature Work avec tous les champs renseignés, y compris les trois plafonds de mémoire
+  When elle est écrite en texte puis relue
+  Then la définition relue est identique et son empreinte est la même
+
+Scenario: le texte ne nomme que le profil
+  Given une définition du profil `strix-qwen`
+  When elle est écrite en texte
+  Then le texte contient `profile: strix-qwen`, n'a aucune clé `provider`, et le prompt suit exactement la seconde ligne `---`
+
+Scenario: champ inconnu toléré à la relecture
+  Given un texte de définition portant un champ `author` absent de la définition
+  When il est relu
+  Then la définition est celle du texte sans ce champ
+
+Scenario: prompt exact, lignes de tirets comprises
+  Given un prompt qui commence par une ligne vide, contient une ligne `---` et finit par un saut de ligne
+  When la définition est écrite puis relue
+  Then le prompt relu est identique au prompt d'origine
+
+Scenario: texte refusé sans contenu
+  Given un texte dont le frontmatter est illisible et dont le prompt contient une valeur de secret
+  When il est relu
+  Then la relecture échoue avec InvalidDefinition et le message ne contient ni le prompt ni la valeur
+
+Scenario: frontmatter absent ou non fermé refusé
+  Given un texte sans ligne `---` d'ouverture, puis un texte sans ligne `---` de fermeture
+  When chacun est relu
+  Then chacun échoue avec InvalidDefinition

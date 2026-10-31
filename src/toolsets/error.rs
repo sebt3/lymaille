@@ -27,13 +27,16 @@ pub enum ToolsetsError {
         /// offending version text. Never a fragment of a source text.
         detail: String,
     },
-    /// A skill is inconsistent: name or description out of bounds, or an annex document declared twice.
-    #[error("invalid skill `{name}`: {reason}")]
+    /// A skill is inconsistent or unknown: name or description out of bounds, an annex document declared twice, or a
+    /// skill or annex document requested by a name that does not exist.
+    #[error("invalid skill `{name}`: {reason}{}", known_note(.known))]
     InvalidSkill {
-        /// Name of the refused skill.
+        /// Name that was refused: the skill, or the annex document, as declared or requested.
         name: String,
         /// Fixed reason of the refusal.
         reason: &'static str,
+        /// Names that do exist, in place of the refused one (for an unknown name); empty when there is none.
+        known: Vec<String>,
     },
     /// A toolset context is inconsistent: empty name, empty role or parameter name, or a value that looks like a secret.
     /// The name is the one of the context, role or parameter concerned; the value is never carried.
@@ -92,6 +95,15 @@ fn detail_note(detail: &str) -> String {
     }
 }
 
+/// The note that lists the names that exist, after the reason of an unknown name: nothing when there is none.
+fn known_note(known: &[String]) -> String {
+    if known.is_empty() {
+        String::new()
+    } else {
+        format!(" (known: {})", known.join(", "))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::ToolsetsError;
@@ -112,6 +124,29 @@ mod tests {
             !text.contains("sk-abcdef"),
             "the message must never carry the value: {text}"
         );
+    }
+
+    #[test]
+    fn invalid_skill_message_lists_known_names_after_the_reason() {
+        let error = ToolsetsError::InvalidSkill {
+            name: "nope".to_owned(),
+            reason: "unknown skill name",
+            known: vec!["deploy".to_owned(), "rhai-pad".to_owned()],
+        };
+        assert_eq!(
+            error.to_string(),
+            "invalid skill `nope`: unknown skill name (known: deploy, rhai-pad)"
+        );
+    }
+
+    #[test]
+    fn invalid_skill_message_has_no_note_without_known_names() {
+        let error = ToolsetsError::InvalidSkill {
+            name: "Grafana".to_owned(),
+            reason: "unknown skill name",
+            known: Vec::new(),
+        };
+        assert_eq!(error.to_string(), "invalid skill `Grafana`: unknown skill name");
     }
 
     #[test]

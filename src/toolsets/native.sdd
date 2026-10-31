@@ -23,7 +23,7 @@ Returns:
   `session_context()` : une table Rhai de copie (paramètres résolus par toolset, noms des rôles liés), jamais de référence de secret.
 
 Raises:
-  @ToolsetsError::InvalidSkill: nom de skill ou de document inconnu (le message liste les noms existants).
+  @ToolsetsError::InvalidSkill: nom de skill ou de document inconnu ; `name` porte le nom demandé seul, `known` la liste des noms existants (le message les liste).
   @ToolsetsError::Template: voir ./template.sdd.
 
 Must:
@@ -68,7 +68,7 @@ Tasks:
       - le skill intégré s'appelle `rhai-pad` : un nom de skill n'admet pas `_` (./skill.sdd) ; l'outil reste `rhai_pad` dans son texte ;
       - `session_context()` rend les clés `params` (paramètres partagés), `toolsets` et `roles` : `shared` est un mot réservé de Rhai ;
       - `session_context` est enregistrée non volatile par `FuncRegistration` (déclarée déterministe) ; `register_fn` la rendrait volatile. L'indicateur n'est pas observable par l'API publique de Rhai (mutant survivant, non testé) ;
-      - `InvalidSkill` n'a qu'une raison `&'static str` : la liste des noms existants entre dans le champ `name` (« nom (known skills: …) »), faute de variante dédiée (./error.sdd) ;
+      - `InvalidSkill` porte un champ `known` (décidé le 2026-10-31) : `name` ne porte que le nom demandé ; pour un document inconnu, `name` est le nom du document demandé, le message ne nomme pas le skill (raison fixe, pas de skill dans le champ) ;
       - `skill` avec un nom de document seul : refusé par `InvalidSkill`, cas non prévu par la spec ;
       - la liste sans argument rend aussi le corps de chaque skill (la description et le corps passent par le même rendu) : un corps qui ne se rend pas fait échouer la liste ;
       - @builtin_rhai_pad_skill refuse un texte qui dépasse le plafond de rendu (`SkillTooLarge`) ;

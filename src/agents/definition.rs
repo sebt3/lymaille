@@ -324,6 +324,54 @@ impl AgentDefinition {
         Ok(())
     }
 
+    /// Writes the definition as text: a YAML frontmatter of every field but the prompt, then the prompt as the body, exactly.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AgentsError::InvalidDefinition`] when the definition does not serialize, which no definition built by this
+    /// module does.
+    pub fn to_text(&self) -> AgentsResult<String> {
+        let mut head = serde_json::to_value(self)
+            .ok()
+            .ok_or_else(|| text_refusal("the definition does not serialize"))?;
+        let object = head
+            .as_object_mut()
+            .ok_or_else(|| text_refusal("the definition is not a table of fields"))?;
+        let _prompt = object.remove("prompt");
+        let yaml = yaml_serde::to_string(&*object)
+            .ok()
+            .ok_or_else(|| text_refusal("the frontmatter does not serialize"))?;
+        let line_break = if yaml.ends_with('\n') { "" } else { "\n" };
+        Ok(format!("{FENCE}\n{yaml}{line_break}{FENCE}\n{}", self.prompt))
+    }
+
+    /// Reads a text of the format of [`AgentDefinition::to_text`]: the frontmatter is read as YAML, the body is the prompt.
+    /// Unknown frontmatter fields are ignored. The result is not validated: call [`AgentDefinition::validate`] for that.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AgentsError::InvalidDefinition`] when the frontmatter is missing or not closed, when it is not readable
+    /// YAML of a definition, or when it holds a `prompt` field, which the body is. The refusal carries no value of the text.
+    pub fn from_text(text: &str) -> AgentsResult<Self> {
+        let (frontmatter, prompt) = split_text(text)
+            .ok_or_else(|| text_refusal("the frontmatter is missing or is not closed by a `---` line"))?;
+        let mut head: Value = yaml_serde::from_str(&frontmatter)
+            .ok()
+            .ok_or_else(|| text_refusal("the frontmatter is not readable YAML of a definition"))?;
+        let object = head
+            .as_object_mut()
+            .ok_or_else(|| text_refusal("the frontmatter is not a table of fields"))?;
+        if object.contains_key("prompt") {
+            return Err(text_refusal(
+                "the frontmatter holds a prompt field, the prompt is the body",
+            ));
+        }
+        let _previous = object.insert("prompt".to_owned(), Value::String(prompt));
+        serde_json::from_value::<Self>(head)
+            .ok()
+            .ok_or_else(|| text_refusal("the frontmatter is not readable YAML of a definition"))
+    }
+
     /// Returns the fingerprint of the definition: 16 hexadecimal digits of FNV-1a 64 bits over its canonical JSON.
     #[must_use]
     pub fn fingerprint(&self) -> String {
@@ -381,6 +429,40 @@ fn fnv1a_64(bytes: &[u8]) -> u64 {
     bytes.iter().fold(FNV_OFFSET_BASIS, |hash, &byte| {
         (hash ^ u64::from(byte)).wrapping_mul(FNV_PRIME)
     })
+}
+
+/// Line that opens and closes the frontmatter of a text.
+const FENCE: &str = "---";
+
+/// Splits a text into its frontmatter and its body. The opening `---` line must be the first line; the frontmatter runs to
+/// the first following `---` line, and the body is what follows that line, unchanged. CRLF line endings are accepted.
+fn split_text(text: &str) -> Option<(String, String)> {
+    let lines: Vec<&str> = text.split_inclusive('\n').collect();
+    let (opening, rest) = lines.split_first()?;
+    if line_text(opening) != FENCE {
+        return None;
+    }
+    let closing = rest.iter().position(|line| line_text(line) == FENCE)?;
+    let (frontmatter, after) = rest.split_at_checked(closing)?;
+    let body: String = after.iter().skip(1).copied().collect();
+    Some((frontmatter.concat(), body))
+}
+
+/// The text of a line without its line break, LF or CRLF.
+fn line_text(line: &str) -> &str {
+    let without_newline = line.strip_suffix('\n').unwrap_or(line);
+    without_newline.strip_suffix('\r').unwrap_or(without_newline)
+}
+
+/// Identifier that a refusal of a text carries: the definition is not known for certain when the text does not read.
+const TEXT_ID: &str = "<AGENT.md>";
+
+/// The refusal of a text that does not read as a definition, with a fixed reason.
+fn text_refusal(reason: &'static str) -> AgentsError {
+    AgentsError::InvalidDefinition {
+        id: TEXT_ID.to_owned(),
+        reason,
+    }
 }
 
 #[cfg(test)]
@@ -459,6 +541,191 @@ mod tests {
             matches!(result, Err(AgentsError::InvalidDefinition { .. })),
             "{case} must fail with InvalidDefinition, got {result:?}"
         );
+    }
+
+    /// The prompt of the text tests, after the frontmatter.
+    fn body_of(text: &str) -> &str {
+        text.split_once("\n---\n").map_or("", |(_head, body)| body)
+    }
+
+    // Scenario: définition aller-retour texte
+    #[test]
+    fn text_round_trip_is_identical() {
+        let definition = full_main_agent();
+        let text = definition.to_text().expect("a definition is written");
+        let back = AgentDefinition::from_text(&text).expect("the text is read back");
+        assert_eq!(back, definition, "the round trip must be identical");
+        assert_eq!(
+            back.fingerprint(),
+            definition.fingerprint(),
+            "the fingerprint is the same"
+        );
+    }
+
+    #[test]
+    fn text_round_trip_keeps_the_output_schema_of_a_sub_agent() {
+        let definition = sub_agent().with_output_schema(serde_json::json!({
+            "type": "object",
+            "properties": { "ok": { "type": "boolean" } }
+        }));
+        let text = definition.to_text().expect("a sub-agent is written");
+        let back = AgentDefinition::from_text(&text).expect("the text is read back");
+        assert_eq!(back, definition, "the output schema survives the round trip");
+    }
+
+    // Scenario: le texte ne nomme que le profil
+    #[test]
+    fn text_names_the_profile_and_no_provider() {
+        let text = main_agent().to_text().expect("a definition is written");
+        assert!(
+            text.starts_with("---\n"),
+            "the frontmatter opens the text: {text}"
+        );
+        assert!(
+            text.contains("\nprofile: strix-qwen\n"),
+            "the profile name is written: {text}"
+        );
+        assert!(
+            !text.contains("provider"),
+            "no provider field in the text: {text}"
+        );
+        assert!(
+            text.ends_with(&format!("\n---\n{PROMPT}")),
+            "the prompt follows the closing line exactly: {text}"
+        );
+    }
+
+    // Scenario: champ inconnu toléré à la relecture
+    #[test]
+    fn unknown_text_field_is_tolerated() {
+        let text = main_agent().to_text().expect("a definition is written");
+        let with_extra = text.replacen(
+            "profile: strix-qwen\n",
+            "profile: strix-qwen\nauthor: someone\n",
+            1,
+        );
+        let back = AgentDefinition::from_text(&with_extra).expect("the unknown field is tolerated");
+        assert_eq!(back, main_agent(), "the unknown field changes nothing");
+    }
+
+    // Scenario: prompt exact, lignes de tirets comprises
+    #[test]
+    fn prompt_is_kept_byte_for_byte() {
+        let prompt = "\nFirst line.\n---\nLast line.\n\n";
+        let definition = AgentDefinition::new(
+            "main".to_owned(),
+            AgentKind::Work,
+            prompt.to_owned(),
+            PROFILE.to_owned(),
+        );
+        let text = definition.to_text().expect("a definition is written");
+        assert_eq!(
+            body_of(&text),
+            prompt,
+            "the body is the prompt, nothing added or trimmed"
+        );
+        let back = AgentDefinition::from_text(&text).expect("the text is read back");
+        assert_eq!(back.prompt(), prompt, "the prompt is read back exactly");
+    }
+
+    #[test]
+    fn absent_memory_limits_are_not_written() {
+        let definition = AgentDefinition::new(
+            "main".to_owned(),
+            AgentKind::Work,
+            PROMPT.to_owned(),
+            PROFILE.to_owned(),
+        )
+        .with_sandbox(sandbox(30, 10_000, None, None, None));
+        let text = definition.to_text().expect("a definition is written");
+        assert!(
+            !text.contains("max_string_bytes"),
+            "an absent limit is not written: {text}"
+        );
+        assert!(
+            !text.contains("max_map_len"),
+            "an absent limit is not written: {text}"
+        );
+    }
+
+    // Scenario: texte refusé sans contenu
+    #[test]
+    fn malformed_text_refused_without_its_content() {
+        let text = "---\nid: [SECRET-ID\nkind: work\n---\nSECRET-PROMPT-VALUE\n";
+        match AgentDefinition::from_text(text) {
+            Err(error @ AgentsError::InvalidDefinition { .. }) => {
+                let shown = error.to_string();
+                assert!(
+                    !shown.contains("SECRET"),
+                    "the refusal carries no value of the text: {shown}"
+                );
+            }
+            other => panic!("malformed YAML must fail with InvalidDefinition, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn field_of_the_wrong_type_refused_without_its_content() {
+        let text = "---\nid: [1, 2]\nkind: work\nprofile: strix-qwen\n---\nbody\n";
+        match AgentDefinition::from_text(text) {
+            Err(error @ AgentsError::InvalidDefinition { .. }) => assert!(
+                !error.to_string().contains("1, 2"),
+                "the refusal carries no value of the text: {error}"
+            ),
+            other => panic!("a wrong type must fail with InvalidDefinition, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prompt_field_in_the_frontmatter_refused() {
+        let text = "---\nid: main\nkind: work\nprofile: strix-qwen\nprompt: PROMPT-IN-HEAD\n---\nbody\n";
+        match AgentDefinition::from_text(text) {
+            Err(error @ AgentsError::InvalidDefinition { .. }) => assert!(
+                !error.to_string().contains("PROMPT-IN-HEAD"),
+                "the refusal carries no value of the text: {error}"
+            ),
+            other => panic!("a prompt field in the frontmatter must be refused, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn crlf_text_is_read_and_the_prompt_keeps_its_line_breaks() {
+        let text = "---\r\nid: main\r\nkind: work\r\nprofile: strix-qwen\r\n---\r\nbody\r\n";
+        let back = AgentDefinition::from_text(text).expect("CRLF line endings are read");
+        assert_eq!(
+            back.prompt(),
+            "body\r\n",
+            "the closing line and its line break are removed, nothing else"
+        );
+    }
+
+    #[test]
+    fn frontmatter_must_open_the_text() {
+        let text = "intro\nid: main\nkind: work\nprofile: strix-qwen\n---\nbody\n";
+        assert!(
+            matches!(
+                AgentDefinition::from_text(text),
+                Err(AgentsError::InvalidDefinition { .. })
+            ),
+            "a text whose first line is not `---` has no frontmatter"
+        );
+    }
+
+    // Scenario: frontmatter absent ou non fermé refusé
+    #[test]
+    fn missing_or_unclosed_frontmatter_refused() {
+        for text in [
+            "id: main\nkind: work\nprofile: strix-qwen\nbody\n",
+            "---\nid: main\nkind: work\nprofile: strix-qwen\nbody\n",
+        ] {
+            assert!(
+                matches!(
+                    AgentDefinition::from_text(text),
+                    Err(AgentsError::InvalidDefinition { .. })
+                ),
+                "a text without a closed frontmatter must fail: {text:?}"
+            );
+        }
     }
 
     #[test]

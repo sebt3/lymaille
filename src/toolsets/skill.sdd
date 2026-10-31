@@ -57,8 +57,14 @@ Scenario: oversized body refused
   Then it fails with SkillTooLarge
 
 Tasks:
-  [ ] #1 Tests puis implémentation.
+  [x] #1 Tests puis implémentation, vérifié le 2026-10-31.
   [x] #4 Description blanche et clé de `metadata` en double refusées (voir `Must`), avec leurs tests.
       Validé le 2026-10-29 (validator, mutations manuelles) sous `SKIP=deny scripts/check`.
-  [?] #2 Posé : @Skill::parse lit le frontmatter par l'analyseur YAML choisi en ./toolsets.sdd #2 ; sans lui, seul @Skill::new est livré.
+  [ ] #2 Résolu le 2026-10-31 : @Skill::parse lit le frontmatter par `yaml_serde` 0.10.7 (`default-features = false`, ./toolsets.sdd #2, décision du développeur principal). Choix posés par l'implémenteur, à valider (ne pas considérer comme tranchés) :
+      - le corps est le texte qui suit la ligne `---` de fermeture, cette ligne et son saut de ligne retirés, rien d'autre ; une ligne `---` ultérieure reste dans le corps ;
+      - les fins de ligne CRLF sont acceptées ; un frontmatter absent ou non fermé est refusé ;
+      - un refus issu d'un texte lu porte le nom `<SKILL.md>` à la place du nom du skill : la valeur refusée n'entre jamais dans le message ;
+      - une valeur scalaire de `metadata` (`version: 1.0`) est lue comme son texte (`"1.0"`) ; une liste ou une table est refusée ; une clé en double est refusée ;
+      - un champ inconnu est ignoré ; `allowed-tools` est ignoré (`Scenario: allowed-tools is ignored`).
+      Les refus (nom invalide, description blanche, frontmatter absent, YAML illisible, métadonnée en double) passent aussi sur le stub : ce sont des garde-fous, la preuve rouge est le scénario de lecture valide.
   [?] #3 « Contexte le plus long permis » (FR-18) : la taille rendue dépend des valeurs du contexte, inconnues à l'enregistrement. Posé : le contrôle porte sur le gabarit brut sans marge, et un dépassement au rendu est tronqué par @truncate_middle ; à confirmer.
