@@ -252,3 +252,5 @@ Specs créées dans `src/scratchpad/` (une par fichier source prévu, spec de r�
 - `introspect.sdd` : catalogue, introspection et recherche `find` (FR-3, FR-9, AC-2, AC-6).
 - `suggest.sdd` : candidats les plus proches parmi les seuls éléments accordés (FR-6, AC-12).
 - `run.sdd` : le pad et l'exécution d'un appel de `rhai_pad` (FR-1, FR-5, FR-7, FR-10, DEC-3, AC-1, AC-4, AC-8, AC-9).
+
+État au 2026-10-31 : toutes ces specs sont implémentées et couvertes par des tests de comportement et de mutation (`scripts/mutants`). Une annulation n'est pas rattrapable par `try/catch` d'un script (vérifié sur la version de Rhai épinglée), et l'absence de limite de durée est vérifiée par un test long `#[ignore]` de deux minutes réelles. Le tool `rhai_pad` est appelé par la boucle de tour (`src/runtime/turn.rs`).

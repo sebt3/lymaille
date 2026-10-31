@@ -28,4 +28,4 @@ Must:
     sous ce nom, sans alias ; `ErrorClass` à la racine reste celui d'`agents`, inchangé.
 
 Tasks:
-  [ ] #1 Ajouter les déclarations `mod` et les `pub use` au fil des specs enfants livrées.
+  [x] #1 Ajouter les déclarations `mod` et les `pub use` au fil des specs enfants livrées.

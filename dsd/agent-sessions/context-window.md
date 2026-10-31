@@ -121,4 +121,4 @@ Specs dans `src/context/`, implémentées (des tâches de durcissement restent l
 - `strategy.sdd` : traits remplaçables du résumé et du choix de ce qui est compacté, stratégie par défaut (FR-4 à FR-8).
 - `error.sdd` : erreur typée du module.
 
-État au 2026-10-30 : le **prompt de résumé par défaut** (`context.sdd` #3), l'**essai de bout en bout du rejeu du raisonnement** (TBD ci-dessus, AC-5) et l'**intégration à la boucle de tour** (`context.sdd` #2) restent à faire ; les deux premiers se font avec le code, le troisième avec la boucle de tour de `session`.
+État au 2026-10-31 : l'**intégration à la boucle de tour** (`context.sdd` #2) est livrée par `src/runtime/turn.rs` (refus d'un message trop gros avant tout appel, compaction décidée avant chaque requête). Restent le **prompt de résumé par défaut** (`context.sdd` #3, brouillon proposé, à valider) et l'**essai de bout en bout du rejeu du raisonnement** (TBD ci-dessus, AC-5), qui demande un vrai modèle.

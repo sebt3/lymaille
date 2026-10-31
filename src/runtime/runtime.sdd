@@ -26,4 +26,4 @@ Must:
   Ne laisser aucun secret atteindre l'historique, les événements, les erreurs ni les sorties renvoyées au LLM (`agent-sessions#CON-3`) : tout texte sort par le @Redactor de la session.
 
 Tasks:
-  [ ] #1 Déclarer les sous-modules dans ./mod.rs au fil des specs enfants livrées, et le module dans ../lib.sdd et ../lib.rs.
+  [x] #1 Déclarer les sous-modules dans ./mod.rs au fil des specs enfants livrées, et le module dans ../lib.sdd et ../lib.rs.

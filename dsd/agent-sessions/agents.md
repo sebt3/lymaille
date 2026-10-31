@@ -94,4 +94,4 @@ Specs dans `src/agents/`, implémentées (des tâches de durcissement restent li
 - `inference.sdd` : trait du fournisseur d'inférence, classement des erreurs, streaming de fragments, fournisseur scripté.
 - `error.sdd` : erreur typée du module.
 
-État au 2026-10-30 : restent la **sérialisation frontmatter + corps** d'une définition (FR-3, `agents.sdd` #5, dépend du choix de `yaml_serde`), le **manifeste de projet** (FR-4, `agents.sdd` #3, dépend de `toolsets`, maintenant livré) et l'**adaptateur `rig`** (clients, `list_models`, décodage du raisonnement : décision d'architecture du 2026-10-27, pas encore spécifié ni implémenté ; le TBD de détection des modèles ci-dessus en dépend).
+État au 2026-10-31 : la **sérialisation frontmatter + corps** d'une définition (FR-3, `agents.sdd` #5, `definition.sdd` #18, `yaml_serde`) est livrée. Restent le **manifeste de projet** (FR-4, `agents.sdd` #3, dépend de `toolsets`, maintenant livré) et l'**adaptateur `rig`** (clients, `list_models`, décodage du raisonnement : décision d'architecture du 2026-10-27, pas encore spécifié ni implémenté ; le TBD de détection des modèles ci-dessus en dépend).

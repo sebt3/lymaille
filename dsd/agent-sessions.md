@@ -10,7 +10,7 @@ remplacer l'inférence actuelle de vanyline et à fournir à miryad-core des ét
 Statut du document : cadrage initial complet au 2026-10-24. Les points restants sont marqués `TBD`, dans les Open Issues
 ou dans la Solution concernée.
 
-Avancement de la réalisation au 2026-10-30 : six Solutions sur sept ont leurs specs `.sdd` et sont en grande partie implémentées (`session`, `context-window`, `scratchpad`, `agents`, `toolsets`, `modules` ; voir la section « Réalisation SpecDD » de chacune). Seule `delegation` n'est pas encore spécifiée. Ce qui manque pour assembler le tout : la boucle de tour (`session`), l'adaptateur `rig`, le tool `skill` et `session_context()` (`toolsets/native`), le manifeste de projet, la sérialisation frontmatter des définitions et la décision sur la section « pad de workflow » (extension réservée, `scratchpad.md`).
+Avancement de la réalisation au 2026-10-31 : les sept Solutions ont leurs specs `.sdd` et sont implémentées (`session`, `context-window`, `scratchpad`, `agents`, `toolsets`, `modules`, `delegation`, plus la boucle de tour dans `src/runtime/` ; voir la section « Réalisation SpecDD » de chacune). Ce qui manque pour assembler le tout : la restauration d'une session de bout en bout (`session` FR-3, AC-2 : les pièces existent, aucun assemblage ne les relie), l'adaptateur `rig`, le manifeste de projet, le module de création de toolsets, le prompt de résumé par défaut, la décision sur la section « pad de workflow » (extension réservée, `scratchpad.md`), et l'essai de bout en bout du rejeu du raisonnement contre un vrai modèle.
 
 ## Objectif et problème
 
@@ -445,10 +445,9 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
 
 - **Décidé:** `syn` figure dans `allowed-duplicate-crates` de `clippy.toml` (doublon inhérent à `rhai_codegen`, syn 2, contre syn 3 pour `serde_derive`, `thiserror` et `tokio-macros`), décision du développeur principal du 2026-10-27 ; `rhai` est déclaré sans features par défaut (retire le doublon `getrandom`).
 
-- **TBD:** compléter le harnais : `cargo-deny` et `cargo-mutants` sont installés sur la machine de développement (2026-10-26) ;
-  reste à écrire `deny.toml` (licences, avis de sécurité, sources) et `scripts/mutants`, déclarer les doublons de versions inévitables dans
-  `allowed-duplicate-crates` avec une raison, et reporter dans le dépôt le mécanisme de canaris de
-  `spikes/lint-harness`.
+- **Décidé:** le harnais est complet (2026-10-31) : `deny.toml` (licences, avis de sécurité, sources) tourne dans `scripts/check`, les doublons de versions inévitables sont déclarés dans
+  `allowed-duplicate-crates` avec une raison, et `scripts/mutants` (mutation reproductible avec autotest à canaris, report du mécanisme de
+  `spikes/lint-harness`) est livré. `cargo-mutants` reste installé sur la machine de développement ; `scripts/mutants` est l'alternative cadrée par le harnais.
 
 ## Références
 

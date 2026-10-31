@@ -188,7 +188,7 @@ Specs dans `src/toolsets/`, implémentées sauf mention contraire (des tâches d
 - `compat.sdd` : compatibilité structurelle, sous-agents retirés signalés par `Delegation`, règle du module de création (FR-4, FR-8, AC-3, AC-4, AC-8).
 - `assemble.sdd` : construction des modules, toolsets et skills accordés, dépendances privées (FR-2, AC-1).
 - `config.sdd` : modules de l'agent de configuration `contexts`, `inspect`, `sessions` et événement `TargetOpened` (FR-19, BR-8).
-- `native.sdd` : tool `skill` et fonction `session_context()` (FR-17, FR-18, AC-10, AC-11) — **non implémentée**.
+- `native.sdd` : tool `skill` et fonction `session_context()` (FR-17, FR-18, AC-10, AC-11).
 - `error.sdd` : erreur typée du module.
 
-État au 2026-10-30 : restent le **tool `skill` et `session_context()`** (`native.sdd`), le texte du **skill intégré sur `rhai_pad`**, la **validation JSON Schema complète** (`toolsets.sdd` #3, `jsonschema` désormais admis), le **module de création de toolsets** (FR-8, hôte ou domaine `modules`) et l'analyseur de frontmatter des skills (`Skill::parse`, `yaml_serde`).
+État au 2026-10-31 : le **tool `skill`** et `session_context()` (`native.sdd`), la **validation JSON Schema complète** des valeurs du contexte (`toolsets.sdd` #3, FR-4, `jsonschema` admis le 2026-10-30) et l'analyseur de frontmatter des skills (`Skill::parse`, `yaml_serde` admis le 2026-10-31) sont livrés. Restent le texte du **skill intégré sur `rhai_pad`** (un brouillon est en place dans `native.rs`, à relire : `native.sdd` #2), le branchement du tool `skill` dans la boucle de tour (point d'extension de `runtime/turn.sdd` #2, hors de cette Solution) et le **module de création de toolsets** (FR-8, hôte ou domaine `modules`).
