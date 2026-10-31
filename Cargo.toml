@@ -168,10 +168,12 @@ redundant_pub_crate = { level = "allow", priority = 1 }
 # Relay of the `vynil-core` features whose groups the scratchpad may grant (see `src/scratchpad/engine.sdd`, #3).
 # Off by default: a build without them cannot grant `Fs` or `Shell`.
 # Real MCP connector over streamable HTTP (`src/modules/mcp_client.sdd`). The host installs its own rustls provider.
-default = ["mcp-http"]
+# OpenAI-compatible inference adapter over `rig-core` (`src/agents/rig.sdd`), on by default; a host may turn it off.
+default = ["mcp-http", "rig"]
 fs = ["vynil-core/fs"]
 shell = ["vynil-core/shell"]
 mcp-http = ["dep:rmcp", "dep:http"]
+rig = ["dep:rig-core"]
 
 [dependencies]
 base64 = "0.23.1"
@@ -179,6 +181,7 @@ handlebars = "6.4.4"
 http = { version = "1.5.0", optional = true }
 jsonschema = { version = "0.60.2", default-features = false }
 rhai = { version = "1.27.0", default-features = false, features = ["std", "sync", "serde", "internals", "metadata"] }
+rig-core = { version = "=0.43.0", default-features = false, features = ["reqwest"], optional = true }
 rmcp = { version = "=3.8.0", default-features = false, features = ["client", "transport-streamable-http-client-reqwest", "reqwest-tls-no-provider"], optional = true }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"

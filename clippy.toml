@@ -36,6 +36,9 @@ allowed-duplicate-crates = [
   # `windows-sys` 0.52 (via `ring`, a rustls provider of `reqwest`, under `rmcp`) and 0.61 (via `mio` and `rustix`): Windows targets
   # only, inherent to the transitive dependencies of `rmcp` (`mcp-http` feature). Decision of the lead developer, 2026-10-30.
   "windows-sys",
+  # `base64` 0.22 (via `rig-core`, `rig` feature) and 0.23 (direct dependency): inherent to `rig-core` 0.43.0, measured by
+  # `spikes/rig-probe`. Decision of the lead developer, 2026-10-31.
+  "base64",
 ]
 
 # Architecture constraints of the design, enforced by the compiler.

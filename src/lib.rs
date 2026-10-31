@@ -21,6 +21,8 @@ pub use agents::{
     ProviderStore, ReportedUsage, ResolvedProfile, SamplingParams, SandboxLimits, ScriptedProvider,
     classify_status,
 };
+#[cfg(feature = "rig")]
+pub use agents::{RigConfig, RigProvider, detect_models};
 pub use clock::{Clock, ManualClock, SystemClock, Timestamp};
 pub use context::{
     Budget, CompactionStrategy, ContextError, ContextResult, DEFAULT_SUMMARY_PROMPT, DefaultStrategy, Digest,

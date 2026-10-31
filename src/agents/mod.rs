@@ -11,6 +11,8 @@ mod inference;
 mod manifest;
 mod profile;
 mod provider;
+#[cfg(feature = "rig")]
+mod rig;
 
 pub use catalog::{AgentStore, InMemoryCatalog, Layered, ProfileStore, ProviderStore};
 pub use definition::{AgentDefinition, AgentKind, SandboxLimits};
@@ -22,3 +24,5 @@ pub use inference::{
 pub use manifest::{ManifestGap, ManifestView, ProjectManifest};
 pub use profile::{DetectedModel, ModelProfile, ResolvedProfile, SamplingParams};
 pub use provider::{Provider, ProviderLevel};
+#[cfg(feature = "rig")]
+pub use rig::{RigConfig, RigProvider, detect_models};
