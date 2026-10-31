@@ -650,8 +650,9 @@ pub fn limits_notice(limits: &ScratchpadLimits) -> String {
     format!(
         "Sandbox rules: a function defined with `fn` cannot see the variables of the scope; pass them as arguments. \
          Its toolset context is read with `session_context()`. A closure or a function pointer is not kept between calls: \
-         define a `fn` instead. `const` does not exist; use `let`. No duration limit applies: a long script is allowed, and \
-         the host stops a runaway loop. The output is capped at {} characters: the middle of a longer result is replaced by a \
+         define a `fn` instead. `const` does not exist; use `let`. No operation limit and no duration limit apply: a long script \
+         is allowed, and a runaway script is stopped only by the host's cancellation. The output is capped at {} characters: \
+         the middle of a longer result is replaced by a \
          notice, so store the result in a variable and extract the useful part with the `fmt_*` functions. Memory: strings up \
          to {} bytes, arrays up to {} elements, maps up to {} entries.",
         limits.render_cap_chars(),
@@ -1072,7 +1073,14 @@ mod tests {
             text.contains("A closure or a function pointer is not kept between calls"),
             "closures are not persisted: {text}"
         );
-        assert!(text.contains("No duration limit"), "no duration limit: {text}");
+        assert!(
+            text.contains("No operation limit and no duration limit apply"),
+            "no operation limit and no duration limit: {text}"
+        );
+        assert!(
+            text.contains("a runaway script is stopped only by the host's cancellation"),
+            "only the host's cancellation stops a runaway script, the model cannot: {text}"
+        );
         assert!(
             text.contains("capped at 8000 characters"),
             "the output cap: {text}"

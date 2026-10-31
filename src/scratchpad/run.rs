@@ -990,7 +990,7 @@ mod tests {
         assert!(snapshot.functions().contains_key("f/0"), "keyed f/0");
     }
 
-    // Scenario: une redéfinition remplace une fonction (failed extraction: the stale source is removed)
+    // Scenario: une redéfinition remplace une fonction (extraction échouée : la source périmée est retirée)
     #[tokio::test]
     async fn failed_extraction_removes_the_stale_source_of_a_redefined_function() {
         let pad = Scratchpad::new(plain());
@@ -1026,7 +1026,7 @@ mod tests {
         );
     }
 
-    // Scenario: une redéfinition remplace une fonction (failed extraction, arity one: the stale source is removed)
+    // Scenario: une redéfinition remplace une fonction (extraction échouée, arité un : la source périmée est retirée)
     #[tokio::test]
     async fn failed_extraction_removes_the_stale_source_of_an_arity_one_function() {
         let pad = Scratchpad::new(plain());
@@ -1057,7 +1057,7 @@ mod tests {
         );
     }
 
-    // Scenario: une redéfinition remplace une fonction (failed extraction: the sources of the other functions are kept)
+    // Scenario: une redéfinition remplace une fonction (extraction échouée : les sources des autres fonctions sont conservées)
     #[tokio::test]
     async fn failed_extraction_keeps_the_source_of_another_function() {
         let pad = Scratchpad::new(plain());
@@ -1209,22 +1209,37 @@ mod tests {
         }
     }
 
-    /// A native call that blocks on a future that never completes, through the `vynil-core` bridge.
-    fn stuck(dropped: Arc<AtomicBool>) -> Result<i64, Box<EvalAltResult>> {
+    /// A native call that blocks on a future that never completes, through the `vynil-core` bridge. It records that it
+    /// was entered, so that a test cancels the run only once the call is really blocked.
+    fn stuck(entered: &AtomicBool, dropped: Arc<AtomicBool>) -> Result<i64, Box<EvalAltResult>> {
+        entered.store(true, Ordering::SeqCst);
         match vynil_core::rt::block_on(Never(dropped)) {
             Ok(()) => Ok(0),
             Err(error) => Err(vynil_core::rhai_err(error)),
         }
     }
 
+    /// Waits, for a bounded time, until the condition holds, and tells whether it did. The wait is bounded by a deadline,
+    /// not a fixed sleep: the test observes a state that another task of the host sets.
+    async fn within_ten_seconds(condition: impl Fn() -> bool + Send + Sync) -> bool {
+        let wait = async {
+            while !condition() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(10), wait).await.is_ok()
+    }
+
     // The host runtime is multi-thread (`agent-sessions#CON-6`): on a `current_thread` runtime, the bridge refuses the call.
     #[tokio::test(flavor = "multi_thread")]
     async fn cancellation_of_a_never_returning_native_call() {
+        let entered = Arc::new(AtomicBool::new(false));
         let dropped = Arc::new(AtomicBool::new(false));
-        let flag = Arc::clone(&dropped);
+        let (entered_flag, dropped_flag) = (Arc::clone(&entered), Arc::clone(&dropped));
         let engine = engine_with(Grants::new(), ScratchpadLimits::new(), move |engine| {
-            let flag = Arc::clone(&flag);
-            let _native = engine.register_fn("stuck", move || stuck(Arc::clone(&flag)));
+            let (entered_flag, dropped_flag) = (Arc::clone(&entered_flag), Arc::clone(&dropped_flag));
+            let _native =
+                engine.register_fn("stuck", move || stuck(&entered_flag, Arc::clone(&dropped_flag)));
         });
         let pad = Scratchpad::new(engine);
         let redactor = Redactor::new();
@@ -1233,8 +1248,9 @@ mod tests {
         let cancel = CancelHandle::new();
         let trigger = cancel.clone();
         let started = tokio::time::Instant::now();
+        // The cancellation is sent once the native call is blocked: before that, it would stop the script before the call.
         let _timer = tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            let _reached = within_ten_seconds(|| entered.load(Ordering::SeqCst)).await;
             trigger.cancel();
         });
         let run = pad.run("stuck()", &cancel, &env);
@@ -1251,7 +1267,10 @@ mod tests {
             started.elapsed() < Duration::from_secs(5),
             "the cancellation is not held back by the call that never returns"
         );
-        assert!(dropped.load(Ordering::SeqCst), "the future was dropped");
+        assert!(
+            within_ten_seconds(|| dropped.load(Ordering::SeqCst)).await,
+            "the future was dropped"
+        );
     }
 
     #[tokio::test]
@@ -1293,11 +1312,18 @@ mod tests {
         );
     }
 
+    /// The same blocked call as `stuck`, for a test that does not look at the future it drops.
+    fn stuck_untracked(entered: &AtomicBool) -> Result<i64, Box<EvalAltResult>> {
+        stuck(entered, Arc::new(AtomicBool::new(false)))
+    }
+
     // The host runtime is multi-thread (`agent-sessions#CON-6`): on a `current_thread` runtime, the bridge refuses the call.
     #[tokio::test(flavor = "multi_thread")]
     async fn cancellation_wins_over_the_error_it_caused() {
-        let engine = engine_with(Grants::new(), ScratchpadLimits::new(), |engine| {
-            let _native = engine.register_fn("stuck", || stuck(Arc::new(AtomicBool::new(false))));
+        let entered = Arc::new(AtomicBool::new(false));
+        let entered_flag = Arc::clone(&entered);
+        let engine = engine_with(Grants::new(), ScratchpadLimits::new(), move |engine| {
+            let _native = engine.register_fn("stuck", move || stuck_untracked(&entered_flag));
         });
         let pad = Scratchpad::new(engine);
         let redactor = Redactor::new();
@@ -1306,7 +1332,7 @@ mod tests {
         let cancel = CancelHandle::new();
         let trigger = cancel.clone();
         let _timer = tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            let _reached = within_ten_seconds(|| entered.load(Ordering::SeqCst)).await;
             trigger.cancel();
         });
         let outcome = pad.run("stuck()", &cancel, &env).await;
@@ -1340,6 +1366,7 @@ mod tests {
         let second = Scratchpad::new(engine);
         let ticks = Arc::new(AtomicUsize::new(0));
         let counter = Arc::clone(&ticks);
+        let watched = Arc::clone(&ticks);
         let _counting = tokio::spawn(count_ticks(counter));
         let (cancel_a, cancel_b) = (CancelHandle::new(), CancelHandle::new());
         let (trigger_a, trigger_b) = (cancel_a.clone(), cancel_b.clone());
@@ -1350,7 +1377,9 @@ mod tests {
             first.run("loop { }", &cancel_a, &env),
             second.run("loop { }", &cancel_b, &env),
             async {
-                tokio::time::sleep(Duration::from_millis(300)).await;
+                // The runs are cancelled once the counter has advanced while they loop: if they held the workers, the
+                // counter would stay at zero and the wait would end at its deadline, failing the check below.
+                let _advanced = within_ten_seconds(|| watched.load(Ordering::SeqCst) >= 5).await;
                 trigger_a.cancel();
                 trigger_b.cancel();
             }

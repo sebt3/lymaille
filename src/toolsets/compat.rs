@@ -709,7 +709,7 @@ mod tests {
         }
     }
 
-    // Scenario: creation module refused with delegable sub-agents
+    // Scenario: module de création refusé pour un agent de travail
     // Obsolete wording (compat.sdd, 2026-10-29): the rule now depends on the nature `Work`, not on delegation. This
     // test keeps the Scenario's setup (a work agent with delegable sub-agents) and checks the nature rule.
     #[test]

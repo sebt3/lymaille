@@ -81,7 +81,7 @@ Scenario: l'échec du résumeur est signalé
 
 Tasks:
   [x] #1 Tests (résumeur simulé) puis implémentation.
-  [x] #4 Rendre les appels d'outil et le nom de l'outil de chaque résultat dans la transcription, et le Scenario « tool calls and tool names are in the transcript » (défaut relevé au rapport du lot F2).
+  [x] #4 Rendre les appels d'outil et le nom de l'outil de chaque résultat dans la transcription, et le Scenario « les appels d'outils et les noms d'outils sont dans la transcription » (défaut relevé au rapport du lot F2).
   [x] #6 Tests mineurs relevés : contenu multiligne, forme exacte de la ligne `reasoning: `, historique inchangé aussi sur le chemin de succès.
   [x] #5 Posé à l'implémentation : préambule `The earlier part of this conversation was compacted. Summary of that part:`, digest `Session digest: N open tasks, M memories.`, ligne `reasoning: ` avant le message de l'assistant, erreur du résumeur propagée telle quelle.
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).

@@ -64,14 +64,14 @@ Tasks:
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
   [x] #2 Décidé le 2026-10-27 : le niveau (utilisateur, projet) n'est pas dans la clé de stockage ; un nom est unique par catalogue, un catalogue par niveau, que l'hôte empile.
   [x] #6 Spécifier et livrer la résolution en cascade au-dessus de plusieurs catalogues (le niveau projet l'emporte, `agent-sessions/agents#FR-6` et `FR-7`) si elle n'existe pas encore.
-  [x] #10 Compléments relevés à la validation de H3 : assertions de `put_agent` et `put_profile` écrivant dans le haut seulement dans le test du Scenario « put writes to the top layer only ».
+  [x] #10 Compléments relevés à la validation de H3 : assertions de `put_agent` et `put_profile` écrivant dans le haut seulement dans le test du Scenario « put n'écrit que dans la couche haute ».
   [x] #7 Forme choisie : `Layered<Top, Base>` dans ./catalog.rs, même spec que les traits (la composition est du stockage, et le fichier reste court). Alternative non retenue : un couple layered.sdd / layered.rs séparé, à prendre si ce fichier grossit ou si la cascade gagne un comportement propre.
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
   [x] #8 Fusion champ par champ écartée : un profil du niveau projet remplace entièrement celui du niveau utilisateur (`agent-sessions/agents#FR-7`, « la surcharge l'emporte »). Une fusion partielle serait une décision à part, à prendre si un profil partiel s'avère nécessaire.
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
   [x] #9 La validation d'une définition à l'écriture reste celle de la couche qui stocke : `put_agent` de @Layered délègue à la couche haute, qui doit être une @InMemoryCatalog ou un hôte qui valide (voir #4).
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
-  [x] #11 Accesseurs en lecture `top()` et `base()` de @Layered (décidé le 2026-10-29) : le domaine `toolsets` implémente ses propres traits de stockage pour @Layered et doit lire ses deux couches (un `agents` qui dépendrait de `toolsets` inverserait la dépendance). Scenario : « layers are readable ».
+  [x] #11 Accesseurs en lecture `top()` et `base()` de @Layered (décidé le 2026-10-29) : le domaine `toolsets` implémente ses propres traits de stockage pour @Layered et doit lire ses deux couches (un `agents` qui dépendrait de `toolsets` inverserait la dépendance). Scenario : « les couches sont lisibles ».
       Validé le 2026-10-29 (validator, 58 mutants dont 55 tués) sous `scripts/check` complet.
 
 Scenario: put puis get restituent chaque entité

@@ -572,7 +572,7 @@ mod tests {
         assert_eq!(extra, plain, "an unknown field changes nothing");
     }
 
-    // Scenario: invalid name refused (for a parsed file)
+    // Scenario: nom invalide refusé
     #[test]
     fn invalid_name_refused_when_parsed() {
         for name in ["Grafana", "a b", ""] {
@@ -617,7 +617,7 @@ mod tests {
         );
     }
 
-    // Scenario: refusals never carry the content of the file
+    // Scenario: les refus ne portent jamais le contenu du fichier
     #[test]
     fn malformed_frontmatter_refused_without_its_content() {
         let text = "---\nname: [FILE-CONTENT-SECRET\ndescription: d\n---\nbody\n";

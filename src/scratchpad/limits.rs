@@ -297,13 +297,11 @@ mod tests {
         assert_eq!(second.ok(), Some(100_000), "the large engine accepts the string");
     }
 
-    /// Blocks the thread for `ms` milliseconds, as a native function waiting on the outside world does.
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "test only: a native call that really blocks its thread, to check that no duration limit stops a script"
-    )]
+    /// Blocks the thread for `ms` milliseconds, as a native function waiting on the outside world does: a receive that no
+    /// one answers. The sender is kept alive, so that the receive waits for the whole timeout instead of failing at once.
     fn block_the_thread(ms: u64) {
-        std::thread::sleep(Duration::from_millis(ms));
+        let (_sender, receiver) = std::sync::mpsc::channel::<()>();
+        let _timed_out = receiver.recv_timeout(Duration::from_millis(ms));
     }
 
     // Scenario: pas de limite de durée au-delà de deux minutes réelles
@@ -312,11 +310,7 @@ mod tests {
     fn no_time_limit_over_two_real_minutes() {
         let mut engine = engine_with(&ScratchpadLimits::new());
         let _nap = engine.register_fn("nap", |ms: i64| block_the_thread(u64::try_from(ms).unwrap_or(0)));
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "test only: measures the real duration of the script, which no limit of duration may cut"
-        )]
-        let started = std::time::Instant::now();
+        let started = tokio::time::Instant::now();
         let result = engine.eval::<i64>("let i = 0; while i < 5 { nap(25000); i += 1; } i");
         let elapsed = started.elapsed();
         assert_eq!(result.ok(), Some(5), "five naps of 25 seconds complete");

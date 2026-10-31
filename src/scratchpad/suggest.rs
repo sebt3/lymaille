@@ -189,7 +189,7 @@ fn bounded_chars(name: &str) -> Vec<char> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CandidateSet, nearest, suggest_for};
+    use super::{CandidateSet, levenshtein, nearest, suggest_for};
     use crate::scratchpad::{NotFoundKind, ScratchpadError};
 
     fn grafana() -> CandidateSet {
@@ -502,6 +502,44 @@ mod tests {
             suggest_for(error.clone(), &grafana()),
             error,
             "not a not-found error"
+        );
+    }
+
+    // suggest.sdd, Must: the granted module names come first; the modules of the visible paths are only a fallback.
+    #[test]
+    fn granted_module_without_visible_function_is_suggested() {
+        let candidates = CandidateSet::new(Vec::new(), vec!["mcp".to_owned()], Vec::new());
+        let error = suggest_for(not_found(NotFoundKind::Module, "mcpp", None), &candidates);
+        assert_eq!(
+            suggestions(error),
+            vec!["mcp".to_owned()],
+            "a granted module is suggested even when it exposes no visible function"
+        );
+    }
+
+    // suggest.sdd, Must: for a qualified name, the distance is computed on the whole path, not on the last segment.
+    #[test]
+    fn qualified_name_is_not_matched_on_its_last_segment() {
+        let error = suggest_for(
+            not_found(NotFoundKind::Function, "x::loki_query", None),
+            &grafana(),
+        );
+        assert!(
+            suggestions(error).is_empty(),
+            "the whole path is too far, so the last segment alone must not match"
+        );
+    }
+
+    // suggest.sdd, Must: the distance is the Levenshtein edit distance, where a deletion and an insertion both cost one.
+    #[test]
+    fn edit_distance_counts_one_deletion_and_is_symmetric() {
+        let abc: Vec<char> = "abc".chars().collect();
+        let ab: Vec<char> = "ab".chars().collect();
+        assert_eq!(levenshtein(&abc, &ab), 1, "deleting one character costs one");
+        assert_eq!(
+            levenshtein(&ab, &abc),
+            1,
+            "inserting one character costs one, as deleting does"
         );
     }
 }

@@ -555,8 +555,8 @@ mod tests {
         );
     }
 
-    // Scenario: les fonctions de session sont listées mais non appelables (the source of a function is read by `source`, on the
-    // inspection pad only)
+    // Scenario: les fonctions de session sont listées mais non appelables (la source d'une fonction se lit par `source`,
+    // sur le bac d'inspection seulement)
     #[tokio::test]
     async fn source_is_refused_on_a_definition_target() {
         let Ok(pad) = InspectionPad::new(&base(), &Grants::new(), &[], InspectionTarget::Definition) else {
@@ -636,7 +636,7 @@ mod tests {
         );
     }
 
-    // Scenario: aucun groupe fs ni shell (the host group is absent too)
+    // Scenario: aucun groupe fs ni shell (le groupe Host est absent aussi)
     #[tokio::test]
     async fn host_group_is_absent_even_when_the_target_grants_it() {
         let target = Grants::new()
