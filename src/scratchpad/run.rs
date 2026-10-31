@@ -16,8 +16,8 @@ use super::engine::{RunScope, ScratchpadEngine, captured_output};
 use super::error::{ScratchpadError, ScriptErrorClass};
 use super::introspect::{ScriptFunction, VariableInfo};
 use super::persist::{
-    PersistWarning, extract_function_sources, key_of, recompile_functions, restore_scope, snapshot_scope,
-    to_dynamic,
+    PersistWarning, RestoreWarning, extract_function_sources, key_of, recompile_functions, restore_scope,
+    snapshot_scope, to_dynamic,
 };
 use super::render::{full_text, truncate_middle};
 use super::suggest::{CandidateSet, suggest_for};
@@ -173,6 +173,7 @@ impl RunOutcome {
 pub struct Restored {
     pad: Scratchpad,
     broken: Vec<String>,
+    warnings: Vec<RestoreWarning>,
 }
 
 impl Restored {
@@ -186,6 +187,12 @@ impl Restored {
     #[must_use]
     pub fn broken(&self) -> &[String] {
         &self.broken
+    }
+
+    /// The calls that match no known name, in the order of the recompilation. Best effort: the call may still work.
+    #[must_use]
+    pub fn warnings(&self) -> &[RestoreWarning] {
+        &self.warnings
     }
 }
 
@@ -244,6 +251,7 @@ impl Scratchpad {
         let scope = restore_scope(variables);
         let recompiled = recompile_functions(&engine, sources);
         let broken = recompiled.broken().to_vec();
+        let warnings = recompiled.warnings().to_vec();
         let state = PadState {
             scope,
             sources: sources.clone(),
@@ -264,6 +272,7 @@ impl Scratchpad {
                 persistent: true,
             },
             broken,
+            warnings,
         }
     }
 
@@ -833,6 +842,7 @@ fn masked_source(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::pin::Pin;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -1176,6 +1186,21 @@ mod tests {
         let second = eval(&pad, "n + 1").await;
         assert_eq!(second.text(), "4", "no warning in the text");
         assert!(second.warnings().is_empty(), "no warning raised");
+    }
+
+    // Scenario: une fonction dont une API a disparu n'empêche pas la restauration (avertissement du pad, run.sdd #15)
+    #[test]
+    fn restore_gives_the_unknown_call_of_a_function_as_a_warning() {
+        let sources = BTreeMap::from([("h/1".to_owned(), "fn h(n) { ops::disparue(n) }".to_owned())]);
+        let restored = Scratchpad::restore(plain(), &BTreeMap::new(), &sources);
+        let warnings = restored.warnings();
+        assert_eq!(warnings.len(), 1, "one warning for the call to the vanished API");
+        assert_eq!(warnings[0].function(), "h/1", "the warning names the function");
+        assert_eq!(warnings[0].call(), "ops::disparue", "the warning names the call");
+        assert!(
+            restored.broken().is_empty(),
+            "a call to an unknown name does not make the function broken"
+        );
     }
 
     #[tokio::test]
@@ -1875,11 +1900,7 @@ mod tests {
     // Config task #4: an inspection pad never persists, so it never renders the notice that its functions were not persisted.
     #[tokio::test]
     async fn inspection_pad_does_not_warn_about_unpersisted_functions() {
-        let pad = Scratchpad::inspection(
-            plain(),
-            &std::collections::BTreeMap::new(),
-            &std::collections::BTreeMap::new(),
-        );
+        let pad = Scratchpad::inspection(plain(), &BTreeMap::new(), &BTreeMap::new());
         let outcome = eval(&pad, "fn f(a) { a } fn int.double() { this * 2 } 1").await;
         assert_eq!(
             outcome.status(),

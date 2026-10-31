@@ -20,6 +20,7 @@ Structure:
   ./assemble.rs: construction des @GrantedModule, @GrantedToolset et @GrantedSkill
   ./native.rs: tool `skill`, fonction `session_context()`
   ./config.rs: modules de l'agent de configuration (`contexts`, `inspect`, `sessions`)
+  ./builder.rs: module de création de brouillons (`toolset_builder`)
 
 Owns:
   ./mod.rs
@@ -43,6 +44,7 @@ References:
   ./assemble.sdd
   ./native.sdd
   ./config.sdd
+  ./builder.sdd
 
 Must:
   Ne réaliser aucune E/S : le stockage est un ensemble de traits que l'hôte implémente (`agent-sessions#CON-1`).

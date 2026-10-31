@@ -5,14 +5,16 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::sync::Arc;
 
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use vynil_core::Semver;
 
-use super::toolset_context::value_looks_like_secret;
+use super::toolset_context::{SharedDetector, value_looks_like_secret};
 use super::version::semver_text;
 use super::{Skill, ToolsetsError, ToolsetsResult, TypeRequirement};
+use crate::secret::SecretDetector;
 
 /// Parameter declared by a toolset: its name, its JSON Schema, and a generic default value when one is declared. A
 /// default never holds a value of an environment.
@@ -106,6 +108,8 @@ pub struct Toolset {
     params: BTreeMap<String, ParamDecl>,
     roles: BTreeMap<String, RoleDecl>,
     dependencies: BTreeSet<String>,
+    #[serde(skip)]
+    detector: SharedDetector,
 }
 
 impl fmt::Debug for Toolset {
@@ -122,7 +126,7 @@ impl fmt::Debug for Toolset {
             .field("params", &self.params)
             .field("roles", &self.roles)
             .field("dependencies", &self.dependencies)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -159,6 +163,7 @@ impl Toolset {
             params: BTreeMap::new(),
             roles: BTreeMap::new(),
             dependencies: BTreeSet::new(),
+            detector: SharedDetector::default(),
         })
     }
 
@@ -198,6 +203,14 @@ impl Toolset {
         Ok(self)
     }
 
+    /// Replaces the detector that judges the default values of the next calls of [`Toolset::with_param`]. The detector of
+    /// the host replaces the default one entirely.
+    #[must_use]
+    pub fn with_secret_detector(mut self, detector: Arc<dyn SecretDetector>) -> Self {
+        self.detector = SharedDetector::new(detector);
+        self
+    }
+
     /// Adds a parameter that the toolset reads from the toolset context.
     ///
     /// # Errors
@@ -212,7 +225,10 @@ impl Toolset {
                 detail: String::new(),
             });
         }
-        if param.default().is_some_and(value_looks_like_secret) {
+        if param
+            .default()
+            .is_some_and(|value| value_looks_like_secret(value, self.detector.get()))
+        {
             return Err(ToolsetsError::InvalidToolset {
                 name: self.name,
                 reason: "a default value looks like a secret: a toolset holds no value of an environment",
@@ -590,6 +606,43 @@ mod tests {
                 "the default {default} must fail with InvalidToolset"
             );
         }
+    }
+
+    // Scenario: un détecteur de l'hôte juge les valeurs par défaut
+    #[test]
+    fn host_detector_judges_parameter_defaults() {
+        struct TokDetector;
+        impl crate::secret::SecretDetector for TokDetector {
+            fn looks_like_secret(&self, text: &str) -> bool {
+                text.starts_with("tok_")
+            }
+        }
+        let build = |default: serde_json::Value| {
+            toolset("grafana")
+                .with_secret_detector(std::sync::Arc::new(TokDetector))
+                .with_param(
+                    ParamDecl::new("endpoint".to_owned(), json!({ "type": "string" })).with_default(default),
+                )
+        };
+        assert!(
+            matches!(build(json!("tok_abc")), Err(ToolsetsError::InvalidToolset { .. })),
+            "the host detector refuses a tok_ default"
+        );
+        assert!(
+            build(json!("sk-abc")).is_ok(),
+            "the host detector replaces the default: sk- is accepted"
+        );
+        let with_host = toolset("grafana").with_secret_detector(std::sync::Arc::new(TokDetector));
+        assert_eq!(
+            with_host,
+            toolset("grafana"),
+            "the detector does not take part in equality"
+        );
+        let text = serde_json::to_string(&with_host).expect("a toolset serializes");
+        assert!(
+            !text.contains("detector"),
+            "the detector is not serialized: {text}"
+        );
     }
 
     #[test]

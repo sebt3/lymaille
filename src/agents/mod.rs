@@ -8,6 +8,7 @@ mod catalog;
 mod definition;
 mod error;
 mod inference;
+mod manifest;
 mod profile;
 mod provider;
 
@@ -18,5 +19,6 @@ pub use inference::{
     ErrorClass, InferenceError, InferenceProvider, InferenceRequest, InferenceResponse, ReportedUsage,
     ScriptedProvider, classify_status,
 };
+pub use manifest::{ManifestGap, ManifestView, ProjectManifest};
 pub use profile::{DetectedModel, ModelProfile, ResolvedProfile, SamplingParams};
 pub use provider::{Provider, ProviderLevel};

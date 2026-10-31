@@ -66,8 +66,8 @@ Tasks:
       fournisseur d'inférence (`agents`), du scratchpad (`scratchpad`) et de la fenêtre de contexte (`context-window`).
       Ne s'écrit qu'après leurs specs.
       Livrée le 2026-10-30 dans `src/runtime/` (`runtime.sdd`, `turn.sdd`, lot R1).
-  [!] #3 Restauration complète (`FR-3`, `AC-2`) : recompiler les fonctions exige le moteur Rhai (`scratchpad`). Cette spec
-      ne livre que le diff de provenance (./notice.sdd) et le format.
+  [x] #3 Restauration complète (`FR-3`, `AC-2`) : recompiler les fonctions exige le moteur Rhai (`scratchpad`). Cette spec
+      ne livre que le diff de provenance (./notice.sdd) et le format ; l'assemblage de bout en bout est livré par `restore_session` dans `runtime` (../runtime/restore.sdd), le domaine `session` ne dépendant pas de `scratchpad` (2026-10-31).
   [x] #4 Décidé le 2026-10-27 : le texte de streaming est émis en fragments comme événements ; la réponse complète figure dans l'événement de fin de tour.
   [x] #6 Ajouter à @Event la variante des fragments de streaming (`./event.sdd` #2 : spec, tests, implémentation).
   [x] #5 Décidé le 2026-10-27 : pas d'autre type `Dynamic` étiqueté que `char` et `blob` ; ./tagged_value.sdd couvre

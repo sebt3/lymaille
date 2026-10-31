@@ -3,6 +3,7 @@
 //! belongs to the host.
 
 mod assemble;
+mod builder;
 mod compat;
 mod config;
 mod context_type;
@@ -17,6 +18,7 @@ mod toolset_context;
 mod version;
 
 pub use assemble::{Assembled, assemble};
+pub use builder::{DraftEntry, DraftKind, DraftStore, builder_registration};
 pub use compat::{
     Delegation, Gap, GapKind, RemovalReason, RemovedSubagent, check_context, check_creation_rule,
     delegable_subagents,

@@ -1,0 +1,91 @@
+Spec: builder
+
+Purpose:
+  Module Rhai `toolset_builder` de création de toolsets, réservé à l'agent de configuration : écrit des brouillons de toolsets, de skills et de types de contexte, les valide, les liste et les supprime, sans jamais rien activer
+    (`agent-sessions/toolsets#FR-8`, `agent-sessions#BR-8`, `agent-sessions#DEC-13`).
+
+Owns:
+  ./builder.rs
+
+References:
+  ./store.sdd
+  ./compat.sdd
+  ./config.sdd
+  ./skill.sdd
+
+Exposes:
+  @DraftStore
+  @DraftKind
+  @DraftEntry
+  @builder_registration
+
+Accepts:
+  @DraftStore: trait de l'hôte (`Send + Sync`, futurs `Send`, générique, jamais objet dynamique) pour ce que @ToolsetStore ne sait pas faire : `list_drafts` (aucun argument ; rend des @DraftEntry : genre et nom), `delete_draft` (un @DraftKind et un nom ; rend si un brouillon a été retiré) et, pour les types de contexte qui n'ont pas de brouillon dans @ContextTypeStore, `put_type_draft` et `get_type_draft`.
+  @builder_registration: un @ToolsetStore, un @DraftStore, le @Redactor de la session et le @SecretDetector (par défaut @DefaultSecretDetector) ; rend une étape d'enregistrement (@EngineBuilder::with_registration) du module `toolset_builder`.
+
+Returns:
+  Module `toolset_builder` :
+  `put_toolset_draft(definition)` : une map Rhai (nom, version, description, fonctions, paramètres, dépendances) ; construit un @Toolset, le valide (compilation des fonctions, plafond de rendu, `Skill`, défauts de paramètres sans secret) et l'écrit comme brouillon ; rend le nom.
+  `put_skill_draft(toolset, definition)` : une map (nom, description, corps, documents annexes) ; ajoute le skill au brouillon du toolset nommé (le crée à partir de la version active si aucun brouillon n'existe) ; rend le nom du skill.
+  `put_skill_draft_text(toolset, texte)` : même effet à partir d'un texte `SKILL.md` (frontmatter et corps, @Skill::parse).
+  `put_context_type_draft(definition)` : une map (nom, version, schéma, rôles, inclusions) ; construit un @ContextType validé et l'écrit comme brouillon par le @DraftStore ; rend le nom.
+  `validate_draft(genre, nom)` : revalide un brouillon et rend un tableau d'écarts en texte (vide si valide), sans rien écrire.
+  `list_drafts()` : un tableau de maps `{kind, name}`. `delete_draft(genre, nom)` : retire un brouillon, rend vrai s'il existait.
+
+Raises:
+  Une erreur de script rendue au LLM, texte sans valeur de secret (masqué par le @Redactor), nommant la règle violée : définition illisible, nom invalide, secret détecté, fonction qui ne compile pas, plafond dépassé, brouillon absent, échec du stockage.
+
+Must:
+  Le module n'a aucune opération d'activation et n'écrit jamais une version active (il ne lit la version active que pour amorcer le brouillon d'un skill, `put_skill_draft`) : l'activation reste une action de l'hôte (`FR-8`). Il n'écrit que par @ToolsetStore::put_draft et par @DraftStore.
+  Il n'est accordable qu'à un agent de configuration : la règle est celle de ./compat.sdd (refus au chargement), non redéfinie ici.
+  Un brouillon invalide n'est jamais écrit : la validation précède l'écriture, et l'erreur rendue au LLM permet de corriger et recommencer. Le plafond de rendu des skills est appliqué par @ToolsetStore::put_draft à l'écriture, non par le module (qui ne le connaît pas) ; `validate_draft` ne le revérifie pas.
+  Un secret détecté (@SecretDetector de l'hôte, sinon le défaut) dans un défaut, un paramètre ou un texte est refusé ; la valeur n'apparaît ni dans l'erreur ni dans les événements.
+  Les sessions de l'agent de configuration restent exclues des candidatures à l'amélioration continue (`agent-sessions#DEC-13`) : rien à faire ici.
+  Aucune E/S propre : tout passe par les traits de l'hôte ; aucune panique.
+
+Depends on:
+  ./store.sdd
+  ./toolset.sdd
+  ./skill.sdd
+  ./context_type.sdd
+  ./compat.sdd
+  ./error.sdd
+  ../secret.sdd
+  ../scratchpad/engine.sdd
+  ../session/redact.sdd
+  rhai
+
+Scenario: un toolset valide est écrit comme brouillon et reste inactif
+  Given un agent de configuration et un script qui appelle put_toolset_draft avec une définition valide
+  When le script s'exécute
+  Then le brouillon est lisible par get_draft, et get_active ne rend rien
+
+Scenario: un brouillon invalide n'est pas écrit
+  Given une définition dont une fonction ne compile pas
+  When put_toolset_draft est appelé
+  Then le script reçoit une erreur qui nomme la règle, et get_draft ne rend rien
+
+Scenario: un skill s'écrit en map et en texte
+  Given un brouillon de toolset
+  When put_skill_draft puis put_skill_draft_text ajoutent deux skills
+  Then le brouillon porte les deux, et un texte sans frontmatter est refusé
+
+Scenario: un secret est refusé et jamais rendu
+  Given une définition dont un défaut vaut `sk-abc123` et un détecteur de l'hôte différent du défaut
+  When put_toolset_draft est appelé
+  Then l'erreur se conforme au détecteur de l'hôte, et la valeur n'est dans aucun texte rendu
+
+Scenario: validate, list et delete
+  Given deux brouillons dont un devenu invalide
+  When validate_draft, list_drafts et delete_draft s'exécutent
+  Then validate_draft rend les écarts du seul invalide, list_drafts rend les deux, delete_draft retire l'un et rend vrai, puis faux au second appel
+
+Scenario: aucune activation n'existe
+  Given le module enregistré
+  When functions("toolset_builder") est lu
+  Then aucune fonction ne porte `activate` ni n'écrit une version active
+
+Tasks:
+  [x] #1 Tests puis implémentation (lot T1), déclaration dans ./mod.rs et ré-export dans ../lib.rs.
+  [?] #2 Posé : les types de contexte n'ont pas de brouillon dans @ContextTypeStore ; le brouillon vit dans le @DraftStore de l'hôte (`put_type_draft`, `get_type_draft`). À confirmer par le développeur principal.
+  [?] #3 Posé : seuls les skills admettent la forme texte (`SKILL.md`), le seul format texte existant ; toolsets et types de contexte se donnent en map. À confirmer.

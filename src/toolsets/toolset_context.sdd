@@ -74,7 +74,7 @@ Tasks:
       Validé le 2026-10-29 (validator, mutations manuelles) sous `SKIP=deny scripts/check`.
   [x] #3 Décisions posées le 2026-10-29 (à confirmer) : les références de rôle et les valeurs par défaut passent par le même contrôle de secret que les valeurs de paramètres ; un doublon de valeur par défaut est une erreur.
       Validé le 2026-10-31 (accord du développeur principal).
-  [ ] #2 Posé : la détection de valeur ressemblant à un secret réutilise la liste de ../agents/provider.sdd (heuristique documentée, le contrôle réel reste à l'hôte, `agent-sessions#CON-3`) ; une fonction commune est à extraire quand les deux specs sont livrées.
+  [x] #2 Posé : la détection de valeur ressemblant à un secret réutilise la liste de ../agents/provider.sdd (heuristique documentée, le contrôle réel reste à l'hôte, `agent-sessions#CON-3`) ; une fonction commune est à extraire quand les deux specs sont livrées.
       Décision modifiée : la détection de secret passe par un trait remplaçable par l'hôte, avec l'heuristique de `provider.sdd` comme implémentation par défaut ; la librairie ne l'impose pas à l'hôte. À spécifier et implémenter ; le même trait sert `provider.sdd`. (accord du développeur principal, 2026-10-31).
       Extraite (toolsets#6) : la détection vit dans `../secret.rs` (`looks_like_secret`, `pub(crate)`), appelée ici et par `../agents/provider.rs`.
-  [ ] #P5 @ToolsetContext::with_secret_detector et @ToolsetContext::check (lot P5, 2026-10-31) : la désérialisation applique @DefaultSecretDetector.
+  [x] #P5 @ToolsetContext::with_secret_detector et @ToolsetContext::check (lot P5, 2026-10-31) : la désérialisation applique @DefaultSecretDetector.

@@ -1,0 +1,70 @@
+Spec: restore
+
+Purpose:
+  Restauration d'une session de bout en bout : charge l'état sauvegardé, vérifie le format, remet le pad dans l'état sauvegardé (variables restaurées, fonctions recompilées depuis leur source) et produit les messages système sur ce qui a changé
+    (`agent-sessions/session#FR-3`, `AC-2`, `agent-sessions#BO-4`). Assemble des pièces existantes ; placée dans `runtime` (couche d'assemblage) et non dans `session`, qui ne dépend pas de `scratchpad` (décision du 2026-10-31) ; ne lance aucun script ni aucun tour.
+
+Owns:
+  ./restore.rs
+
+References:
+  ../session/store.sdd
+  ../session/state.sdd
+  ../session/format.sdd
+  ../session/notice.sdd
+  ../scratchpad/run.sdd
+
+Exposes:
+  @restore_session
+  @RestoredSession
+
+Accepts:
+  @restore_session: un @SessionStore (générique), un @SessionId, le @ScratchpadEngine de la cible (déjà construit par l'hôte avec les accords courants) et la @Provenance courante (empreinte de l'agent, version de chaque toolset utilisé) ; asynchrone.
+
+Returns:
+  @restore_session: un @RestoredSession : l'@SessionState chargé, le @Scratchpad restauré, et les messages système de restauration (@restore_notices : définition d'agent changée, toolsets changés par nom croissant, fonctions cassées dans l'ordre reçu ; puis @unresolved_call_notices pour les appels irrésolus des avertissements de @Restored::warnings, `AC-2`).
+  @RestoredSession : accesseurs en lecture, et une méthode qui consomme la valeur et rend ses trois pièces.
+
+Raises:
+  @SessionError::UnknownSession: aucun état sauvegardé sous l'identifiant (nouvelle variante, à ajouter à ../session/error.sdd ; porte l'identifiant ; `Display` : « no saved session `<id>` »).
+  @SessionError::IncompatibleFormat: version majeure de format différente (../session/format.sdd).
+  @SessionError::Store: échec du stockage de l'hôte.
+
+Must:
+  Une définition de fonction qui ne compile plus, ou qui appelle une API disparue d'un toolset, n'empêche pas la restauration du reste : elle est signalée dans les messages système (`session#FR-3`, `AC-2`) et ses variables, ainsi que le reste du scope, sont restaurés ; une closure ou un pointeur de fonction sauvegardé n'existe pas et est signalé par l'avertissement du pad.
+  Aucun script n'est rejoué, aucun appel MCP ni modèle n'est fait, aucun tour n'est ouvert : le @TurnGate n'est pas pris.
+  Les messages système ne portent que des noms, des empreintes et des versions, jamais du contenu de session ni de secret (`agent-sessions#CON-3`).
+  L'état n'est pas modifié ni réécrit : la sauvegarde reste celle de la fin du tour précédent.
+  Aucune E/S propre (tout par le @SessionStore), aucune horloge, aucune panique.
+
+Depends on:
+  ../session/store.sdd
+  ../session/state.sdd
+  ../session/format.sdd
+  ../session/notice.sdd
+  ../session/error.sdd
+  ../scratchpad/run.sdd
+
+Scenario: restaurer une session rend état, pad et messages
+  Given une session sauvegardée avec une variable `x`, une fonction `f` et une provenance identique à la courante
+  When restore_session est appelé
+  Then le pad lit `x`, appelle `f`, et la liste des messages système est vide
+
+Scenario: une fonction dont une API a disparu n'empêche pas la restauration
+  Given une session dont une fonction référence une API de toolset disparue
+  When restore_session est appelé
+  Then les variables et les autres fonctions sont restaurées, la fonction cassée est signalée par un message système qui la nomme
+
+Scenario: les changements de provenance sont signalés
+  Given une session sauvegardée sous une autre empreinte d'agent et une autre version d'un toolset
+  When restore_session est appelé
+  Then deux messages systèmes, dans l'ordre : l'agent puis le toolset
+
+Scenario: session inconnue ou format incompatible
+  Given un identifiant absent du stockage, puis un état d'une autre version majeure de format
+  When restore_session est appelé
+  Then UnknownSession puis IncompatibleFormat, et rien n'est modifié
+
+Tasks:
+  [x] #1 Tests puis implémentation (lot S1), variante `UnknownSession` dans ../session/error.sdd (domaine `session`), déclaration dans ./mod.rs et ré-export dans ../lib.rs.
+  [x] #2 Scenario « une fonction dont une API a disparu » (lot S1, décision du 2026-10-31) : dépend de ../scratchpad/run.sdd #15 et de ../session/notice.sdd #P6.

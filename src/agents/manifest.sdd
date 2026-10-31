@@ -1,0 +1,58 @@
+Spec: manifest
+
+Purpose:
+  Manifeste de projet : la liste, sérialisable, des entités qu'un projet regroupe (agents principaux, sous-agents, toolsets, types de contexte, contextes, fournisseurs, profils de modèle), avec la vérification de cohérence de ses références
+    (`agent-sessions/agents#FR-4`). Une structure de données : la librairie ne lit ni n'écrit aucun fichier, l'hôte stocke le manifeste comme il veut.
+
+Owns:
+  ./manifest.rs
+
+Exposes:
+  @ProjectManifest
+  @ManifestView (vue des noms existants, fournie par l'hôte à @ProjectManifest::check)
+  @ManifestGap
+
+Accepts:
+  @ProjectManifest::new: le nom du projet ; constructeurs chaînés pour ajouter, par catégorie, un nom d'entité (`with_main_agent`, `with_subagent`, `with_toolset`, `with_context_type`, `with_context`, `with_provider`, `with_profile`).
+  @ProjectManifest::check: une vue de ce qui existe, sous forme de listes de noms par catégorie fournies par l'hôte (lues dans ses stockages) ; synchrone.
+
+Returns:
+  @ProjectManifest : accesseurs en lecture seule par catégorie, noms triés et sans doublon.
+  @ProjectManifest::check: la liste des @ManifestGap (entité du manifeste absente du stockage ; la présence est le seul contrôle : les liens entre entités, par exemple le type d'un contexte, vivent dans les stockages et leurs contrôles de compatibilité, décision du 2026-10-31), vide si le manifeste est cohérent.
+
+Raises:
+  Aucune erreur : un nom vide est refusé par le constructeur chaîné qui rend `None` ; un doublon dans une catégorie est ignoré.
+
+Must:
+  Le manifeste ne contient que des noms : aucune définition, aucune adresse, aucun secret (`agent-sessions#CON-3`) ; un nom qui ressemble à un secret pour @SecretDetector est refusé.
+  Se sérialise et se désérialise à l'identique ; la désérialisation applique les mêmes refus que les constructeurs.
+  Un @ManifestGap nomme la catégorie et l'entité, jamais de contenu ; `Display` stable.
+  Aucune E/S, aucune horloge, aucune panique.
+
+Depends on:
+  ./error.sdd
+  ../secret.sdd
+  serde
+
+Scenario: un manifeste cohérent n'a aucun écart
+  Given un manifeste qui nomme un agent, un toolset et un contexte, et un stockage qui les contient
+  When check est appelé
+  Then la liste d'écarts est vide
+
+Scenario: une entité absente est un écart nommé
+  Given un manifeste qui nomme un toolset absent du stockage
+  When check est appelé
+  Then un écart nomme la catégorie `toolset` et le nom, rien d'autre
+
+Scenario: noms triés, sans doublon, sans nom vide
+  Given l'ajout de `b`, `a`, `a` puis d'un nom vide
+  When les accesseurs sont lus
+  Then ils rendent `a`, `b`, et l'ajout du nom vide a rendu None
+
+Scenario: aller-retour sérialisé
+  Given un manifeste complet
+  When il est sérialisé puis désérialisé
+  Then le résultat est identique, et un document qui porte un nom ressemblant à un secret est refusé
+
+Tasks:
+  [x] #1 Tests puis implémentation (lot M1), déclaration dans ./mod.rs et ré-export dans ../lib.rs.

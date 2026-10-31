@@ -71,4 +71,4 @@ Tasks:
       Validé le 2026-10-29 (validator, mutations manuelles) sous `SKIP=deny scripts/check`.
   [x] #4 `Debug` manuel de @Toolset qui élide le texte source du module (un `{:?}` ne doit pas le répandre), avec son test.
       Validé le 2026-10-29 (validator, 58 mutants dont 55 tués) sous `scripts/check` complet.
-  [ ] #P5 @Toolset::with_secret_detector (lot P5, 2026-10-31).
+  [x] #P5 @Toolset::with_secret_detector (lot P5, 2026-10-31).

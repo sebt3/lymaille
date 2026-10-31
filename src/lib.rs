@@ -17,8 +17,9 @@ mod toolsets;
 pub use agents::{
     AgentDefinition, AgentKind, AgentStore, AgentsError, AgentsResult, DetectedModel, ErrorClass,
     InMemoryCatalog, InferenceError, InferenceProvider, InferenceRequest, InferenceResponse, Layered,
-    ModelProfile, ProfileStore, Provider, ProviderLevel, ProviderStore, ReportedUsage, ResolvedProfile,
-    SamplingParams, SandboxLimits, ScriptedProvider, classify_status,
+    ManifestGap, ManifestView, ModelProfile, ProfileStore, ProjectManifest, Provider, ProviderLevel,
+    ProviderStore, ReportedUsage, ResolvedProfile, SamplingParams, SandboxLimits, ScriptedProvider,
+    classify_status,
 };
 pub use clock::{Clock, ManualClock, SystemClock, Timestamp};
 pub use context::{
@@ -40,7 +41,10 @@ pub use modules::{
 };
 #[cfg(feature = "mcp-http")]
 pub use modules::{McpAuth, McpClientConfig, McpHeaders, RmcpConnector};
-pub use runtime::{RHAI_PAD_TOOL, TurnConfig, TurnOutput, TurnRunner, UserInbox, rhai_pad_definition};
+pub use runtime::{
+    RHAI_PAD_TOOL, RestoredSession, TurnConfig, TurnOutput, TurnRunner, UserInbox, restore_session,
+    rhai_pad_definition,
+};
 pub use scratchpad::{
     CandidateSet, Catalog, CoreGroup, EngineBuilder, FunctionDescriptor, FunctionEntry, FunctionSource,
     GrantedModule, GrantedSkill, GrantedToolset, Grants, InspectionPad, InspectionTarget,
@@ -51,21 +55,22 @@ pub use scratchpad::{
     full_text, limits_notice, nearest, recompile_functions, register_format_functions, render_value,
     restore_scope, shell_module, snapshot_scope, suggest_for, to_dynamic, to_tagged, truncate_middle,
 };
+pub use secret::{DefaultSecretDetector, SecretDetector};
 pub use session::{
     AgentRef, Backoff, BoundaryKind, CancelHandle, Event, EventKind, EventSink, FormatVersion, History,
     InMemoryStore, InspectionTargetRef, Label, LabelAuthor, LabelTarget, Labels, McpInput, McpRecord,
     Message, ModelSnapshot, NativeTool, NullSink, Outcome, Provenance, Reasoning, RecordingSink, Redactor,
     RunId, RunSignals, ScriptInput, ScriptRecord, Segment, SegmentContext, SessionError, SessionId,
     SessionKind, SessionResult, SessionState, SessionStore, SleepOutcome, TaggedValue, TokenCounters,
-    ToolCall, TurnGate, TurnId, TurnPermit, restore_notices,
+    ToolCall, TurnGate, TurnId, TurnPermit, restore_notices, unresolved_call_notices,
 };
 pub use toolsets::{
     Assembled, Bump, ConfigEnv, ConfigStores, ContextLevel, ContextStore, ContextType, ContextTypeStore,
-    Contract, Delegation, FlatContextType, Gap, GapKind, InMemoryToolsets, InspectionSlot, ParamDecl,
-    RemovalReason, RemovedSubagent, ResolvedContext, RoleDecl, RoleSpec, ScriptError, SessionFilter,
-    SessionIndex, SessionMeta, SessionSummary, Skill, SkillTool, Toolset, ToolsetContext, ToolsetStore,
-    ToolsetsError, ToolsetsResult, TypeRequirement, VersionWarning, assemble, builtin_rhai_pad_skill,
-    check_context, check_creation_rule, check_declared_version, check_template, config_registration,
-    delegable_subagents, extract_contract, render_prompt, render_skill, session_context_registration,
-    skill_definition,
+    Contract, Delegation, DraftEntry, DraftKind, DraftStore, FlatContextType, Gap, GapKind, InMemoryToolsets,
+    InspectionSlot, ParamDecl, RemovalReason, RemovedSubagent, ResolvedContext, RoleDecl, RoleSpec,
+    ScriptError, SessionFilter, SessionIndex, SessionMeta, SessionSummary, Skill, SkillTool, Toolset,
+    ToolsetContext, ToolsetStore, ToolsetsError, ToolsetsResult, TypeRequirement, VersionWarning, assemble,
+    builder_registration, builtin_rhai_pad_skill, check_context, check_creation_rule, check_declared_version,
+    check_template, config_registration, delegable_subagents, extract_contract, render_prompt, render_skill,
+    session_context_registration, skill_definition,
 };

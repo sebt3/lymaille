@@ -5,7 +5,7 @@ use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::secret::looks_like_secret;
+use crate::secret::{DefaultSecretDetector, SecretDetector};
 
 /// Message of the refusal of a provider read from its serialized form. It names no field value.
 const REFUSED: &str = "invalid provider: a name, a type or a reference is empty or refused";
@@ -44,10 +44,28 @@ impl Provider {
         auth: Option<String>,
         level: ProviderLevel,
     ) -> Option<Self> {
+        Self::new_with_detector(name, kind, address, auth, level, &DefaultSecretDetector)
+    }
+
+    /// Builds a provider like [`Provider::new`], but the references are judged by the detector of the host instead of
+    /// the default one.
+    #[must_use]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the five fields of Provider::new, plus the detector of the host, are the contract of the spec"
+    )]
+    pub fn new_with_detector(
+        name: String,
+        kind: String,
+        address: String,
+        auth: Option<String>,
+        level: ProviderLevel,
+        detector: &dyn SecretDetector,
+    ) -> Option<Self> {
         let valid = !name.trim().is_empty()
             && !kind.trim().is_empty()
-            && is_reference(&address)
-            && auth.as_deref().is_none_or(is_reference);
+            && is_reference(&address, detector)
+            && auth.as_deref().is_none_or(|text| is_reference(text, detector));
         valid.then_some(Self {
             name,
             kind,
@@ -55,6 +73,17 @@ impl Provider {
             auth,
             level,
         })
+    }
+
+    /// Tells whether none of the references of the provider looks like a secret for `detector`. The host calls it on a
+    /// loaded provider, since deserialization applies the default detector only.
+    #[must_use]
+    pub fn check(&self, detector: &dyn SecretDetector) -> bool {
+        !detector.looks_like_secret(&self.address)
+            && !self
+                .auth
+                .as_deref()
+                .is_some_and(|text| detector.looks_like_secret(text))
     }
 
     /// Returns the name of the provider.
@@ -122,13 +151,23 @@ impl<'de> Deserialize<'de> for Provider {
 
 /// Tells whether `text` is a reference that the host resolves: a non-empty text without blank characters, that does not
 /// look like a secret (`crate::secret`).
-fn is_reference(text: &str) -> bool {
-    !text.is_empty() && !text.chars().any(char::is_whitespace) && !looks_like_secret(text)
+fn is_reference(text: &str, detector: &dyn SecretDetector) -> bool {
+    !text.is_empty() && !text.chars().any(char::is_whitespace) && !detector.looks_like_secret(text)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{Provider, ProviderLevel};
+    use crate::secret::{DefaultSecretDetector, SecretDetector};
+
+    /// A host detector that only knows the prefix `tok_`.
+    struct TokDetector;
+
+    impl SecretDetector for TokDetector {
+        fn looks_like_secret(&self, text: &str) -> bool {
+            text.starts_with("tok_")
+        }
+    }
 
     fn provider(address: &str, auth: Option<&str>) -> Option<Provider> {
         Provider::new(
@@ -298,6 +337,78 @@ mod tests {
         assert!(
             serde_json::from_str::<Provider>(blank_type).is_err(),
             "a JSON provider with a blank type must fail to deserialize"
+        );
+    }
+
+    // Scenario: un détecteur de l'hôte juge les références
+    #[test]
+    fn host_detector_judges_the_references() {
+        let build = |address: &str| {
+            Provider::new_with_detector(
+                "strix".to_owned(),
+                "openai".to_owned(),
+                address.to_owned(),
+                None,
+                ProviderLevel::User,
+                &TokDetector,
+            )
+        };
+        assert!(build("tok_abc").is_none(), "the host detector refuses tok_");
+        let accepted = build("sk-abc").expect("the host detector replaces the default: sk- is accepted");
+        assert!(
+            accepted.check(&TokDetector),
+            "check agrees with the constructor for the host detector"
+        );
+        assert!(
+            !accepted.check(&DefaultSecretDetector),
+            "check with the default refuses sk-"
+        );
+        let text = r#"{"name":"strix","kind":"openai","address":"tok_abc","auth":null,"level":"user"}"#;
+        let loaded: Provider =
+            serde_json::from_str(text).expect("deserialization applies the default detector");
+        assert!(
+            !loaded.check(&TokDetector),
+            "check with the host detector refuses a loaded tok_"
+        );
+        assert!(
+            loaded.check(&DefaultSecretDetector),
+            "check with the default accepts tok_"
+        );
+        let with_auth = Provider::new_with_detector(
+            "strix".to_owned(),
+            "openai".to_owned(),
+            "vllm-strix".to_owned(),
+            Some("tok_key".to_owned()),
+            ProviderLevel::User,
+            &TokDetector,
+        );
+        assert!(
+            with_auth.is_none(),
+            "the host detector judges the auth reference too"
+        );
+    }
+
+    // Scenario: un détecteur de l'hôte juge les références (branches de check)
+    #[test]
+    fn check_judges_the_address_and_the_auth_separately() {
+        let build = |address: &str, auth: Option<&str>| {
+            provider(address, auth).expect("the default detector accepts tok_ references")
+        };
+        assert!(
+            !build("vllm-strix", Some("tok_abc")).check(&TokDetector),
+            "check refuses a suspect auth reference alone"
+        );
+        assert!(
+            !build("tok_abc", Some("vllm-key")).check(&TokDetector),
+            "check refuses a suspect address alone"
+        );
+        assert!(
+            build("vllm-strix", Some("vllm-key")).check(&TokDetector),
+            "check accepts plain references"
+        );
+        assert!(
+            build("vllm-strix", None).check(&TokDetector),
+            "check accepts a missing auth"
         );
     }
 }

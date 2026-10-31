@@ -11,13 +11,17 @@ Owns:
 Exposes:
   @Provenance
   @restore_notices
+  @unresolved_call_notices
 
 Accepts:
   @Provenance::new: l'empreinte de la définition d'agent et les versions de toolsets (nom → `major.minor.patch`).
   @restore_notices: la @Provenance enregistrée, la @Provenance courante et la liste des noms de fonctions dont la recompilation a échoué.
   Les versions de toolsets sont lues par `vynil_core::Semver` (`Semver::opt_parse`) ; la @Provenance garde leur texte.
 
+  @unresolved_call_notices: une liste de couples (clé de fonction `nom/arité`, nom d'appel qualifié) que la recompilation n'a pas pu résoudre, fournie par l'appelant (la crate `session` ne connaît pas les types de `scratchpad`).
+
 Returns:
+  @unresolved_call_notices: un texte de message système par fonction, triées par clé, appels triés et sans doublon : `the function `<clé>` calls `<appel>`, `<appel>` which are not available in this session; fix or redefine it` (singulier « which is » pour un seul appel). Liste vide si rien n'est à signaler. Aucun contenu de session, seulement des noms.
   @restore_notices: une liste de textes de message système, en anglais, vide si rien n'a changé.
 
 Must:
@@ -70,6 +74,16 @@ Scenario: une version illisible ne panique jamais
   When restore_notices est appelé
   Then un message est produit
 
+Scenario: une API disparue est signalée par fonction
+  Given les couples (`g/0`, `ops::b`), (`f/1`, `ops::a`), (`f/1`, `ops::a`) et (`f/1`, `ops::c`)
+  When unresolved_call_notices est appelé
+  Then deux textes, `f/1` d'abord, qui nomment `ops::a` et `ops::c` sans doublon, puis `g/0` qui nomme `ops::b`
+
+Scenario: rien d'irrésolu, rien de dit
+  Given aucun couple
+  When unresolved_call_notices est appelé
+  Then la liste est vide
+
 Tasks:
   [x] #5 Tests manquants relevés par la validation : ordre global des messages (agent, toolsets par nom croissant, fonctions cassées) ; majeure différente ET plus
       ancien (2.0.0 vers 1.9.0) selon la décision de #4.
@@ -97,3 +111,4 @@ Tasks:
       Les quatre tests ont été écrits VERTS sur le comportement décidé (a, b, d) ou ROUGE pour (c) (ordre inverse de métadonnées) ;
       chacun est prouvé par mutation. Le marqueur `[?] #6` reste à basculer en `[x]` par l'orchestrateur après validation ;
       la case #3 reste à cocher par la même voie (remplacement fait).
+  [x] #P6 @unresolved_call_notices (Décision du 2026-10-31 (AC-2 de `session`, accord du développeur principal)) : tests puis implémentation, ré-export dans ../lib.rs ; `restore_notices` est inchangée.

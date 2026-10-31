@@ -14,6 +14,7 @@ use vynil_core::Semver;
 use super::toolset_context::value_looks_like_secret;
 use super::version::semver_text;
 use super::{Bump, ToolsetsError, ToolsetsResult, TypeRequirement};
+use crate::secret::{DefaultSecretDetector, SecretDetector};
 
 /// A role of a context type: its name, and whether it is required or optional.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -185,13 +186,28 @@ impl ContextType {
     /// parameter default looks like a secret, or when the schema does not compile (a reference to another document
     /// included). The reason never quotes the schema.
     pub fn new(name: String, version: Semver, schema: Value) -> ToolsetsResult<Self> {
+        Self::new_with_detector(name, version, schema, &DefaultSecretDetector)
+    }
+
+    /// Builds a context type like [`ContextType::new`], but the defaults of the schema are judged by the detector of the
+    /// host instead of the default one.
+    ///
+    /// # Errors
+    ///
+    /// The same as [`ContextType::new`].
+    pub fn new_with_detector(
+        name: String,
+        version: Semver,
+        schema: Value,
+        detector: &dyn SecretDetector,
+    ) -> ToolsetsResult<Self> {
         if !is_valid_name(&name) {
             return Err(invalid(
                 &name,
                 "the name must be non-empty lowercase ASCII letters, digits and hyphens",
             ));
         }
-        let compiled = Arc::new(compile_schema(&name, schema)?);
+        let compiled = Arc::new(compile_schema(&name, schema, detector)?);
         Ok(Self {
             name,
             version,
@@ -389,7 +405,11 @@ const SCHEMA_MAX_BYTES: usize = 64 * 1024;
 /// Checks a parameter schema and compiles it once. The serialized schema is at most [`SCHEMA_MAX_BYTES`]; the parts that
 /// the structural check reads are an object, a `required` list of names and a `properties` object, and no default of a
 /// parameter looks like a secret. The compiler's message is dropped, since it can quote the schema.
-fn compile_schema(name: &str, schema: Value) -> ToolsetsResult<CompiledSchema> {
+fn compile_schema(
+    name: &str,
+    schema: Value,
+    detector: &dyn SecretDetector,
+) -> ToolsetsResult<CompiledSchema> {
     let size = serde_json::to_string(&schema).map_or(usize::MAX, |text| text.len());
     if size > SCHEMA_MAX_BYTES {
         return Err(invalid(
@@ -397,7 +417,7 @@ fn compile_schema(name: &str, schema: Value) -> ToolsetsResult<CompiledSchema> {
             "the parameter schema is larger than 64 KiB once serialized",
         ));
     }
-    validate_shape(name, &schema)?;
+    validate_shape(name, &schema, detector)?;
     // A reference to another document cannot be resolved (no network, no file), so it is refused here.
     let validator = jsonschema::validator_for(&schema)
         .map_err(|_refusal| invalid(name, "the parameter schema does not compile as a JSON Schema"))?;
@@ -406,7 +426,7 @@ fn compile_schema(name: &str, schema: Value) -> ToolsetsResult<CompiledSchema> {
 
 /// Checks the parts of a parameter schema that the structural check reads: an object, a `required` list of names and
 /// a `properties` object without a secret-like default. The rest of the schema is compiled as it is.
-fn validate_shape(name: &str, schema: &Value) -> ToolsetsResult<()> {
+fn validate_shape(name: &str, schema: &Value, detector: &dyn SecretDetector) -> ToolsetsResult<()> {
     let Some(object) = schema.as_object() else {
         return Err(invalid(name, "the parameter schema is not a JSON Schema object"));
     };
@@ -428,7 +448,10 @@ fn validate_shape(name: &str, schema: &Value) -> ToolsetsResult<()> {
     }
     if let Some(properties) = object.get("properties").and_then(Value::as_object) {
         for property in properties.values() {
-            if property.get("default").is_some_and(value_looks_like_secret) {
+            if property
+                .get("default")
+                .is_some_and(|value| value_looks_like_secret(value, detector))
+            {
                 return Err(invalid(
                     name,
                     "a parameter default looks like a secret: a schema holds references and plain values, never a secret",
@@ -551,6 +574,7 @@ mod tests {
     use vynil_core::Semver;
 
     use super::{Bump, ContextType, RoleSpec};
+    use crate::secret::SecretDetector;
     use crate::toolsets::{
         ContextLevel, Toolset, ToolsetContext, ToolsetsError, TypeRequirement, check_context,
     };
@@ -1040,6 +1064,41 @@ mod tests {
         assert!(
             flat.required_parameters().contains("namespace"),
             "the own required parameter is listed"
+        );
+    }
+
+    // Scenario: un détecteur de l'hôte juge les défauts d'un schéma
+    #[test]
+    fn host_detector_judges_schema_defaults() {
+        struct TokDetector;
+        impl SecretDetector for TokDetector {
+            fn looks_like_secret(&self, text: &str) -> bool {
+                text.starts_with("tok_")
+            }
+        }
+        let schema = || {
+            json!({
+                "type": "object",
+                "properties": { "api_key": { "type": "string", "default": "tok_abc" } },
+            })
+        };
+        let refused =
+            ContextType::new_with_detector("cluster".to_owned(), semver("1.0.0"), schema(), &TokDetector);
+        assert!(
+            matches!(refused, Err(ToolsetsError::InvalidContextType { .. })),
+            "the host detector refuses a tok_ default"
+        );
+        let accepted = ContextType::new("cluster".to_owned(), semver("1.0.0"), schema());
+        assert!(accepted.is_ok(), "the default heuristic accepts a tok_ default");
+        let replaced = json!({
+            "type": "object",
+            "properties": { "api_key": { "type": "string", "default": "sk-abc" } },
+        });
+        let kept =
+            ContextType::new_with_detector("cluster".to_owned(), semver("1.0.0"), replaced, &TokDetector);
+        assert!(
+            kept.is_ok(),
+            "the host detector replaces the default: sk- is accepted"
         );
     }
 }

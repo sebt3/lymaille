@@ -8,6 +8,7 @@ Structure:
   ./mod.rs: déclarations et ré-exports
   ./turn.rs: boucle de tour
   ./definition.rs: définition canonique du tool `rhai_pad`
+  ./restore.rs: restauration d'une session de bout en bout
 
 Owns:
   ./mod.rs
@@ -21,6 +22,7 @@ References:
   ../scratchpad/scratchpad.sdd
   ./turn.sdd
   ./definition.sdd
+  ./restore.sdd
 
 Must:
   Ne réaliser aucune E/S propre : le stockage de session, l'inférence et les modules viennent de traits ou d'objets fournis par l'hôte ; le temps passe par @Clock et par l'attente annulable de @CancelHandle.

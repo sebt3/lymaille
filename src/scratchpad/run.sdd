@@ -54,6 +54,7 @@ Exposes:
   @PadSnapshot::warnings
   @Restored::into_pad
   @Restored::broken
+  @Restored::warnings
   @PadSnapshot::variables
   @PadSnapshot::functions
 
@@ -302,3 +303,4 @@ Scenario: runtime current_thread
   Then le statut est Failed(Runtime) avec l'erreur explicite de `vynil-core`, sans blocage
   [x] #14 Validation du 2026-10-29 : (a) test du retrait des sources périmées (définir `fn f(){1}`, puis lancer `fn f(){2}` avec une fonction à méthode typée dans le même script, vérifier que l'instantané ne contient plus l'ancienne `f/0`) ; (b) remplacer la copie privée de `key_of` par un `pub(super)` de ./persist.rs ; (c) justifier par un commentaire ou repasser en `current_thread` le test `call_depth_is_an_error_rendered_to_the_llm` ; (d) étendre le Scenario « une fonction exclue par le masquage est signalée » aux deux avertissements rendus en texte seulement (Scenario étendu le 2026-10-29) ; (e) deux tests relevés par le validateur : retrait d'une fonction d'arité 1 ou plus, et conservation de la source d'une autre fonction `g/0` après l'échec d'extraction.
       Validé le 2026-10-29 (validator, 12 mutants tués) sous `SKIP=deny scripts/check`.
+  [x] #15 Décision du 2026-10-31 (AC-2 de `session`, accord du développeur principal) : @Restored::warnings rend les @RestoreWarning de la recompilation (appel à un nom inconnu, voir ./persist.sdd), jusqu'ici jetés par @Scratchpad::restore ; l'ordre est celui de @recompile_functions. Test : une fonction qui appelle `ops::disparue` produit un avertissement qui la nomme et nomme l'appel.

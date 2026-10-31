@@ -3,7 +3,9 @@
 //! storage, inference and modules come from traits and objects the host provides.
 
 mod definition;
+mod restore;
 mod turn;
 
 pub use definition::rhai_pad_definition;
+pub use restore::{RestoredSession, restore_session};
 pub use turn::{RHAI_PAD_TOOL, TurnConfig, TurnOutput, TurnRunner, UserInbox};

@@ -3,12 +3,14 @@
 //! `FR-5`, `FR-17`, `agent-sessions#DEC-5`, `agent-sessions#CON-3`).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+use std::sync::Arc;
 
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 use super::{ToolsetsError, ToolsetsResult};
-use crate::secret::looks_like_secret;
+use crate::secret::{DefaultSecretDetector, SecretDetector};
 
 /// Level at which a toolset context lives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -23,8 +25,37 @@ pub enum ContextLevel {
     Session,
 }
 
+/// Secret detector shared by a context or a toolset. It is neither shown, nor compared, nor serialized: two values that
+/// differ only by their detector are equal.
+#[derive(Clone)]
+pub(in crate::toolsets) struct SharedDetector(Arc<dyn SecretDetector>);
+
+impl SharedDetector {
+    /// Wraps the detector given by the host.
+    pub(in crate::toolsets) fn new(detector: Arc<dyn SecretDetector>) -> Self {
+        Self(detector)
+    }
+
+    /// Returns the detector.
+    pub(in crate::toolsets) fn get(&self) -> &dyn SecretDetector {
+        &*self.0
+    }
+}
+
+impl Default for SharedDetector {
+    fn default() -> Self {
+        Self(Arc::new(DefaultSecretDetector))
+    }
+}
+
+impl PartialEq for SharedDetector {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
 /// Named toolset context. It holds parameters and references only: a value that looks like a secret is refused.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Clone, PartialEq, Serialize)]
 #[non_exhaustive]
 pub struct ToolsetContext {
     name: String,
@@ -32,6 +63,21 @@ pub struct ToolsetContext {
     parameters: BTreeMap<String, Value>,
     roles: BTreeMap<String, String>,
     overrides: BTreeMap<String, BTreeMap<String, Value>>,
+    #[serde(skip)]
+    detector: SharedDetector,
+}
+
+impl fmt::Debug for ToolsetContext {
+    /// Shows the same fields as before the detector existed, then `..`: the detector never appears.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ToolsetContext")
+            .field("name", &self.name)
+            .field("level", &self.level)
+            .field("parameters", &self.parameters)
+            .field("roles", &self.roles)
+            .field("overrides", &self.overrides)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Values resolved for a session.
@@ -72,7 +118,7 @@ impl ToolsetContext {
     /// # Errors
     ///
     /// Returns [`ToolsetsError::InvalidContext`] when the name is empty.
-    pub const fn new(name: String, level: ContextLevel) -> ToolsetsResult<Self> {
+    pub fn new(name: String, level: ContextLevel) -> ToolsetsResult<Self> {
         if name.is_empty() {
             return Err(ToolsetsError::InvalidContext {
                 name,
@@ -85,7 +131,33 @@ impl ToolsetContext {
             parameters: BTreeMap::new(),
             roles: BTreeMap::new(),
             overrides: BTreeMap::new(),
+            detector: SharedDetector::default(),
         })
+    }
+
+    /// Replaces the detector that judges the next calls of `with_parameter`, `with_role`, `with_override` and `resolve`.
+    /// The detector of the host replaces the default one entirely. Entries already added are not judged again: see
+    /// [`ToolsetContext::check`].
+    #[must_use]
+    pub fn with_secret_detector(mut self, detector: Arc<dyn SecretDetector>) -> Self {
+        self.detector = SharedDetector::new(detector);
+        self
+    }
+
+    /// Tells whether no value and no role reference of the context looks like a secret for `detector`. The host calls it
+    /// on a loaded context, since deserialization applies the default detector only.
+    #[must_use]
+    pub fn check(&self, detector: &dyn SecretDetector) -> bool {
+        let values_clean = self
+            .parameters
+            .values()
+            .chain(self.overrides.values().flat_map(BTreeMap::values))
+            .all(|value| !value_looks_like_secret(value, detector));
+        values_clean
+            && !self
+                .roles
+                .values()
+                .any(|reference| detector.looks_like_secret(reference))
     }
 
     /// Adds a parameter, replacing an earlier value of the same name.
@@ -99,7 +171,7 @@ impl ToolsetContext {
     ///
     /// Returns [`ToolsetsError::InvalidContext`] when the name is empty or when the value looks like a secret.
     pub fn with_parameter(mut self, name: String, value: Value) -> ToolsetsResult<Self> {
-        check_entry(&name, &value)?;
+        check_entry(&name, &value, self.detector.get())?;
         let _previous = self.parameters.insert(name, value);
         Ok(self)
     }
@@ -116,7 +188,7 @@ impl ToolsetContext {
                 reason: "the role name is empty",
             });
         }
-        if looks_like_secret(&reference) {
+        if self.detector.get().looks_like_secret(&reference) {
             return Err(ToolsetsError::InvalidContext {
                 name: role,
                 reason: "the reference looks like a secret: a context holds references the host resolves, never a secret",
@@ -139,7 +211,7 @@ impl ToolsetContext {
                 reason: "the toolset name of an override is empty",
             });
         }
-        check_entry(&name, &value)?;
+        check_entry(&name, &value, self.detector.get())?;
         let _previous = self.overrides.entry(toolset).or_default().insert(name, value);
         Ok(self)
     }
@@ -165,7 +237,7 @@ impl ToolsetContext {
                     reason: "the toolset name of a default is empty",
                 });
             }
-            check_entry(&name, &value)?;
+            check_entry(&name, &value, self.detector.get())?;
             let table = defaults_by_toolset.entry(toolset.clone()).or_default();
             if table.contains_key(&name) {
                 return Err(ToolsetsError::InvalidContext {
@@ -232,14 +304,14 @@ impl<'de> Deserialize<'de> for ToolsetContext {
 
 /// Checks one parameter or override entry: the name is not empty and the value does not look like a secret. The error
 /// names the parameter and never carries the value.
-fn check_entry(name: &str, value: &Value) -> ToolsetsResult<()> {
+fn check_entry(name: &str, value: &Value, detector: &dyn SecretDetector) -> ToolsetsResult<()> {
     if name.is_empty() {
         return Err(ToolsetsError::InvalidContext {
             name: name.to_owned(),
             reason: "the parameter name is empty",
         });
     }
-    if value_looks_like_secret(value) {
+    if value_looks_like_secret(value, detector) {
         return Err(ToolsetsError::InvalidContext {
             name: name.to_owned(),
             reason: "the value looks like a secret: a context holds references and parameters, never a secret",
@@ -249,11 +321,13 @@ fn check_entry(name: &str, value: &Value) -> ToolsetsResult<()> {
 }
 
 /// Tells whether a JSON value holds, at any depth in its strings, a text that looks like a secret.
-pub(in crate::toolsets) fn value_looks_like_secret(value: &Value) -> bool {
+pub(in crate::toolsets) fn value_looks_like_secret(value: &Value, detector: &dyn SecretDetector) -> bool {
     match value {
-        Value::String(text) => looks_like_secret(text),
-        Value::Array(items) => items.iter().any(value_looks_like_secret),
-        Value::Object(entries) => entries.values().any(value_looks_like_secret),
+        Value::String(text) => detector.looks_like_secret(text),
+        Value::Array(items) => items.iter().any(|item| value_looks_like_secret(item, detector)),
+        Value::Object(entries) => entries
+            .values()
+            .any(|item| value_looks_like_secret(item, detector)),
         Value::Null | Value::Bool(_) | Value::Number(_) => false,
     }
 }
@@ -262,8 +336,20 @@ pub(in crate::toolsets) fn value_looks_like_secret(value: &Value) -> bool {
 mod tests {
     use serde_json::{Value, json};
 
+    use std::sync::Arc;
+
     use super::{ContextLevel, ToolsetContext};
+    use crate::secret::{DefaultSecretDetector, SecretDetector};
     use crate::toolsets::ToolsetsError;
+
+    /// A host detector that only knows the prefix `tok_`.
+    struct TokDetector;
+
+    impl SecretDetector for TokDetector {
+        fn looks_like_secret(&self, text: &str) -> bool {
+            text.starts_with("tok_")
+        }
+    }
 
     /// The defaults of one toolset parameter, in the form `resolve` takes them.
     fn default_of(toolset: &str, name: &str, value: Value) -> (String, String, Value) {
@@ -522,5 +608,126 @@ mod tests {
             serde_json::from_str::<ToolsetContext>(text).is_err(),
             "a secret-like value must fail to deserialize"
         );
+    }
+
+    // Scenario: un détecteur de l'hôte juge paramètres, rôles et surcharges
+    #[test]
+    fn host_detector_judges_parameters_roles_and_overrides() {
+        let base = || {
+            ToolsetContext::new("ctx".to_owned(), ContextLevel::User)
+                .expect("a named context builds")
+                .with_secret_detector(Arc::new(TokDetector))
+        };
+        let refused = |result: Result<ToolsetContext, ToolsetsError>, what: &str| {
+            assert!(
+                matches!(result, Err(ToolsetsError::InvalidContext { .. })),
+                "the host detector must refuse tok_ in {what}"
+            );
+        };
+        refused(
+            base().with_parameter("p".to_owned(), json!("tok_abc")),
+            "a parameter",
+        );
+        refused(base().with_role("r".to_owned(), "tok_abc".to_owned()), "a role");
+        refused(
+            base().with_override("t".to_owned(), "p".to_owned(), json!("tok_abc")),
+            "an override",
+        );
+        let accepted = base()
+            .with_parameter("p".to_owned(), json!("sk-abc"))
+            .expect("the host detector replaces the default: sk- is accepted")
+            .with_role("r".to_owned(), "sk-abc".to_owned())
+            .expect("sk- is accepted as a role reference")
+            .with_override("t".to_owned(), "p".to_owned(), json!("sk-abc"))
+            .expect("sk- is accepted as an override");
+        let resolve_refused = base().resolve([("t".to_owned(), "d".to_owned(), json!("tok_abc"))]);
+        assert!(
+            resolve_refused.is_err(),
+            "resolve judges the defaults with the host detector"
+        );
+        assert!(
+            accepted.check(&TokDetector),
+            "check agrees with the host detector"
+        );
+        assert!(
+            !accepted.check(&DefaultSecretDetector),
+            "check with the default refuses sk-"
+        );
+        let text = r#"{"name":"ctx","level":"user","parameters":{"p":"tok_abc"},"roles":{},"overrides":{}}"#;
+        let loaded: ToolsetContext =
+            serde_json::from_str(text).expect("deserialization applies the default detector");
+        assert!(
+            !loaded.check(&TokDetector),
+            "check with the host detector refuses a loaded tok_"
+        );
+        assert!(
+            loaded.check(&DefaultSecretDetector),
+            "check with the default accepts tok_"
+        );
+        let json_text = serde_json::to_string(&accepted).expect("a context serializes");
+        assert!(
+            !json_text.contains("detector"),
+            "the detector does not appear in the serialized form"
+        );
+        assert!(
+            !format!("{accepted:?}").contains("detector"),
+            "the detector does not appear in Debug"
+        );
+        let plain = ToolsetContext::new("ctx".to_owned(), ContextLevel::User).expect("builds");
+        assert_eq!(
+            accepted
+                .clone()
+                .with_secret_detector(Arc::new(DefaultSecretDetector)),
+            accepted,
+            "the detector does not take part in equality"
+        );
+        assert_ne!(accepted, plain, "contents still differ");
+    }
+
+    // Scenario: un détecteur de l'hôte juge paramètres, rôles et surcharges (branches de check)
+    #[test]
+    fn check_judges_each_branch_alone_and_after_deserialization() {
+        let plain = || ToolsetContext::new("ctx".to_owned(), ContextLevel::User).expect("builds");
+        let only_role = plain()
+            .with_role("r".to_owned(), "tok_abc".to_owned())
+            .expect("the default accepts tok_");
+        assert!(
+            !only_role.check(&TokDetector),
+            "check refuses a suspect role alone"
+        );
+        let only_override = plain()
+            .with_override(
+                "t".to_owned(),
+                "p".to_owned(),
+                json!({ "a": [{ "b": "tok_abc" }] }),
+            )
+            .expect("the default accepts tok_");
+        assert!(
+            !only_override.check(&TokDetector),
+            "check refuses a nested suspect override alone"
+        );
+        let only_parameter = plain()
+            .with_parameter("p".to_owned(), json!("tok_abc"))
+            .expect("the default accepts tok_");
+        assert!(
+            !only_parameter.check(&TokDetector),
+            "check refuses a suspect parameter alone"
+        );
+        assert!(plain().check(&TokDetector), "an empty context is clean");
+        let role_json =
+            r#"{"name":"c","level":"user","parameters":{},"roles":{"r":"tok_abc"},"overrides":{}}"#;
+        let override_json =
+            r#"{"name":"c","level":"user","parameters":{},"roles":{},"overrides":{"t":{"p":"tok_abc"}}}"#;
+        for text in [role_json, override_json] {
+            let loaded: ToolsetContext = serde_json::from_str(text).expect("the default accepts tok_");
+            assert!(
+                !loaded.check(&TokDetector),
+                "check refuses the loaded entry: {text}"
+            );
+            assert!(
+                loaded.check(&DefaultSecretDetector),
+                "the default accepts it: {text}"
+            );
+        }
     }
 }

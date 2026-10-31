@@ -30,7 +30,7 @@ pub use history::{History, Message, Reasoning, ToolCall};
 pub use id::{RunId, SessionId, TurnId};
 pub use label::{Label, LabelAuthor, LabelTarget, Labels};
 pub use native_tool::NativeTool;
-pub use notice::{Provenance, restore_notices};
+pub use notice::{Provenance, restore_notices, unresolved_call_notices};
 pub use redact::Redactor;
 pub use segment::{BoundaryKind, ModelSnapshot, Segment, SegmentContext};
 pub use signals::{Outcome, RunSignals};

@@ -10,6 +10,8 @@ Structure:
   ./error.rs: erreur du module
   ./profile.rs: profil de modèle, métadonnées détectées, profil résolu
   ./provider.rs: fournisseur (entité nommée par références)
+  ./manifest.rs: manifeste de projet (noms d'entités, cohérence)
+  ./rig.rs: adaptateur d'inférence `rig` OpenAI-compatible (feature `rig`)
   ./definition.rs: définition d'agent et empreinte
   ./catalog.rs: traits de stockage du catalogue et stockage mémoire
   ./inference.rs: trait du fournisseur d'inférence, requête, réponse, classement des erreurs, fournisseur scripté
@@ -25,6 +27,8 @@ References:
   ./error.sdd
   ./profile.sdd
   ./provider.sdd
+  ./manifest.sdd
+  ./rig.sdd
   ./definition.sdd
   ./catalog.sdd
   ./inference.sdd

@@ -45,6 +45,12 @@ pub enum SessionError {
         /// Name of the refused tool.
         name: String,
     },
+    /// No state is saved under the identifier. Carries the identifier, which the caller asked for.
+    #[error("no saved session `{id}`")]
+    UnknownSession {
+        /// Identifier of the session that was asked for.
+        id: SessionId,
+    },
 }
 
 /// Result of the session module.
@@ -85,6 +91,10 @@ mod tests {
             (
                 SessionError::SecretTooShort,
                 "a secret must be at least 6 characters long",
+            ),
+            (
+                SessionError::UnknownSession { id: session.clone() },
+                "no saved session `s-1`",
             ),
             (
                 SessionError::NotSubSession(session.clone()),

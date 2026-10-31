@@ -103,11 +103,70 @@ fn toolset_notice(name: &str, saved: &str, current: &str) -> Option<String> {
     }
 }
 
+/// Lists the calls that a restored function makes to names no longer available, as system message texts.
+///
+/// One text per function, in ascending key order, with the calls sorted and without duplicates. `calls` holds pairs of
+/// a function key (`name/arity`) and a called name, given by the caller: this crate does not know the types of
+/// `scratchpad`. The list is empty when nothing is unresolved. Texts carry names only, never session content.
+#[must_use]
+pub fn unresolved_call_notices(calls: &[(String, String)]) -> Vec<String> {
+    let mut by_function: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for (function, call) in calls {
+        by_function
+            .entry(function.as_str())
+            .or_default()
+            .push(call.as_str());
+    }
+    by_function
+        .into_iter()
+        .map(|(function, mut names)| {
+            names.sort_unstable();
+            names.dedup();
+            let verb = if names.len() == 1 { "which is" } else { "which are" };
+            let list = names.iter().map(|name| format!("`{name}`")).collect::<Vec<_>>().join(", ");
+            format!("the function `{function}` calls {list} {verb} not available in this session; fix or redefine it")
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
 
-    use super::{Provenance, restore_notices};
+    use super::{Provenance, restore_notices, unresolved_call_notices};
+
+    // Scenario: une API disparue est signalée par fonction (notice.sdd #P6)
+    #[test]
+    fn unresolved_calls_are_reported_once_per_function_in_key_order() {
+        let calls = [
+            ("g/0", "ops::b"),
+            ("f/1", "ops::a"),
+            ("f/1", "ops::a"),
+            ("f/1", "ops::c"),
+        ]
+        .map(|(function, call)| (function.to_owned(), call.to_owned()));
+        let notices = unresolved_call_notices(&calls);
+        assert_eq!(notices.len(), 2, "one text per function");
+        assert_eq!(
+            notices[0],
+            "the function `f/1` calls `ops::a`, `ops::c` which are not available in this session; fix or redefine it",
+            "f/1 comes first, its calls are listed once each"
+        );
+        assert_eq!(
+            notices[1],
+            "the function `g/0` calls `ops::b` which is not available in this session; fix or redefine it",
+            "g/0 comes second, with the singular verb for one call"
+        );
+    }
+
+    // Scenario: rien d'irrésolu, rien de dit (notice.sdd #P6)
+    #[test]
+    fn no_unresolved_call_says_nothing() {
+        assert!(
+            unresolved_call_notices(&[]).is_empty(),
+            "an empty list of calls gives no system message"
+        );
+    }
 
     fn toolsets(entries: &[(&str, &str)]) -> BTreeMap<String, String> {
         entries

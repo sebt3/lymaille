@@ -1,6 +1,27 @@
 //! Heuristic that tells whether a text looks like a secret, shared by the context and provider checks, so that the two
 //! can never diverge (`agent-sessions/toolsets#FR-3`, `agent-sessions#CON-3`). The real control stays with the host.
 
+/// Decides whether a text looks like a secret.
+///
+/// The host can replace the library heuristic with its own detector: a detector given by the host replaces
+/// [`DefaultSecretDetector`] entirely, never adds to it. An implementation does no I/O and does not panic.
+pub trait SecretDetector: Send + Sync {
+    /// Returns true when `text` looks like a secret.
+    fn looks_like_secret(&self, text: &str) -> bool;
+}
+
+/// Default detector: the heuristic of the library, built with [`Default`]. Credentials in a URL (`://` followed by `@`), or the prefix `sk-` or
+/// `Bearer`, in any case.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct DefaultSecretDetector;
+
+impl SecretDetector for DefaultSecretDetector {
+    fn looks_like_secret(&self, text: &str) -> bool {
+        looks_like_secret(text)
+    }
+}
+
 /// Tells whether `text` looks like a secret: credentials in a URL (`://` followed by `@`), or the prefix `sk-` or
 /// `Bearer`, in any case. Only the start of the text is checked for the prefixes.
 #[expect(
@@ -24,7 +45,16 @@ fn has_prefix(text: &str, prefix: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::looks_like_secret;
+    use super::{DefaultSecretDetector, SecretDetector, looks_like_secret};
+
+    /// A host detector that only knows the prefix `tok_`.
+    struct TokDetector;
+
+    impl SecretDetector for TokDetector {
+        fn looks_like_secret(&self, text: &str) -> bool {
+            text.starts_with("tok_")
+        }
+    }
 
     // Scenario: les identifiants dans une URL ressemblent à un secret
     #[test]
@@ -68,5 +98,16 @@ mod tests {
                 "a multi-byte text must not look like a secret: {text}"
             );
         }
+    }
+
+    // Scenario: un détecteur de l'hôte remplace le défaut
+    #[test]
+    fn host_detector_replaces_the_default() {
+        let host = TokDetector;
+        let default = DefaultSecretDetector;
+        assert!(!host.looks_like_secret("sk-abc"), "the host detector ignores sk-");
+        assert!(host.looks_like_secret("tok_abc"), "the host detector knows tok_");
+        assert!(default.looks_like_secret("sk-abc"), "the default knows sk-");
+        assert!(!default.looks_like_secret("tok_abc"), "the default ignores tok_");
     }
 }

@@ -27,6 +27,7 @@ Raises:
   @SessionError::SecretTooShort: un secret non vide de moins de 6 caractères est refusé à l'ajout (`./redact.sdd`) ; le message ne contient pas le secret.
   @SessionError::NotSubSession: une session parente est posée sur une session qui n'est pas de nature `Sub` ; porte l'identifiant de la session.
   @SessionError::NotConfigSession: une cible d'inspection est posée sur une session qui n'est pas de nature `Config` (`./state.sdd`) ; porte l'identifiant de la session. Textes `Display` : « an inspection target can only be set on a configuration session, not on session {id} » et « a parent session can only be set on a sub-agent session, not on session {id} ».
+  @SessionError::UnknownSession: aucun état sauvegardé sous l'identifiant demandé (`../runtime/restore.sdd`) ; porte l'identifiant. Texte `Display` : « no saved session `{id}` ».
 
 Must:
   @SessionError est `#[non_exhaustive]` et dérive `thiserror::Error` ; chaque variante a un texte `Display` en anglais.
