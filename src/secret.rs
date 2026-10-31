@@ -26,7 +26,7 @@ fn has_prefix(text: &str, prefix: &str) -> bool {
 mod tests {
     use super::looks_like_secret;
 
-    // Scenario: credentials in a URL look like a secret
+    // Scenario: les identifiants dans une URL ressemblent à un secret
     #[test]
     fn credentials_in_url_are_secret_like() {
         for text in ["https://user:pw@host/v1", "ftp://user@host/path"] {
@@ -37,7 +37,7 @@ mod tests {
         }
     }
 
-    // Scenario: token prefixes look like a secret in any case
+    // Scenario: les préfixes de jeton ressemblent à un secret, quelle que soit la casse
     #[test]
     fn token_prefixes_are_secret_like_in_any_case() {
         for text in ["sk-abc123", "SK-abc123", "Bearer abc", "bearer-abc"] {
@@ -48,7 +48,7 @@ mod tests {
         }
     }
 
-    // Scenario: ordinary references do not look like a secret
+    // Scenario: les références ordinaires ne ressemblent pas à un secret
     #[test]
     fn ordinary_references_are_not_secret_like() {
         for text in ["vllm-strix", "prod-k8s", "https://host/v1", "desk-lamp"] {
@@ -59,7 +59,7 @@ mod tests {
         }
     }
 
-    // Scenario: multi-byte text does not panic
+    // Scenario: un texte multi-octets ne provoque pas de panique
     #[test]
     fn multibyte_text_does_not_panic() {
         for text in ["\u{e9}\u{e9}", "\u{e9}"] {

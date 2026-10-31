@@ -35,40 +35,40 @@ Depends on:
   serde
   vynil-core
 
-Scenario: nothing changed
-  Given identical provenances and no broken function
-  When restore_notices is called
-  Then the list is empty
+Scenario: rien n'a changé
+  Given des provenances identiques et aucune fonction cassée
+  When restore_notices est appelé
+  Then la liste est vide
 
-Scenario: agent definition changed
-  Given different agent fingerprints
-  When restore_notices is called
-  Then one message states that the agent definition changed
+Scenario: définition d'agent modifiée
+  Given des empreintes d'agent différentes
+  When restore_notices est appelé
+  Then un message indique que la définition d'agent a changé
 
-Scenario: major toolset change
-  Given toolset `k8s` at 1.4.0 saved and 2.0.0 now
-  When restore_notices is called
-  Then one message names `k8s`, 1.4.0 and 2.0.0
+Scenario: changement de toolset en majeure
+  Given le toolset `k8s` à 1.4.0 sauvegardé et 2.0.0 maintenant
+  When restore_notices est appelé
+  Then un message nomme `k8s`, 1.4.0 et 2.0.0
 
-Scenario: older toolset
-  Given toolset `k8s` at 1.4.0 saved and 1.2.0 now
-  When restore_notices is called
-  Then one message states the toolset is older than the saved one
+Scenario: toolset plus ancien
+  Given le toolset `k8s` à 1.4.0 sauvegardé et 1.2.0 maintenant
+  When restore_notices est appelé
+  Then un message indique que le toolset est plus ancien que celui sauvegardé
 
-Scenario: newer minor is silent
-  Given toolset `k8s` at 1.4.0 saved and 1.6.1 now
-  When restore_notices is called
-  Then there is no message for `k8s`
+Scenario: une mineure plus récente est silencieuse
+  Given le toolset `k8s` à 1.4.0 sauvegardé et 1.6.1 maintenant
+  When restore_notices est appelé
+  Then aucun message pour `k8s`
 
-Scenario: broken functions listed once
-  Given the broken functions `list_pods` and `scale`
-  When restore_notices is called
-  Then one message lists both names in that order
+Scenario: fonctions cassées listées une seule fois
+  Given les fonctions cassées `list_pods` et `scale`
+  When restore_notices est appelé
+  Then un message liste les deux noms dans cet ordre
 
-Scenario: unparseable version never panics
-  Given a toolset version `nightly` saved and `1.0.0` now
-  When restore_notices is called
-  Then a message is produced
+Scenario: une version illisible ne panique jamais
+  Given une version de toolset `nightly` sauvegardée et `1.0.0` maintenant
+  When restore_notices est appelé
+  Then un message est produit
 
 Tasks:
   [x] #5 Tests manquants relevés par la validation : ordre global des messages (agent, toolsets par nom croissant, fonctions cassées) ; majeure différente ET plus

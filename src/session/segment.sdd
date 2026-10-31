@@ -31,15 +31,15 @@ Depends on:
   serde
   serde_json
 
-Scenario: segment keeps the context as sent
-  Given a segment built with a system prompt, two tool definitions and a model snapshot
-  When serialized then deserialized
-  Then prompt, tool definitions in order and profile are identical
+Scenario: le segment garde le contexte tel qu'envoyé
+  Given un segment construit avec un prompt système, deux définitions d'outils et un instantané de modèle
+  When sérialisé puis désérialisé
+  Then le prompt, les définitions d'outils dans l'ordre et le profil sont identiques
 
-Scenario: a restore creates a new segment
-  Given a persisted start segment
-  When a restore segment is created with a newer prompt
-  Then the start segment is unchanged and the two exist side by side
+Scenario: une restauration crée un nouveau segment
+  Given un segment de début persisté
+  When un segment de restauration est créé avec un prompt plus récent
+  Then le segment de début est inchangé et les deux existent côte à côte
 
 Tasks:
   [x] #4 Renforcer `a_restore_creates_a_new_segment` : asserter le @BoundaryKind::Restore du second segment, et que le premier survit à une sérialisation.

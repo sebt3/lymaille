@@ -41,90 +41,90 @@ Must:
     Observed in: spikes/rhai-1-25 (`scope_visibility`) : `Variable not found` dans une `fn` qui lit une variable du scope.
   Le résultat est déterministe et ne dépend d'aucun état global.
 
-Scenario: typo in a function name
-  Given the visible functions `grafana::loki_query` and `grafana::prom_query`
-  When a script calls `grafana::loki_queryy`
-  Then the error names `grafana::loki_query` as the closest candidate
+Scenario: faute de frappe dans un nom de fonction
+  Given les fonctions visibles `grafana::loki_query` et `grafana::prom_query`
+  When un script appelle `grafana::loki_queryy`
+  Then l'erreur nomme `grafana::loki_query` comme candidat le plus proche
 
-Scenario: unqualified name matches the last segment
-  Given the visible function `grafana::loki_query`
-  When a script calls `loki_querry("x")`
-  Then the suggestion is `grafana::loki_query`
+Scenario: un nom non qualifié correspond au dernier segment
+  Given la fonction visible `grafana::loki_query`
+  When un script appelle `loki_querry("x")`
+  Then la suggestion est `grafana::loki_query`
 
-Scenario: no suggestion names an ungranted function
-  Given the visible function `grafana::loki_query` and an ungranted module `other` exposing `loki_queryx`
-  When a script calls `grafana::loki_queryy`
-  Then the only suggestion is `grafana::loki_query` and `other::loki_queryx` appears nowhere in the message
+Scenario: aucune suggestion ne nomme une fonction non accordée
+  Given la fonction visible `grafana::loki_query` et un module non accordé `other` qui expose `loki_queryx`
+  When un script appelle `grafana::loki_queryy`
+  Then la seule suggestion est `grafana::loki_query` et `other::loki_queryx` n'apparaît nulle part dans le message
 
-Scenario: dependency of a toolset is never suggested
-  Given a toolset `ts` that imports a dependency `dep` exposing `secret`
-  When a script calls `ts::secrt`
-  Then the error has no suggestion
+Scenario: la dépendance d'un toolset n'est jamais suggérée
+  Given un toolset `ts` qui importe une dépendance `dep` qui expose `secret`
+  When un script appelle `ts::secrt`
+  Then l'erreur n'a aucune suggestion
 
-Scenario: ungranted group function is never suggested
-  Given an engine without the Host group
-  When a script calls `get_envv("X")`
-  Then the error has no suggestion, `get_env` not being granted
+Scenario: une fonction d'un groupe non accordé n'est jamais suggérée
+  Given un moteur sans le groupe Host
+  When un script appelle `get_envv("X")`
+  Then l'erreur n'a aucune suggestion, `get_env` n'étant pas accordée
 
-Scenario: unknown module
-  Given the granted modules `grafana` and `k8s`
-  When a script calls `grafan::loki_query("x")`
-  Then the suggestion is the module `grafana`
+Scenario: module inconnu
+  Given les modules accordés `grafana` et `k8s`
+  When un script appelle `grafan::loki_query("x")`
+  Then la suggestion est le module `grafana`
 
-Scenario: arity mismatch shows the signature
-  Given the visible function `grafana::loki_query(query: string, range: string) -> map`
-  When a script calls `grafana::loki_query("x")`
-  Then the suggestion is that signature
+Scenario: un nombre d'arguments incorrect affiche la signature
+  Given la fonction visible `grafana::loki_query(query: string, range: string) -> map`
+  When un script appelle `grafana::loki_query("x")`
+  Then la suggestion est cette signature
 
-Scenario: threshold excludes far names
-  Given the visible function `grafana::loki_query`
-  When a script calls `zzzzzzzz()`
-  Then the error has no suggestion
+Scenario: le seuil exclut les noms éloignés
+  Given la fonction visible `grafana::loki_query`
+  When un script appelle `zzzzzzzz()`
+  Then l'erreur n'a aucune suggestion
 
-Scenario: at most three suggestions, ordered by distance then name
-  Given five visible functions at distance 1 from the requested name
-  When suggestions are computed
-  Then three come back in alphabetical order
+Scenario: au plus trois suggestions, ordonnées par distance puis par nom
+  Given cinq fonctions visibles à distance 1 du nom demandé
+  When les suggestions sont calculées
+  Then trois reviennent, dans l'ordre alphabétique
 
-Scenario: variable typo
-  Given the scope variables `pods` and `nodes`
-  When a script reads `podz`
-  Then the suggestion is `pods`
+Scenario: faute de frappe dans une variable
+  Given les variables de scope `pods` et `nodes`
+  When un script lit `podz`
+  Then la suggestion est `pods`
 
-Scenario: function cannot see scope variables
-  Given a scope variable `x` and a script function `fn f() { x }`
-  When `f()` is called and fails with variable not found
-  Then the message tells the LLM to pass `x` as an argument
+Scenario: une fonction ne voit pas les variables du scope
+  Given une variable de scope `x` et une fonction de script `fn f() { x }`
+  When `f()` est appelée et échoue par variable introuvable
+  Then le message dit au LLM de passer `x` en argument
 
-Scenario: very long and empty names
-  Given a name of 10000 characters and an empty name
-  When suggestions are computed
-  Then no suggestion is returned and nothing panics
+Scenario: noms très longs et vides
+  Given un nom de 10000 caractères et un nom vide
+  When les suggestions sont calculées
+  Then aucune suggestion n'est rendue et rien ne panique
 
-Scenario: the order of candidates does not matter
-  Given the same candidates in two different orders
-  When suggestions are computed
-  Then the results are equal
+Scenario: l'ordre des candidats n'a pas d'importance
+  Given les mêmes candidats dans deux ordres différents
+  When les suggestions sont calculées
+  Then les résultats sont égaux
 
-Scenario: a candidate is near when its distance is at most a third of the name length
-  Given names of nine, eight and five characters, at distances three, three and two from their candidates
-  When `nearest` is evaluated
-  Then the first candidate is kept and the two others are not, and a name of two characters keeps a threshold of one
+Scenario: un candidat est proche quand sa distance vaut au plus le tiers de la longueur du nom
+  Given des noms de neuf, huit et cinq caractères, à des distances de trois, trois et deux de leurs candidats
+  When `nearest` est évaluée
+  Then le premier candidat est retenu et les deux autres ne le sont pas, et un nom de deux caractères garde un seuil de un
 
-Scenario: names are compared on their first 128 characters
-  Given names longer than 128 characters whose differences fall within or beyond the first 128 characters
-  When `nearest` is evaluated
-  Then only the differences within the first 128 characters count
+Scenario: les noms sont comparés sur leurs 128 premiers caractères
+  Given des noms de plus de 128 caractères dont les différences tombent dans ou au-delà des 128 premiers caractères
+  When `nearest` est évaluée
+  Then seules les différences dans les 128 premiers caractères comptent
 
-Scenario: a hint explains only a scope variable read inside a function
-  Given a variable not found inside a function, outside a function, and a function not found
-  When the suggestions are attached
-  Then only the scope variable read inside a function gets the hint
+Scenario: un indice n'explique qu'une variable de scope lue dans une fonction
+  Given une variable introuvable dans une fonction, hors fonction, et une fonction introuvable
+  When les suggestions sont attachées
+  Then seule la variable de scope lue dans une fonction reçoit l'indice
 
-Scenario: the modules of visible functions are named once each
-  Given two visible functions of module `grafana` and no granted module
-  When `grafan` is not found
-  Then `grafana` is suggested once
+Scenario: les modules des fonctions visibles sont nommés une seule fois chacun
+  Given deux fonctions visibles du module `grafana` et aucun module accordé
+  When `grafan` est introuvable
+  Then `grafana` est suggéré une seule fois
 
 Tasks:
   [x] #1 Tests puis implémentation, vérifié le 2026-10-30.

@@ -63,32 +63,32 @@ Must not:
   [x] #7 Décision : `timestamp()` accepté comme sur le pad ordinaire (engine.sdd #6), sans test. Validation du 2026-10-29 : le @RunOutcome d'un pad d'inspection porte un instantané vide (ni les variables de la cible ni celles du script), avec test ; Debug manuel de @PadSnapshot (noms des variables et des clés de fonctions, nombre d'avertissements ; jamais les valeurs ni les sources) ; test que `source` n'est pas listée par `functions()` .
       Validé le 2026-10-29 (validator, 76 mutants, `scripts/check` complet vert).
 
-Scenario: shell function lists with its documentation
+Scenario: la fonction de coquille est listée avec sa documentation
   Given un module MCP décrit avec la fonction `query(expr)` documentée
   When `functions("grafana")` est exécuté dans le pad d'inspection
   Then le chemin, la signature et la documentation de `grafana::query` sont listés
 
-Scenario: shell call fails without side effect
+Scenario: l'appel à une coquille échoue sans effet de bord
   Given le même module
   When `grafana::query("up")` est exécuté
   Then le statut est Failed et le texte dit que l'inspection ne s'exécute pas, et aucun appel n'a eu lieu
 
-Scenario: session variables are read-only
+Scenario: les variables de session sont en lecture seule
   Given une cible Session dont le scope contient `n = 3`
   When `n` est lu, puis `n = 4` est exécuté
   Then la lecture rend 3 et l'écriture échoue
 
-Scenario: session functions are listed but not callable
+Scenario: les fonctions de session sont listées mais non appelables
   Given une cible Session qui a défini `fn f(x) { x + 1 }`
   When `functions("script")`, `source("f")` puis `f(1)` sont exécutés
   Then la première liste `f`, `source("f")` rend son texte source et la seconde échoue
 
-Scenario: definition target has no variables
+Scenario: une cible de définition n'a aucune variable
   Given une cible Definition
   When `vars()` est exécuté
   Then le tableau est vide
 
-Scenario: no filesystem or shell group
+Scenario: aucun groupe fs ni shell
   Given un pad d'inspection
   When `modules()` est exécuté
   Then ni `fs` ni `shell` ne figurent parmi les modules

@@ -35,35 +35,35 @@ Depends on:
   ../clock.sdd
   serde
 
-Scenario: label recorded with author and date
-  Given a manual clock at 1000 milliseconds
-  When a human adds label `good` to a run
-  Then the label has author Human, date 1000 and target that run
+Scenario: étiquette enregistrée avec auteur et date
+  Given une horloge manuelle à 1000 millisecondes
+  When un humain ajoute l'étiquette `good` à un run
+  Then l'étiquette a pour auteur Human, pour date 1000 et pour cible ce run
 
-Scenario: second label keeps the first
-  Given a label already on a session
-  When another label is added to the same session at a later time
-  Then both labels exist, in order, with their own dates
+Scenario: une seconde étiquette conserve la première
+  Given une étiquette déjà posée sur une session
+  When une autre étiquette est ajoutée à la même session à un instant ultérieur
+  Then les deux étiquettes existent, dans l'ordre, avec leurs propres dates
 
-Scenario: labels after session end
-  Given labels serialized with the session
-  When restored and a new label added
-  Then the earlier labels are intact with their author and date
+Scenario: étiquettes après la fin de session
+  Given des étiquettes sérialisées avec la session
+  When restaurées et qu'une nouvelle étiquette est ajoutée
+  Then les étiquettes précédentes sont intactes avec leur auteur et leur date
 
-Scenario: filter by target
-  Given labels on the session, on turn 2 and on run `r1`
-  When for_target is called for turn 2
-  Then only the turn 2 label is returned
+Scenario: filtrage par cible
+  Given des étiquettes sur la session, au tour 2 et sur le run `r1`
+  When for_target est appelé pour le tour 2
+  Then seule l'étiquette du tour 2 est rendue
 
-Scenario: empty label refused
-  Given an empty label text
-  When add is called
-  Then nothing is added
+Scenario: étiquette vide refusée
+  Given un texte d'étiquette vide
+  When add est appelé
+  Then rien n'est ajouté
 
-Scenario: empty label refused on deserialization
-  Given a JSON list holding a label with an empty text
-  When deserialized as @Labels
-  Then it fails
+Scenario: étiquette vide refusée à la désérialisation
+  Given une liste JSON contenant une étiquette au texte vide
+  When désérialisée en @Labels
+  Then elle échoue
 
 Tasks:
   [x] #4 Désérialisation validante de @Labels et son Scenario (rend caduque la seconde moitié de #3).

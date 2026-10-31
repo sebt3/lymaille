@@ -757,7 +757,7 @@ mod tests {
         drop(timer_keep_alive);
     }
 
-    // Scenario: try/catch does not survive the cancellation of a native call
+    // Scenario: try/catch ne survit pas à l'annulation d'un appel natif
     #[test]
     fn try_catch_does_not_survive_the_cancellation_of_a_native_call() {
         let handle = CancelHandle::new();

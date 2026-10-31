@@ -67,96 +67,96 @@ Must not:
   Lire un fichier, l'environnement ou l'horloge système.
   [x] #16 `EngineBuilder::with_unlisted_registration` (`pub(in crate::scratchpad)`, ajouté par le lot T8 d'inspect) : enregistre après le catalogue et l'introspection une fonction appelable mais absente de `functions()` et `modules()` ; sert à `source(nom)` du pad d'inspection (./inspect.sdd).
 
-Scenario: only the pure group by default
-  Given an engine built with no granted group, even when the process links `vynil-core` with its `fs` and `shell` features
-  When a script evaluates `json_encode(#{a: 1})`
-  Then it returns the JSON text
-  And `get_env("PATH")`, `sleep(1)`, `file_read("/etc/hostname")` and `shell_run("ls")` are each a function-not-found error
+Scenario: seul le groupe pur par défaut
+  Given un moteur construit sans groupe accordé, même si le processus lie `vynil-core` avec ses fonctionnalités `fs` et `shell`
+  When un script évalue `json_encode(#{a: 1})`
+  Then il rend le texte JSON
+  And `get_env("PATH")`, `sleep(1)`, `file_read("/etc/hostname")` et `shell_run("ls")` sont chacun une erreur de fonction introuvable
 
-Scenario: ungranted functions are absent from introspection
-  Given the same engine
-  When the catalog is read
-  Then it contains `json_encode` and none of `get_env`, `sleep`, `file_read`, `shell_run`
+Scenario: les fonctions non accordées sont absentes de l'introspection
+  Given le même moteur
+  When le catalogue est lu
+  Then il contient `json_encode` et aucune de `get_env`, `sleep`, `file_read`, `shell_run`
 
-Scenario: a granted group is registered
-  Given an engine whose grants hold Host
-  When a script evaluates `get_env("LYMAILLE_ABSENT")`
-  Then it returns the empty string
-  And `sleep(1)` is still a function-not-found error
+Scenario: un groupe accordé est enregistré
+  Given un moteur dont les accords portent Host
+  When un script évalue `get_env("LYMAILLE_ABSENT")`
+  Then il rend la chaîne vide
+  And `sleep(1)` reste une erreur de fonction introuvable
 
-Scenario: unavailable group refused
-  Given grants that hold the group Fs and a build of `vynil-core` without the `fs` feature
-  When the builder builds
-  Then it fails with an Engine error that names the group
+Scenario: groupe indisponible refusé
+  Given des accords qui portent le groupe Fs et une construction de `vynil-core` sans la fonctionnalité `fs`
+  When le constructeur construit
+  Then il échoue par une erreur Engine qui nomme le groupe
 
-Scenario: const is a syntax error
-  Given a session engine and a toolset-building engine from base_engine
-  When a script evaluates `const C = #{a: 1}; C.a = 2`
-  Then both return a syntax error, no process panic occurs
-  And `let c = #{a: 1}; c.a = 2; c.a` returns `2` on both
+Scenario: const est une erreur de syntaxe
+  Given un moteur de session et un moteur de construction de toolset issus de base_engine
+  When un script évalue `const C = #{a: 1}; C.a = 2`
+  Then les deux rendent une erreur de syntaxe, sans panique du processus
+  And `let c = #{a: 1}; c.a = 2; c.a` rend `2` sur les deux
 
-Scenario: import is closed
-  Given a session engine
-  When a script evaluates `import "anything" as m; 1`
-  Then it returns an error and no file was read
+Scenario: import est fermé
+  Given un moteur de session
+  When un script évalue `import "anything" as m; 1`
+  Then il rend une erreur et aucun fichier n'est lu
 
-Scenario: print never reaches the process output
-  Given a session engine and a run scope
-  When a script evaluates `print("hello"); debug("world")`
-  Then the process standard output and error are unchanged and the run scope holds the captured text
+Scenario: print n'atteint jamais la sortie du processus
+  Given un moteur de session et un scope d'exécution
+  When un script évalue `print("hello"); debug("world")`
+  Then les sorties standard et d'erreur du processus sont inchangées et le scope d'exécution porte le texte capturé
 
-Scenario: granted module is callable and an ungranted one is not
-  Given grants with a module `grafana` exposing `loki_query`
-  When scripts call `grafana::loki_query("x")` and `other::f()`
-  Then the first runs and the second is a module-not-found error
+Scenario: un module accordé est appelable et un module non accordé ne l'est pas
+  Given des accords avec un module `grafana` qui expose `loki_query`
+  When des scripts appellent `grafana::loki_query("x")` et `other::f()`
+  Then le premier s'exécute et le second est une erreur de module introuvable
 
-Scenario: toolset dependency stays out of reach
-  Given a toolset module that imported a dependency module `dep` when it was built
-  When a script calls `ts::f()` which uses `dep`, then `dep::secret()` and `ts::secret()`
-  Then the first works and the other two are not-found errors
+Scenario: la dépendance d'un toolset reste hors d'atteinte
+  Given un module de toolset qui a importé un module de dépendance `dep` lors de sa construction
+  When un script appelle `ts::f()`, qui utilise `dep`, puis `dep::secret()` et `ts::secret()`
+  Then le premier fonctionne et les deux autres sont des erreurs de nom introuvable
     Observed in: spikes/rhai-1-25 (`private_dependencies`, S9).
 
-Scenario: cancellation stops a Rhai loop
-  Given a run scope holding a handle cancelled 200 milliseconds after the start
-  When the engine evaluates `loop { }`
-  Then evaluation ends with a cancellation within one second
+Scenario: l'annulation arrête une boucle Rhai
+  Given un scope d'exécution qui porte un handle annulé 200 millisecondes après le démarrage
+  When le moteur évalue `loop { }`
+  Then l'évaluation se termine par une annulation en moins d'une seconde
 
-Scenario: no handle installed, no interruption
-  Given no run scope on the thread
-  When the engine evaluates a short loop
-  Then it completes normally
+Scenario: sans handle installé, aucune interruption
+  Given aucun scope d'exécution sur le fil
+  When le moteur évalue une courte boucle
+  Then elle se termine normalement
 
-Scenario: try/catch does not survive the cancellation of a native call
-  Given a run scope holding a handle, and a native function `cancelled_native` that cancels the handle then fails
-  When a script evaluates `try { cancelled_native(); } catch (e) { mark(); } mark(); 7`, `mark` counting its calls
-  Then the evaluation is a cancellation, and neither the catch block nor the next statement ran
-  And as a control, without a run scope, `try { throw "x"; } catch (e) { mark(); } mark(); 7` returns `7` after two marks
+Scenario: try/catch ne survit pas à l'annulation d'un appel natif
+  Given un scope d'exécution qui porte un handle, et une fonction native `cancelled_native` qui annule le handle puis échoue
+  When un script évalue `try { cancelled_native(); } catch (e) { mark(); } mark(); 7`, `mark` comptant ses appels
+  Then l'évaluation est une annulation, et ni le bloc catch ni l'instruction suivante ne s'exécutent
+  And en témoin, sans scope d'exécution, `try { throw "x"; } catch (e) { mark(); } mark(); 7` rend `7` après deux marques
 
-Scenario: scopes do not cross threads
-  Given a run scope open on thread A holding a cancelled handle
-  When thread B evaluates a script on the same engine
-  Then thread B is not interrupted
+Scenario: les scopes ne traversent pas les fils
+  Given un scope d'exécution ouvert sur le fil A qui porte un handle annulé
+  When le fil B évalue un script sur le même moteur
+  Then le fil B n'est pas interrompu
 
-Scenario: registration closure runs once and its functions are catalogued
-  Given a registration closure that adds a native function `session_context`
-  When the engine is built
-  Then a script can call it and the catalog lists it, attributed to the closure
+Scenario: la closure d'enregistrement s'exécute une fois et ses fonctions sont cataloguées
+  Given une closure d'enregistrement qui ajoute une fonction native `session_context`
+  When le moteur est construit
+  Then un script peut l'appeler et le catalogue la liste, attribuée à la closure
 
-Scenario: failing registration closure
-  Given a registration closure that returns an error
-  When the builder builds
-  Then it fails with an Engine error
+Scenario: closure d'enregistrement en échec
+  Given une closure d'enregistrement qui rend une erreur
+  When le constructeur construit
+  Then il échoue par une erreur Engine
 
-Scenario: engine is shareable
-  Given a built engine
-  When asserted for Send and Sync
-  Then the assertion compiles
+Scenario: le moteur est partageable
+  Given un moteur construit
+  When on vérifie qu'il est Send et Sync
+  Then l'assertion compile
 
 Tasks:
   [x] #1 Tests puis implémentation : @base_engine d'abord (`const`, résolveur, `print`), puis les groupes, les modules, le crochet de progrès.
   [x] #2 Posé : le jeton d'annulation lu par `on_progress` est propre au fil et vit dans ce module (@RunScope), car `vynil_core::cancel::current` n'est pas public ; le jeton de `vynil-core` est installé en parallèle par ./run.sdd pour les appels natifs bloquants (`cancel::scope`). Deux jetons donc, le @CancelHandle de la crate faisant foi et celui de `vynil-core` en étant le miroir (voir ./run.sdd). Répond à la tâche #2 de ../session/cancel.sdd.
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
-  [x] #3 Les features `fs` et `shell` de `vynil-core` : la crate `lymaille` doit-elle les relayer par des features Cargo propres, désactivées par défaut, ou ne jamais pouvoir accorder `Fs` et `Shell` ? Dépend du manifeste (`/Cargo.toml`, hors de cette spec) et de l'usage visé (aucun besoin de fichier ou de processus n'est exprimé par le DSD pour les agents d'alerte). À trancher par le développeur principal. Recommandation : relayer `fs` et `shell` par des features désactivées par défaut ; les Scenarios « only the pure group by default » et « unavailable group refused » se jouent avec et sans.
+  [x] #3 Les features `fs` et `shell` de `vynil-core` : la crate `lymaille` doit-elle les relayer par des features Cargo propres, désactivées par défaut, ou ne jamais pouvoir accorder `Fs` et `Shell` ? Dépend du manifeste (`/Cargo.toml`, hors de cette spec) et de l'usage visé (aucun besoin de fichier ou de processus n'est exprimé par le DSD pour les agents d'alerte). À trancher par le développeur principal. Recommandation : relayer `fs` et `shell` par des features désactivées par défaut ; les Scenarios « seul le groupe pur par défaut » et « groupe indisponible refusé » se jouent avec et sans.
       Décidé le 2026-10-29 par le développeur principal : `Fs` et `Shell` ne sont jamais accordés ; la crate ne relaie pas ces features de `vynil-core`.
       À rouvrir si un besoin réel apparaît.
   [x] #4 Posé : le groupe pur et les fonctions de format sont toujours accordés ; la définition d'agent ne peut pas les retirer. Le DSD (`FR-11`) enregistre « d'office » le seul groupe pur ; les fonctions de format découlent de `FR-8`.

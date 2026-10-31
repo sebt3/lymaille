@@ -273,7 +273,7 @@ mod tests {
     const OPS: &str =
         "import \"helpers\" as h;\nfn twice(x) { h::double(x) }\nfn token_len() { h::secret().len() }";
 
-    // Scenario: dependency works but stays hidden
+    // Scenario: la dépendance fonctionne mais reste cachée
     #[tokio::test(flavor = "multi_thread")]
     async fn dependency_works_but_stays_hidden() {
         let toolsets = [depending_on(toolset("ops", OPS), "helpers")];
@@ -363,7 +363,7 @@ mod tests {
         assert_eq!(module_names(&assembled).len(), 0);
     }
 
-    // Scenario: dependency not available
+    // Scenario: dépendance indisponible
     #[test]
     fn missing_dependency_fails_the_toolset_only() {
         let toolsets = [
@@ -417,7 +417,7 @@ mod tests {
         );
     }
 
-    // Scenario: skills follow their toolset
+    // Scenario: les skills suivent leur toolset
     #[test]
     fn skills_follow_their_toolset() {
         let granted_toolset = with_skill(toolset("ops", "fn f() { 1 }"), "ops-skill");

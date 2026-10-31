@@ -29,20 +29,20 @@ Depends on:
   ./error.sdd
   vynil-core
 
-Scenario: same major, higher or equal minor
-  Given the requirement `cluster@1.2`
-  When it is checked against 1.2.0 and 1.3.0
-  Then it is satisfied in both cases
+Scenario: même majeure, mineure supérieure ou égale
+  Given l'exigence `cluster@1.2`
+  When elle est vérifiée contre 1.2.0 et 1.3.0
+  Then elle est satisfaite dans les deux cas
 
-Scenario: lower minor or other major
-  Given the requirement `cluster@1.2`
-  When it is checked against 1.1.0 and 2.0.0
-  Then it is not satisfied in either case
+Scenario: mineure inférieure ou autre majeure
+  Given l'exigence `cluster@1.2`
+  When elle est vérifiée contre 1.1.0 et 2.0.0
+  Then elle n'est satisfaite dans aucun des deux cas
 
-Scenario: malformed requirement
-  Given the texts `cluster`, `@1.2` and `cluster@x`
-  When each is parsed
-  Then each fails with InvalidToolset
+Scenario: exigence mal formée
+  Given les textes `cluster`, `@1.2` et `cluster@x`
+  When chacun est analysé
+  Then chacun échoue avec InvalidToolset
 
 Tasks:
   [x] #1 Tests puis implémentation.

@@ -47,116 +47,116 @@ Must:
   Aucune fonction ne panique : arguments hors bornes, indices énormes ou textes vides sont des cas définis (résultat vide ou erreur de script).
   Ces fonctions ne remplacent pas `json_encode`, `json_decode` et `base64_*` du groupe pur de `vynil-core` : elles s'y ajoutent.
 
-Scenario: structured object as JSON
-  Given a script returning the map `#{pods: [#{name: "a"}]}`
-  When it calls `fmt_json` on it
-  Then the result is the compact JSON `{"pods":[{"name":"a"}]}`
+Scenario: un objet structuré en JSON
+  Given un script qui rend la table `#{pods: [#{name: "a"}]}`
+  When il appelle `fmt_json` dessus
+  Then le résultat est le JSON compact `{"pods":[{"name":"a"}]}`
 
-Scenario: pretty JSON
-  Given the map `#{a: 1}`
-  When `fmt_json_pretty` is called
-  Then the result is the JSON on three lines with a two-space indent
+Scenario: JSON indenté
+  Given la table `#{a: 1}`
+  When `fmt_json_pretty` est appelée
+  Then le résultat est le JSON sur trois lignes, avec une indentation de deux espaces
 
-Scenario: list of maps as aligned table
+Scenario: liste de tables en tableau aligné
   Given `[#{name: "api", ready: 2}, #{name: "db", ready: 10}]`
-  When `fmt_table` is called
-  Then the result is the four lines `name | ready`, `-----+------`, `api  | 2`, `db   | 10`
+  When `fmt_table` est appelée
+  Then le résultat est les quatre lignes `name | ready`, `-----+------`, `api  | 2`, `db   | 10`
 
-Scenario: table with chosen columns
-  Given the same rows and the columns `["ready"]`
-  When `fmt_table` is called
-  Then only the `ready` column appears
+Scenario: tableau avec les colonnes choisies
+  Given les mêmes lignes et les colonnes `["ready"]`
+  When `fmt_table` est appelée
+  Then seule la colonne `ready` apparaît
 
-Scenario: missing keys and newlines in cells
-  Given the rows `[#{a: "x\ny"}, #{b: 1}]`
-  When `fmt_table` is called
-  Then the first cell shows `x\ny` on one line, the missing cells are empty, and the columns are `a` and `b`
+Scenario: clés absentes et retours à la ligne dans les cellules
+  Given les lignes `[#{a: "x\ny"}, #{b: 1}]`
+  When `fmt_table` est appelée
+  Then la première cellule affiche `x\ny` sur une ligne, les cellules absentes sont vides, et les colonnes sont `a` et `b`
 
-Scenario: table of non maps refused
-  Given the array `[#{a: 1}, 5]`
-  When `fmt_table` is called
-  Then it fails with an error that names index 1
+Scenario: tableau de valeurs non tables refusé
+  Given le tableau `[#{a: 1}, 5]`
+  When `fmt_table` est appelée
+  Then il échoue par une erreur qui nomme l'indice 1
 
-Scenario: empty table
-  Given an empty array
-  When `fmt_table` is called without then with columns `["a"]`
-  Then the results are the empty string and the two header lines
+Scenario: tableau vide
+  Given un tableau vide
+  When `fmt_table` est appelée sans colonnes, puis avec les colonnes `["a"]`
+  Then les résultats sont la chaîne vide et les deux lignes d'en-tête
 
-Scenario: table width counts characters
-  Given a cell `éé` and a cell `abcd` in the same column
-  When `fmt_table` is called
-  Then the short cell is padded to four characters, not to its byte length
+Scenario: la largeur du tableau compte les caractères
+  Given une cellule `éé` et une cellule `abcd` dans la même colonne
+  When `fmt_table` est appelée
+  Then la cellule courte est complétée à quatre caractères, non à sa longueur en octets
 
 Scenario: extraction
   Given `[#{n: "a", v: #{x: 1}}, #{n: "b"}]`
-  When `fmt_pluck(rows, "n")` and `fmt_path(rows[0], "v.x")` and `fmt_path(rows[1], "v.x")` are called
-  Then the results are `["a", "b"]`, `1` and `()`
+  When `fmt_pluck(rows, "n")`, `fmt_path(rows[0], "v.x")` et `fmt_path(rows[1], "v.x")` sont appelées
+  Then les résultats sont `["a", "b"]`, `1` et `()`
 
-Scenario: path through an array index
+Scenario: chemin à travers un indice de tableau
   Given `#{items: [#{id: 7}]}`
-  When `fmt_path(value, "items.0.id")` is called
-  Then the result is `7`
+  When `fmt_path(value, "items.0.id")` est appelée
+  Then le résultat est `7`
 
-Scenario: line helpers
-  Given a text of five lines, two of which contain `err`
-  When `fmt_grep(text, "err")`, `fmt_head(text, 2)` and `fmt_tail(text, 2)` are called
-  Then they return the two matching lines, the first two lines and the last two lines
+Scenario: fonctions utilitaires de lignes
+  Given un texte de cinq lignes, dont deux contiennent `err`
+  When `fmt_grep(text, "err")`, `fmt_head(text, 2)` et `fmt_tail(text, 2)` sont appelées
+  Then elles rendent les deux lignes qui correspondent, les deux premières lignes et les deux dernières lignes
 
-Scenario: truncate keeps the start
-  Given a text of 100 characters
-  When `fmt_truncate(text, 10)` is called
-  Then the result is the first 10 characters followed by `... [90 more characters]`
-  And a text of 10 characters is returned unchanged
+Scenario: truncate conserve le début
+  Given un texte de 100 caractères
+  When `fmt_truncate(text, 10)` est appelée
+  Then le résultat est les 10 premiers caractères suivis de `... [90 more characters]`
+  And un texte de 10 caractères est rendu inchangé
 
-Scenario: truncate_ends keeps both ends
-  Given a text of 1000 characters
-  When `fmt_truncate_ends(text, 20, 30)` is called
-  Then the result starts with the first 20 characters, ends with the last 30 and mentions 950 omitted characters
+Scenario: truncate_ends conserve les deux extrémités
+  Given un texte de 1000 caractères
+  When `fmt_truncate_ends(text, 20, 30)` est appelée
+  Then le résultat commence par les 20 premiers caractères, finit par les 30 derniers et mentionne 950 caractères omis
 
-Scenario: negative counts refused
-  Given a call `fmt_head(text, -1)`
-  When evaluated
-  Then it fails with an error rendered to the script
+Scenario: comptes négatifs refusés
+  Given un appel `fmt_head(text, -1)`
+  When évalué
+  Then il échoue par une erreur rendue au script
 
-Scenario: documented for introspection
-  Given an engine with the format functions registered
-  When its function metadata is read
-  Then every function has a non empty comment and named parameters
+Scenario: documentées pour l'introspection
+  Given un moteur avec les fonctions de format enregistrées
+  When ses métadonnées de fonctions sont lues
+  Then chaque fonction a un commentaire non vide et des paramètres nommés
 
-Scenario: format functions do not panic
-  Given each function called with an empty text, an empty array, a count of zero and the largest `i64`
-  When evaluated
-  Then each returns a value or a script error and none panics
+Scenario: les fonctions de format ne paniquent pas
+  Given chaque fonction appelée avec un texte vide, un tableau vide, un compte à zéro et le plus grand `i64`
+  When évalué
+  Then chacune rend une valeur ou une erreur de script, et aucune ne panique
 
-Scenario: fmt_truncate counts characters, not bytes
-  Given five accented characters, ten bytes long
-  When `fmt_truncate` keeps three characters of it, and of three accented characters
-  Then the first gives the three characters and `... [2 more characters]`, the second is unchanged
+Scenario: fmt_truncate compte les caractères, non les octets
+  Given cinq caractères accentués, longs de dix octets
+  When `fmt_truncate` conserve trois caractères de ce texte, et de trois caractères accentués
+  Then le premier donne les trois caractères et `... [2 more characters]`, le second est inchangé
 
-Scenario: fmt_text gives the text of a value
-  Given a string, an array, a map, an integer and the unit
-  When each goes through `fmt_text`
-  Then the texts are the string, `[1,2]`, `{"a":1}`, `5` and `()`
+Scenario: fmt_text donne le texte d'une valeur
+  Given une chaîne, un tableau, une table, un entier et l'unité
+  When chacun passe par `fmt_text`
+  Then les textes sont la chaîne, `[1,2]`, `{"a":1}`, `5` et `()`
 
-Scenario: fmt_pluck gives the unit where a row has no such key
-  Given rows `#{k: 1}`, `#{}` and `5`
-  When `fmt_pluck` takes `k`
-  Then three values come back: 1, then the unit twice
+Scenario: fmt_pluck donne l'unité là où une ligne n'a pas la clé
+  Given les lignes `#{k: 1}`, `#{}` et `5`
+  When `fmt_pluck` prend `k`
+  Then trois valeurs sont rendues : 1, puis l'unité deux fois
 
-Scenario: a text of exactly the kept length is untouched
-  Given the text `abcde`
-  When `fmt_truncate_ends` keeps 2 and 3 characters, and `fmt_truncate` keeps 3 of `abc`
-  Then each text is returned unchanged
+Scenario: un texte de la longueur conservée exacte n'est pas modifié
+  Given le texte `abcde`
+  When `fmt_truncate_ends` conserve 2 et 3 caractères, et `fmt_truncate` conserve 3 caractères de `abc`
+  Then chaque texte est rendu inchangé
 
-Scenario: a column is as wide as its longest cell, in characters
-  Given a column whose cells are four accented characters (eight bytes) and `abcd`
-  When the table is formatted
-  Then the column is four characters wide
+Scenario: une colonne a la largeur de sa cellule la plus longue, en caractères
+  Given une colonne dont les cellules sont quatre caractères accentués (huit octets) et `abcd`
+  When le tableau est formaté
+  Then la colonne fait quatre caractères de large
 
-Scenario: fmt_grep is case sensitive
-  Given lines that differ by case only
-  When `fmt_grep` looks for `err`, then for `ERR`
-  Then only the lines with the same case are kept
+Scenario: fmt_grep respecte la casse
+  Given des lignes qui ne diffèrent que par la casse
+  When `fmt_grep` cherche `err`, puis `ERR`
+  Then seules les lignes de même casse sont conservées
 
 Tasks:
   [x] #1 Tests puis implémentation, vérifié le 2026-10-30.

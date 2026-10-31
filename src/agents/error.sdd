@@ -24,10 +24,10 @@ Must:
   @AgentsError est `#[non_exhaustive]`, dérive `thiserror::Error`, chaque variante a un Display anglais qui nomme la cause et l'objet (nom ou identifiant) sans contenu de prompt.
   @AgentsResult est l'alias `Result<T, AgentsError>`.
 
-Scenario: display names the cause and the object
-  Given each variant built with a sample name
-  When formatted
-  Then the text names the cause and the object
+Scenario: l'affichage nomme la cause et l'objet
+  Given chaque variante construite avec un nom d'exemple
+  When elle est formatée
+  Then le texte nomme la cause et l'objet
 
 Tasks:
   [x] #1 Tests puis implémentation.

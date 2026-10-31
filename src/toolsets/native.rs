@@ -325,7 +325,7 @@ mod tests {
         pad.run(script, &cancel, &env).await
     }
 
-    // Scenario: skill tool works without rhai_pad
+    // Scenario: le tool skill fonctionne sans rhai_pad
     #[test]
     fn skill_tool_works_without_rhai_pad() {
         let tool = tool();
@@ -357,7 +357,7 @@ mod tests {
         );
     }
 
-    // Scenario: unknown skill lists the names
+    // Scenario: un skill inconnu liste les noms
     #[test]
     fn unknown_skill_lists_the_names() {
         let tool = tool();
@@ -463,7 +463,7 @@ mod tests {
         );
     }
 
-    // Scenario: session_context is a copy
+    // Scenario: session_context est une copie
     #[tokio::test(flavor = "multi_thread")]
     async fn session_context_is_a_copy() {
         let context = context();
@@ -491,7 +491,7 @@ mod tests {
         );
     }
 
-    // Scenario: same value from a module and a script
+    // Scenario: même valeur depuis un module et depuis un script
     #[tokio::test(flavor = "multi_thread")]
     async fn module_function_and_script_read_the_same_value() {
         let context = context();

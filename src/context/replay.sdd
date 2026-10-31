@@ -31,25 +31,25 @@ Depends on:
   ../session/history.sdd
   serde
 
-Scenario: none stores but does not replay
-  Given an assistant message carrying reasoning
-  When replayed_reasoning is called with None
-  Then no reasoning is returned and the history still holds it
+Scenario: None stocke mais ne rejoue pas
+  Given un message assistant portant du raisonnement
+  When replayed_reasoning est appelé avec None
+  Then aucun raisonnement n'est rendu et l'historique le conserve toujours
 
-Scenario: all turns replays everything
-  Given reasoning on three assistant messages across two user turns
-  When replayed_reasoning is called with AllTurns
-  Then the three reasonings are returned
+Scenario: AllTurns rejoue tout
+  Given du raisonnement sur trois messages assistant répartis sur deux tours utilisateur
+  When replayed_reasoning est appelé avec AllTurns
+  Then les trois raisonnements sont rendus
 
-Scenario: intra turn replays the current turn only
-  Given reasoning on assistant messages before and after the last user message
-  When replayed_reasoning is called with IntraTurn
-  Then only the reasoning after the last user message is returned
+Scenario: IntraTurn rejoue le seul tour courant
+  Given du raisonnement sur des messages assistant avant et après le dernier message utilisateur
+  When replayed_reasoning est appelé avec IntraTurn
+  Then seul le raisonnement après le dernier message utilisateur est rendu
 
-Scenario: mode text round trips
-  Given each mode
-  When converted with as_str then parse, and serialized to JSON
-  Then the same mode returns, the JSON is the quoted text and `other` is refused
+Scenario: le texte du mode fait l'aller-retour
+  Given chaque mode
+  When converti avec as_str puis parse, et sérialisé en JSON
+  Then le même mode revient, le JSON est le texte entre guillemets et `other` est refusé
 
 Tasks:
   [x] #1 Tests puis implémentation.

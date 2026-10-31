@@ -234,7 +234,7 @@ mod tests {
         )
     }
 
-    // Scenario: same template, two contexts
+    // Scenario: même gabarit, deux contextes
     #[test]
     fn same_template_two_contexts() {
         let template = "Cluster: {{context.params.cluster}}.";
@@ -251,7 +251,7 @@ mod tests {
         assert_eq!(second, "Cluster: staging.", "the second text holds its value");
     }
 
-    // Scenario: absent role removes its section
+    // Scenario: un rôle absent retire sa section
     #[test]
     fn absent_role_removes_its_section() {
         let template = "start{{#if context.roles.k8s}} K8S SECTION{{/if}} end";
@@ -266,7 +266,7 @@ mod tests {
         );
     }
 
-    // Scenario: skill names without bodies
+    // Scenario: les skills ne donnent que leur nom
     #[test]
     fn skill_names_without_bodies() {
         let template = "Skills: {{#each session.skills}}[{{this}}]{{/each}}";
@@ -281,7 +281,7 @@ mod tests {
         );
     }
 
-    // Scenario: unknown variable is an error
+    // Scenario: variable inconnue est une erreur
     #[test]
     fn unknown_variable_is_an_error() {
         let refused = render_prompt("{{context.params.missing}}", &context(&[], &[]), &session());
@@ -297,7 +297,7 @@ mod tests {
         }
     }
 
-    // Scenario: rendering is deterministic
+    // Scenario: le rendu est déterministe
     #[test]
     fn rendering_is_deterministic() {
         let template = "{{session.agent_id}} {{session.started_at}}\
@@ -448,7 +448,7 @@ mod tests {
         .expect("a valid skill")
     }
 
-    // Scenario: skill sees its toolset parameters
+    // Scenario: le skill voit les paramètres de son toolset
     #[test]
     fn skill_sees_its_toolset_parameters() {
         let resolved = per_toolset_context();

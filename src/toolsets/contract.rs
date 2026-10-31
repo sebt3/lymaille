@@ -263,7 +263,7 @@ mod tests {
         );
     }
 
-    // Scenario: adding a function is a minor change
+    // Scenario: ajouter une fonction est un changement mineur
     #[test]
     fn adding_a_function_is_a_minor_change() {
         let before = contract("fn first(a) { a }");
@@ -275,7 +275,7 @@ mod tests {
         );
     }
 
-    // Scenario: body change leaves the contract
+    // Scenario: un changement de corps ne touche pas le contrat
     #[test]
     fn body_change_leaves_the_contract() {
         let before = contract("fn f(a) { a + 1 }");
@@ -295,7 +295,7 @@ mod tests {
         );
     }
 
-    // Scenario: removal is a major change
+    // Scenario: une suppression est un changement majeur
     #[test]
     fn removal_is_a_major_change() {
         let before = contract("fn a() { 1 }\nfn b() { 2 }");
@@ -307,7 +307,7 @@ mod tests {
         );
     }
 
-    // Scenario: parameter change is a major change
+    // Scenario: un changement de paramètres est un changement majeur
     #[test]
     fn parameter_change_is_a_major_change() {
         let before = contract("fn f(a) { a }");
@@ -356,7 +356,7 @@ mod tests {
         );
     }
 
-    // Scenario: private functions are outside the contract
+    // Scenario: les fonctions privées sont hors contrat
     #[test]
     fn private_functions_are_outside_the_contract() {
         let found = contract("private fn hidden() { 1 }\nfn shown() { 2 }");
@@ -391,7 +391,7 @@ mod tests {
         }
     }
 
-    // Scenario: undeclared change is warned
+    // Scenario: un changement non déclaré donne un avertissement
     #[test]
     fn removed_function_with_unchanged_version_is_warned() {
         let before = contract("fn a() { 1 }\nfn b() { 2 }");

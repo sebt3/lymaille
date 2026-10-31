@@ -32,25 +32,25 @@ Must:
 Depends on:
   serde
 
-Scenario: counters and outcome
-  Given new signals
-  When two Rhai errors and one correction are recorded and finish(Valid) is called
-  Then the counts are 2 and 1 and the outcome is Valid
+Scenario: compteurs et issue
+  Given des signaux neufs
+  When deux erreurs Rhai et une correction sont enregistrées et finish(Valid) est appelé
+  Then les compteurs valent 2 et 1 et l'issue est Valid
 
-Scenario: first outcome wins
-  Given signals finished with Failed
-  When finish(Valid) is called
-  Then the outcome stays Failed
+Scenario: la première issue l'emporte
+  Given des signaux terminés avec Failed
+  When finish(Valid) est appelé
+  Then l'issue reste Failed
 
-Scenario: unfinished run has no outcome
-  Given new signals
-  When the outcome is read
-  Then it is absent
+Scenario: un run non terminé n'a pas d'issue
+  Given des signaux neufs
+  When l'issue est lue
+  Then elle est absente
 
-Scenario: round trip keeps every field
-  Given signals with subagent, workflow step and two toolset versions
-  When serialized then deserialized
-  Then all fields are identical and toolsets serialize in name order
+Scenario: l'aller-retour conserve chaque champ
+  Given des signaux avec sous-agent, étape de workflow et deux versions de toolset
+  When sérialisés puis désérialisés
+  Then tous les champs sont identiques et les toolsets se sérialisent dans l'ordre des noms
 
 Tasks:
   [x] #0 Amorce : @Outcome seul est implémenté (requis par ./event.sdd).

@@ -37,47 +37,47 @@ Must:
 Depends on:
   ./error.sdd
 
-Scenario: no compaction at the boundary
-  Given max 10000, prompt 500, response max 1000 and render cap such that T is 400
-  When SESSION is 7100 (so the margin is exactly 0)
-  Then needs_compaction is false
-  And with SESSION 7101 it is true
+Scenario: pas de compaction à la borne
+  Given max 10000, prompt 500, réponse max 1000 et plafond de rendu tel que T vaut 400
+  When SESSION vaut 7100 (la marge vaut donc exactement 0)
+  Then needs_compaction est faux
+  And avec SESSION à 7101 il est vrai
 
-Scenario: worst case always fits
-  Given a budget and SESSION just below the threshold
-  When one response of size R then one tool result of size T are added
-  Then the summary request of size PROMPT and its response of size R still fit in MAX
+Scenario: le pire cas tient toujours
+  Given un budget et SESSION juste sous le seuil
+  When une réponse de taille R puis un résultat d'outil de taille T sont ajoutés
+  Then la requête de résumé de taille PROMPT et sa réponse de taille R tiennent encore dans MAX
 
-Scenario: startup refused when the system prompt is too big
-  Given a budget where MAX - PROMPT - 3R - T is 6000
-  When check_startup is called with SYS 6001 and then with SYS 6000
-  Then 6001 fails with SystemTooLarge naming 6001 and 6000, and 6000 succeeds
+Scenario: démarrage refusé quand le prompt système est trop gros
+  Given un budget où MAX - PROMPT - 3R - T vaut 6000
+  When check_startup est appelé avec SYS 6001 puis avec SYS 6000
+  Then 6001 échoue avec SystemTooLarge en nommant 6001 et 6000, et 6000 réussit
 
-Scenario: no compaction loop at the startup boundary
-  Given SYS equal to the startup bound
-  When the session is compacted to SYS + R
-  Then needs_compaction is false
+Scenario: pas de boucle de compaction à la borne de démarrage
+  Given SYS égal à la borne de démarrage
+  When la session est compactée à SYS + R
+  Then needs_compaction est faux
 
-Scenario: oversized user message refused
-  Given SYS alone fits
-  When check_user_message is called with a message that makes the margin negative
-  Then it fails with MessageTooLarge and with a message that fits it succeeds
+Scenario: message utilisateur trop gros refusé
+  Given SYS seul tient
+  When check_user_message est appelé avec un message qui rend la marge négative
+  Then il échoue avec MessageTooLarge, et un message qui tient réussit
 
-Scenario: render cap converts with 2.5 characters per token
-  Given a render cap of 1000 characters and the default ratio
-  When render_cap_tokens is read
-  Then it is 400
-  And with a cap of 1001 characters it is 401
+Scenario: le plafond de rendu se convertit à 2,5 caractères par token
+  Given un plafond de rendu de 1000 caractères et le ratio par défaut
+  When render_cap_tokens est lu
+  Then il vaut 400
+  And avec un plafond de 1001 caractères il vaut 401
 
-Scenario: overflow-safe
-  Given sizes near the maximum of u64
-  When needs_compaction and check_startup are called
-  Then neither panics nor wraps
+Scenario: sûr face au débordement
+  Given des tailles proches du maximum de u64
+  When needs_compaction et check_startup sont appelés
+  Then aucun ne panique ni ne boucle
 
-Scenario: zero ratio refused
-  Given a ratio of zero
-  When with_chars_per_token_milli is called
-  Then it returns nothing
+Scenario: ratio nul refusé
+  Given un ratio de zéro
+  When with_chars_per_token_milli est appelé
+  Then il ne rend rien
 
 Tasks:
   [x] #1 Tests puis implémentation.

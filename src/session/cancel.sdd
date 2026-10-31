@@ -34,26 +34,26 @@ Depends on:
 Can modify:
   /Cargo.toml: ajout de `tokio` (features `rt`, `sync`, `time`, `macros`; `test-util` en dev-dependency) et de `tokio-util` seulement.
 
-Scenario: sleep elapses
-  Given a handle that is not cancelled and paused tokio time
-  When sleep of 2 seconds is awaited and time advances by 2 seconds
-  Then it returns Elapsed
+Scenario: le sommeil s'écoule
+  Given un handle non annulé et un temps tokio en pause
+  When sleep de 2 secondes est attendu et le temps avance de 2 secondes
+  Then il rend Elapsed
 
-Scenario: cancel interrupts sleep
-  Given a handle sleeping for 300 seconds
-  When the handle is cancelled after 1 second
-  Then sleep returns Cancelled after about 1 second, not 300
+Scenario: l'annulation interrompt le sommeil
+  Given un handle en sommeil pendant 300 secondes
+  When le handle est annulé après 1 seconde
+  Then sleep rend Cancelled après environ 1 seconde, et non 300
 
-Scenario: clones and children
-  Given a handle, a clone and a child
-  When the clone is cancelled
-  Then all three report is_cancelled
-  And cancelling only the child leaves the parent not cancelled
+Scenario: clones et enfants
+  Given un handle, un clone et un enfant
+  When le clone est annulé
+  Then les trois répondent is_cancelled
+  And annuler seulement l'enfant laisse le parent non annulé
 
-Scenario: cancelled is idempotent
-  Given a cancelled handle
-  When cancel is called again and cancelled is awaited
-  Then nothing fails and the future completes at once
+Scenario: annulation idempotente
+  Given un handle annulé
+  When cancel est appelé à nouveau et cancelled est attendu
+  Then rien n'échoue et le futur se termine aussitôt
 
 Tasks:
   [x] #1 Tests (temps tokio en pause), puis implémentation sur le jeton de `tokio-util`.

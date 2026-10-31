@@ -74,63 +74,63 @@ Tasks:
   [x] #11 Accesseurs en lecture `top()` et `base()` de @Layered (décidé le 2026-10-29) : le domaine `toolsets` implémente ses propres traits de stockage pour @Layered et doit lire ses deux couches (un `agents` qui dépendrait de `toolsets` inverserait la dépendance). Scenario : « layers are readable ».
       Validé le 2026-10-29 (validator, 58 mutants dont 55 tués) sous `scripts/check` complet.
 
-Scenario: put then get restores each entity
-  Given an in-memory catalog and an agent, a profile and a provider
-  When each is put then fetched
-  Then each equals the original
+Scenario: put puis get restituent chaque entité
+  Given un catalogue en mémoire, un agent, un profil et un fournisseur
+  When chacun est enregistré puis relu
+  Then chacun est égal à l'original
 
-Scenario: unknown names give nothing
-  Given an empty catalog
-  When any get is called
-  Then nothing is returned and there is no error
+Scenario: un nom inconnu ne rend rien
+  Given un catalogue vide
+  When un get quelconque est appelé
+  Then rien n'est rendu et il n'y a aucune erreur
 
-Scenario: put replaces
-  Given two profiles with the same name
-  When both are put in turn
-  Then the last one is returned
+Scenario: put remplace
+  Given deux profils de même nom
+  When les deux sont enregistrés l'un après l'autre
+  Then le dernier est rendu
 
-Scenario: invalid agent refused at put
-  Given a sub-agent declaring delegable sub-agents
-  When put_agent is called
-  Then it fails with InvalidDefinition and nothing is stored
+Scenario: agent invalide refusé à put
+  Given un sous-agent qui déclare des sous-agents délégables
+  When put_agent est appelé
+  Then il échoue avec InvalidDefinition et rien n'est stocké
 
-Scenario: resolve through the store
-  Given a stored profile overriding the context size
-  When resolve_profile is called with a detected model of another size
-  Then the override is used
-  And an unknown profile name fails with UnknownProfile
+Scenario: resolve passe par le stockage
+  Given un profil stocké qui remplace la taille de contexte
+  When resolve_profile est appelé avec un modèle détecté d'une autre taille
+  Then le remplacement est utilisé
+  And un nom de profil inconnu échoue avec UnknownProfile
 
-Scenario: top overrides base
-  Given a top layer holding the profile `strix-qwen` with context size 8192, and a base layer holding the same name with 262144
-  When the profile is fetched through the layered catalog
-  Then the top profile is returned, whole
+Scenario: la couche haute remplace la basse
+  Given une couche haute portant le profil `strix-qwen` de taille de contexte 8192, et une couche basse portant le même nom avec 262144
+  When le profil est lu à travers le catalogue en couches
+  Then le profil de la couche haute est rendu en entier
 
-Scenario: base answers when top has no entry
-  Given an empty top layer, and a base layer holding the agent `main`, the provider `vllm-strix` and the profile `strix-qwen`
-  When each is fetched through the layered catalog
-  Then each equals the base object, and an unknown name gives nothing
+Scenario: la couche basse répond quand la haute n'a pas l'entrée
+  Given une couche haute vide, et une couche basse portant l'agent `main`, le fournisseur `vllm-strix` et le profil `strix-qwen`
+  When chacun est lu à travers le catalogue en couches
+  Then chacun est égal à l'objet de la couche basse, et un nom inconnu ne rend rien
 
-Scenario: put writes to the top layer only
-  Given a layered catalog whose top and base layers are empty
-  When a provider is put through the layered catalog
-  Then the top layer holds it, the base layer does not, and the layered catalog returns it
+Scenario: put n'écrit que dans la couche haute
+  Given un catalogue en couches dont les couches haute et basse sont vides
+  When un fournisseur est enregistré à travers le catalogue en couches
+  Then la couche haute le porte, la couche basse non, et le catalogue en couches le rend
 
-Scenario: top error is returned without querying the base
-  Given a top layer whose storage fails, and a base layer holding the profile `strix-qwen`
-  When the profile is fetched through the layered catalog
-  Then it fails with Store and the base layer was not queried
+Scenario: l'erreur de la couche haute est rendue sans interroger la basse
+  Given une couche haute dont le stockage échoue, et une couche basse portant le profil `strix-qwen`
+  When le profil est lu à travers le catalogue en couches
+  Then il échoue avec Store et la couche basse n'a pas été interrogée
 
-Scenario: resolve_profile works on the cascade
-  Given a base layer holding the profile `strix-qwen` with context size 262144, and an empty top layer
-  When resolve_profile is called with a detected context size of 8192
-  Then the base override is used, and an unknown name fails with UnknownProfile
+Scenario: resolve_profile fonctionne sur la cascade
+  Given une couche basse portant le profil `strix-qwen` de taille de contexte 262144, et une couche haute vide
+  When resolve_profile est appelé avec une taille de contexte détectée de 8192
+  Then le remplacement de la couche basse est utilisé, et un nom inconnu échoue avec UnknownProfile
 
-Scenario: layers nest for more than two levels
-  Given a stack `Layered<Layered<A, B>, C>` where only C holds the provider `vllm-strix`
-  When the provider is fetched through the stack, then put through the stack
-  Then it is found through the stack, and the put lands in A only
+Scenario: les couches s'imbriquent à plus de deux niveaux
+  Given une pile `Layered<Layered<A, B>, C>` dont seule C porte le fournisseur `vllm-strix`
+  When le fournisseur est lu à travers la pile, puis enregistré à travers la pile
+  Then il est trouvé à travers la pile, et l'enregistrement ne va que dans A
 
-Scenario: layers are readable
+Scenario: les couches sont lisibles
   Given un @Layered construit avec une couche haute et une couche basse
   When top() et base() sont lus
   Then ils rendent les deux couches reçues

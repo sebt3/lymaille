@@ -43,27 +43,27 @@ Depends on:
 Can modify:
   /Cargo.toml: ajout de `serde` (feature `derive`) et de `serde_json` (en dev-dependency) seulement.
 
-Scenario: manual clock returns the value it was given
-  Given a @ManualClock created at 1000 milliseconds
-  When the clock is read
-  Then it returns a @Timestamp of 1000 milliseconds
+Scenario: l'horloge manuelle rend la valeur qui lui a été donnée
+  Given une @ManualClock créée à 1000 millisecondes
+  When l'horloge est lue
+  Then elle rend un @Timestamp de 1000 millisecondes
 
-Scenario: manual clock advances
-  Given a @ManualClock at 1000 milliseconds
-  When it is advanced by 500 milliseconds
-  Then it returns 1500 milliseconds
-  And advancing past the maximum saturates instead of overflowing
+Scenario: l'horloge manuelle avance
+  Given une @ManualClock à 1000 millisecondes
+  When elle avance de 500 millisecondes
+  Then elle rend 1500 millisecondes
+  And avancer au-delà du maximum sature au lieu de déborder
 
-Scenario: system clock is after 2020
-  Given a @SystemClock
-  When it is read
-  Then the @Timestamp is greater than `1577836800000`
+Scenario: l'horloge système est postérieure à 2020
+  Given une @SystemClock
+  When elle est lue
+  Then le @Timestamp est supérieur à `1577836800000`
 
-Scenario: timestamp serializes as a plain number
-  Given a @Timestamp of 42 milliseconds
-  When it is serialized to JSON
-  Then the JSON text is `42`
-  And it deserializes back to the same value
+Scenario: le timestamp se sérialise en nombre brut
+  Given un @Timestamp de 42 millisecondes
+  When il est sérialisé en JSON
+  Then le texte JSON est `42`
+  And il se désérialise en la même valeur
 
 Tasks:
   [x] #1 Écrire les tests des quatre scénarios, les voir échouer, puis implémenter @Timestamp, @Clock, @SystemClock, @ManualClock.

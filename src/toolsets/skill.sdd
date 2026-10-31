@@ -36,25 +36,25 @@ Depends on:
   [x] #5 `Debug` manuel de @Skill qui n'affiche que le nom et les tailles du corps et des annexes (le `Debug` dérivé répand corps, annexes et métadonnées dans tout `{:?}` d'un @Toolset), avec son test.
       Validé le 2026-10-29 (implémentation vérifiée par mutations de l'auteur), validation par le validator groupée avec T6.
 
-Scenario: valid skill file is parsed
-  Given a SKILL.md with a name, a description and a body
-  When it is parsed
-  Then the fields are read and the body is the text after the frontmatter
+Scenario: un fichier de skill valide est analysé
+  Given un SKILL.md avec un nom, une description et un corps
+  When il est analysé
+  Then les champs sont lus et le corps est le texte après le frontmatter
 
-Scenario: invalid name refused
-  Given the names `Grafana`, `a b` and an empty name
-  When each is used for a skill
-  Then each fails with InvalidSkill
+Scenario: nom invalide refusé
+  Given les noms `Grafana`, `a b` et un nom vide
+  When chacun est utilisé pour un skill
+  Then chacun échoue avec InvalidSkill
 
-Scenario: allowed-tools is ignored
-  Given a SKILL.md whose frontmatter has `allowed-tools`
-  When it is parsed
-  Then the skill carries no capability and parsing succeeds
+Scenario: allowed-tools est ignoré
+  Given un SKILL.md dont le frontmatter porte `allowed-tools`
+  When il est analysé
+  Then le skill ne porte aucune capacité et l'analyse réussit
 
-Scenario: oversized body refused
-  Given a body longer than the render cap
-  When the size is checked
-  Then it fails with SkillTooLarge
+Scenario: corps trop volumineux refusé
+  Given un corps plus long que le plafond de rendu
+  When la taille est vérifiée
+  Then il échoue avec SkillTooLarge
 
 Tasks:
   [x] #1 Tests puis implémentation, vérifié le 2026-10-31.

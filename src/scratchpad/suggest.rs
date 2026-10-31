@@ -412,7 +412,7 @@ mod tests {
         hint.clone()
     }
 
-    // Scenario: a candidate is near when its distance is at most a third of the name length
+    // Scenario: un candidat est proche quand sa distance vaut au plus le tiers de la longueur du nom
     #[test]
     fn threshold_is_a_third_of_the_name_length() {
         assert_eq!(
@@ -435,7 +435,7 @@ mod tests {
         );
     }
 
-    // Scenario: names are compared on their first 128 characters
+    // Scenario: les noms sont comparés sur leurs 128 premiers caractères
     #[test]
     fn names_are_compared_on_their_first_128_characters() {
         let prefix_124 = "a".repeat(124);
@@ -455,7 +455,7 @@ mod tests {
         );
     }
 
-    // Scenario: a hint explains only a scope variable read inside a function
+    // Scenario: un indice n'explique qu'une variable de scope lue dans une fonction
     #[test]
     fn hint_only_for_a_scope_variable_read_in_a_function() {
         let unknown = suggest_for(not_found(NotFoundKind::Variable, "zzz", Some("f")), &grafana());
@@ -470,7 +470,7 @@ mod tests {
         assert_eq!(hint_of(&function), None, "a function name is not a variable");
     }
 
-    // Scenario: the modules of visible functions are named once each
+    // Scenario: les modules des fonctions visibles sont nommés une seule fois chacun
     #[test]
     fn module_fallback_names_each_module_once() {
         let candidates = CandidateSet::new(

@@ -1074,7 +1074,7 @@ mod tests {
         ToolsetContext::new(name.to_owned(), ContextLevel::Project).expect("a context")
     }
 
-    // Scenario: check reports gaps without executing
+    // Scenario: check signale les écarts sans exécuter
     #[tokio::test(flavor = "multi_thread")]
     async fn check_reports_gaps_without_executing() {
         let host = Host::new(Index::listing(Vec::new()), InMemoryStore::new());
@@ -1659,7 +1659,7 @@ mod tests {
         assert_eq!(slot.get(), None, "an unknown agent leaves the target alone");
     }
 
-    // Scenario: opening a target replaces the previous one
+    // Scenario: l'ouverture d'une cible remplace la précédente
     #[tokio::test(flavor = "multi_thread")]
     async fn opening_a_target_replaces_the_previous_one() {
         let sessions = store_with(vec![past_session("past-1", "work-agent")]).await;
@@ -1699,7 +1699,7 @@ mod tests {
         );
     }
 
-    // Scenario: unknown session is an explicit error
+    // Scenario: session inconnue est une erreur explicite
     #[tokio::test(flavor = "multi_thread")]
     async fn unknown_session_is_an_explicit_error() {
         let host = Host::new(Index::listing(Vec::new()), InMemoryStore::new());
@@ -1719,7 +1719,7 @@ mod tests {
         assert_eq!(slot.get(), None, "an unknown session leaves the target alone");
     }
 
-    // Scenario: past errors are masked
+    // Scenario: les erreurs passées sont masquées
     #[tokio::test(flavor = "multi_thread")]
     async fn past_errors_are_masked() {
         let sessions = store_with(vec![past_session("past-5", "work-agent")]).await;
@@ -1777,7 +1777,7 @@ mod tests {
         );
     }
 
-    // Scenario: summary carries no message text
+    // Scenario: le résumé ne porte aucun texte de message
     #[tokio::test(flavor = "multi_thread")]
     async fn summary_carries_no_message_text() {
         let state = edited(&past_session("past-2", "work-agent"), |value| {
@@ -1865,7 +1865,7 @@ mod tests {
         );
     }
 
-    // Scenario: no module writes
+    // Scenario: aucun module n'écrit
     #[test]
     fn no_module_writes() {
         let contexts = contexts_module(

@@ -55,30 +55,30 @@ Scenario: un sous-agent retiré est signalé avec sa raison
   When les sous-agents délégables sont calculés
   Then la délégation liste les trois retirés avec leur raison (`DefinitionMissing`, `ToolsetMissing`, `Incompatible`) et aucun sous-agent compatible n'est perdu
 
-Scenario: missing role removes a sub-agent
-  Given a context without the role `k8s` and a sub-agent whose toolset requires it
-  When the delegable sub-agents are computed
-  Then that sub-agent is absent and no error is raised
+Scenario: un rôle manquant retire un sous-agent
+  Given un contexte sans le rôle `k8s` et un sous-agent dont le toolset l'exige
+  When les sous-agents délégables sont calculés
+  Then ce sous-agent est absent et aucune erreur n'est levée
 
-Scenario: main agent fails to start
-  Given a main agent whose toolset requires the type `cluster` and a context without its roles
-  When the delegable sub-agents are computed at startup
-  Then it fails with Incompatible listing each gap
+Scenario: l'agent principal ne démarre pas
+  Given un agent principal dont le toolset exige le type `cluster` et un contexte sans ses rôles
+  When les sous-agents délégables sont calculés au démarrage
+  Then il échoue avec Incompatible en listant chaque écart
 
-Scenario: incompatible type version is a gap
-  Given a toolset requiring `cluster@1.2` and a type in 1.1
-  When the context is checked
-  Then a gap names the version
+Scenario: une version de type incompatible est un écart
+  Given un toolset exigeant `cluster@1.2` et un type en 1.1
+  When le contexte est vérifié
+  Then un écart nomme la version
 
-Scenario: creation module refused for a sub-agent
-  Given a sub-agent granted the toolset-creation module
-  When the rule is checked
-  Then it fails with Forbidden naming the rule
+Scenario: module de création refusé pour un sous-agent
+  Given un sous-agent à qui est accordé le module de création de toolset
+  When la règle est vérifiée
+  Then il échoue avec Forbidden en nommant la règle
 
-Scenario: creation module refused for a work agent
+Scenario: module de création refusé pour un agent de travail
   Given un agent de travail qui reçoit le module de création, avec ou sans sous-agents délégables
-  When the rule is checked
-  Then it fails with Forbidden naming the rule
+  When la règle est vérifiée
+  Then il échoue avec Forbidden en nommant la règle
 
 Scenario: valeur de mauvais type est un écart
   Given un toolset exigeant `cluster@1.0` et un contexte dont `namespace` vaut 5 alors que le type le déclare texte

@@ -1079,7 +1079,7 @@ mod tests {
         );
     }
 
-    // Scenario: the memory limits are stated in their own place in the rules
+    // Scenario: les règles énoncent chaque plafond de mémoire à sa place
     #[test]
     fn rules_state_each_memory_limit_in_its_place() {
         let limits = ScratchpadLimits::new()
@@ -1093,7 +1093,7 @@ mod tests {
         );
     }
 
-    // Scenario: the documentation of a function keeps one line per comment
+    // Scenario: la documentation garde une ligne par commentaire
     #[test]
     fn documentation_keeps_one_line_per_comment() {
         let mut engine = Engine::new();
@@ -1117,7 +1117,7 @@ mod tests {
         );
     }
 
-    // Scenario: find searches the description of a toolset
+    // Scenario: find cherche dans la description d'un toolset
     #[test]
     fn search_reads_the_description_of_a_toolset() {
         let (engine, _source) = fixture();

@@ -637,7 +637,7 @@ mod tests {
         }
     }
 
-    // Scenario: fmt_truncate counts characters, not bytes
+    // Scenario: fmt_truncate compte les caractères, non les octets
     #[test]
     fn truncate_counts_characters_not_bytes() {
         let cut = engine().eval::<String>("fmt_truncate(\"\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\", 3)");
@@ -654,7 +654,7 @@ mod tests {
         );
     }
 
-    // Scenario: fmt_text gives the text of a value
+    // Scenario: fmt_text donne le texte d'une valeur
     #[test]
     fn text_of_a_value() {
         let cases = [
@@ -673,7 +673,7 @@ mod tests {
         }
     }
 
-    // Scenario: fmt_pluck gives the unit where a row has no such key
+    // Scenario: fmt_pluck donne l'unité là où une ligne n'a pas la clé
     #[test]
     fn pluck_gives_the_unit_for_a_missing_key() {
         let values = match engine().eval::<rhai::Array>("fmt_pluck([#{k: 1}, #{}, 5], \"k\")") {
@@ -700,7 +700,7 @@ mod tests {
         );
     }
 
-    // Scenario: a text of exactly the kept length is untouched
+    // Scenario: un texte de la longueur conservée exacte n'est pas modifié
     #[test]
     fn exact_length_is_untouched() {
         assert_eq!(
@@ -721,7 +721,7 @@ mod tests {
         );
     }
 
-    // Scenario: a column is as wide as its longest cell, in characters
+    // Scenario: une colonne a la largeur de sa cellule la plus longue, en caractères
     #[test]
     fn column_width_follows_the_characters_of_its_cells() {
         let script = "fmt_table([#{c: \"\u{e9}\u{e9}\u{e9}\u{e9}\", d: 1}, #{c: \"abcd\", d: 2}])";
@@ -733,7 +733,7 @@ mod tests {
         );
     }
 
-    // Scenario: fmt_grep is case sensitive
+    // Scenario: fmt_grep respecte la casse
     #[test]
     fn grep_is_case_sensitive() {
         let upper_in_text = engine().eval::<String>("fmt_grep(\"ERR one\\nerr two\\nErr three\", \"err\")");

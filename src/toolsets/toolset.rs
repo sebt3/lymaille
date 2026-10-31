@@ -412,7 +412,7 @@ mod tests {
         .expect("a toolset with a valid name builds")
     }
 
-    // Scenario: toolset is plain data
+    // Scenario: le toolset est une donnée simple
     #[test]
     fn toolset_is_plain_data() {
         // Not Rhai at all: the source must be kept as text, not compiled.
@@ -453,7 +453,7 @@ mod tests {
         );
     }
 
-    // Scenario: duplicate names refused
+    // Scenario: noms en double refusés
     #[test]
     fn duplicate_skill_names_refused() {
         let result = toolset("grafana")
@@ -544,7 +544,7 @@ mod tests {
         );
     }
 
-    // Scenario: invalid module name refused
+    // Scenario: nom de module invalide refusé
     #[test]
     fn invalid_module_name_refused() {
         for name in ["a-b", "", "1abc"] {

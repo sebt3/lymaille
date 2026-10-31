@@ -42,25 +42,25 @@ Depends on:
   ../scratchpad/introspect.sdd
   rhai
 
-Scenario: skill tool works without rhai_pad
-  Given a session with no call to rhai_pad
-  When `skill` is called with no argument, with the built-in name, and with a document name
-  Then the list, the built-in body and the document are returned
+Scenario: le tool skill fonctionne sans rhai_pad
+  Given une session sans aucun appel à rhai_pad
+  When `skill` est appelé sans argument, avec le nom intégré, et avec le nom d'un document
+  Then la liste, le corps intégré et le document sont rendus
 
-Scenario: unknown skill lists the names
-  Given a skill name that does not exist
-  When `skill` is called with it
-  Then the error lists the existing names
+Scenario: un skill inconnu liste les noms
+  Given un nom de skill qui n'existe pas
+  When `skill` est appelé avec lui
+  Then l'erreur liste les noms existants
 
-Scenario: session_context is a copy
-  Given a script that modifies the value returned by `session_context()`
-  When a second call reads it
-  Then the value is unchanged and nothing panics
+Scenario: session_context est une copie
+  Given un script qui modifie la valeur rendue par `session_context()`
+  When un second appel la lit
+  Then la valeur est inchangée et rien ne panique
 
-Scenario: same value from a module and a script
-  Given a toolset function and a script that both read `session_context()`
-  When both run
-  Then they read the same value
+Scenario: même valeur depuis un module et depuis un script
+  Given une fonction de toolset et un script qui lisent tous deux `session_context()`
+  When les deux s'exécutent
+  Then elles lisent la même valeur
 
 Tasks:
   [x] #1 Tests puis implémentation, vérifié le 2026-10-30.

@@ -33,7 +33,7 @@ Must:
 Depends on:
   thiserror
 
-Scenario: messages hide values
-  Given an invalid context holding a parameter value
-  When the error is formatted
-  Then the message names the parameter and never the value
+Scenario: les messages cachent les valeurs
+  Given un contexte invalide portant une valeur de paramètre
+  When l'erreur est formatée
+  Then le message nomme le paramètre et jamais la valeur

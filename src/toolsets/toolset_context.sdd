@@ -40,25 +40,25 @@ Depends on:
   serde
   serde_json
 
-Scenario: override beats context beats default
-  Given a default `5`, a context parameter `7` and an override `9` for the same toolset parameter
-  When the context is resolved
-  Then the value is 9 for that toolset, 7 without the override, and 5 without either
+Scenario: le remplacement l'emporte sur le contexte, qui l'emporte sur le défaut
+  Given un défaut `5`, un paramètre de contexte `7` et un remplacement `9` pour le même paramètre de toolset
+  When le contexte est résolu
+  Then la valeur vaut 9 pour ce toolset, 7 sans remplacement, et 5 sans l'un ni l'autre
 
-Scenario: only role names come out
-  Given a context binding the role `k8s` to the reference `prod-k8s`
-  When it is resolved
-  Then the resolved context lists `k8s` and never `prod-k8s`
+Scenario: seuls les noms de rôles sortent
+  Given un contexte liant le rôle `k8s` à la référence `prod-k8s`
+  When il est résolu
+  Then le contexte résolu liste `k8s` et jamais `prod-k8s`
 
-Scenario: secret-like value refused
-  Given a parameter whose value is `sk-abcdef`
-  When it is added
-  Then it fails with InvalidContext
+Scenario: valeur ressemblant à un secret refusée
+  Given un paramètre dont la valeur est `sk-abcdef`
+  When il est ajouté
+  Then il échoue avec InvalidContext
 
-Scenario: resolved copy is independent
-  Given a resolved context
-  When one of its values is modified
-  Then a second resolution still returns the original value
+Scenario: la copie résolue est indépendante
+  Given un contexte résolu
+  When l'une de ses valeurs est modifiée
+  Then une seconde résolution rend encore la valeur d'origine
 
 Tasks:
   [x] #1 Tests puis implémentation.

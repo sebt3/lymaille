@@ -28,20 +28,20 @@ Depends on:
   ./error.sdd
   serde
 
-Scenario: same version accepted
-  Given a saved version 1.0
-  When checked
-  Then it is accepted
+Scenario: même version acceptée
+  Given une version 1.0 enregistrée
+  When elle est vérifiée
+  Then elle est acceptée
 
-Scenario: newer minor accepted
-  Given a saved version 1.7
-  When checked
-  Then it is accepted
+Scenario: mineure plus récente acceptée
+  Given une version 1.7 enregistrée
+  When elle est vérifiée
+  Then elle est acceptée
 
-Scenario: different major refused
-  Given a saved version 2.0 and then 0.9
-  When checked
-  Then both fail with IncompatibleFormat naming both versions
+Scenario: majeure différente refusée
+  Given une version 2.0 enregistrée, puis 0.9
+  When elles sont vérifiées
+  Then les deux échouent avec IncompatibleFormat en nommant les deux versions
 
 Tasks:
   [x] #1 Tests puis implémentation.

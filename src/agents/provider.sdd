@@ -27,30 +27,30 @@ Depends on:
   serde
   ../secret.sdd
 
-Scenario: references are names
-  Given a provider built with address reference `vllm-strix` and auth reference `vllm-key`
-  When serialized then deserialized
-  Then it is identical and exposes those references
+Scenario: les références sont des noms
+  Given un fournisseur construit avec la référence d'adresse `vllm-strix` et la référence d'authentification `vllm-key`
+  When il est sérialisé puis désérialisé
+  Then il est identique et expose ces références
 
-Scenario: credentials in clear are refused
-  Given an address `https://user:pw@host/v1` or an auth reference holding `Bearer abc`
-  When a provider is built
-  Then nothing is produced
+Scenario: identifiants en clair refusés
+  Given une adresse `https://user:pw@host/v1` ou une référence d'authentification portant `Bearer abc`
+  When un fournisseur est construit
+  Then rien n'est produit
 
-Scenario: empty fields refused
-  Given an empty name
-  When a provider is built
-  Then nothing is produced
+Scenario: champs vides refusés
+  Given un nom vide
+  When un fournisseur est construit
+  Then rien n'est produit
 
-Scenario: deserialization refuses what the constructor refuses
-  Given JSON with an empty name
-  When deserialized
-  Then it fails
+Scenario: la désérialisation refuse ce que le constructeur refuse
+  Given un JSON avec un nom vide
+  When il est désérialisé
+  Then il échoue
 
-Scenario: debug hides references
-  Given a provider
-  When formatted with Debug
-  Then the references do not appear
+Scenario: le Debug cache les références
+  Given un fournisseur
+  When il est formaté avec Debug
+  Then les références n'apparaissent pas
 
 Tasks:
   [x] #4 Tests manquants : préfixe `sk-` (dont `SK-`), blanc dans une référence, nom et type blancs, désérialisation JSON d'une référence en clair (refus). Rendre `sk-` insensible à la casse.

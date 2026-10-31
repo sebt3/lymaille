@@ -278,7 +278,7 @@ mod tests {
             .cloned()
     }
 
-    // Scenario: override beats context beats default
+    // Scenario: le remplacement l'emporte sur le contexte, qui l'emporte sur le défaut
     #[test]
     fn override_beats_context_beats_default() {
         let defaults = || vec![default_of("tool", "limit", json!(5))];
@@ -319,7 +319,7 @@ mod tests {
         );
     }
 
-    // Scenario: only role names come out
+    // Scenario: seuls les noms de rôles sortent
     #[test]
     fn only_role_names_come_out() {
         let context = ToolsetContext::new("ctx".to_owned(), ContextLevel::User)
@@ -344,7 +344,7 @@ mod tests {
         );
     }
 
-    // Scenario: secret-like value refused
+    // Scenario: valeur ressemblant à un secret refusée
     #[test]
     fn secret_like_value_refused() {
         let result = ToolsetContext::new("ctx".to_owned(), ContextLevel::User)
@@ -366,7 +366,7 @@ mod tests {
         }
     }
 
-    // Scenario: resolved copy is independent
+    // Scenario: la copie résolue est indépendante
     #[test]
     fn resolved_copy_is_independent() {
         let context = ToolsetContext::new("ctx".to_owned(), ContextLevel::Session)

@@ -40,20 +40,20 @@ Depends on:
   serde_json
   vynil-core
 
-Scenario: toolset is plain data
-  Given a toolset built with a source, two skills and a requirement
-  When read
-  Then the accessors return what was given and nothing was compiled
+Scenario: le toolset est une donnée simple
+  Given un toolset construit avec une source, deux skills et une exigence
+  When il est lu
+  Then les accesseurs rendent ce qui a été donné, et rien n'a été compilé
 
-Scenario: duplicate names refused
-  Given a toolset with two skills of the same name
-  When the second is added
-  Then it fails with InvalidToolset
+Scenario: noms en double refusés
+  Given un toolset avec deux skills de même nom
+  When le second est ajouté
+  Then il échoue avec InvalidToolset
 
-Scenario: invalid module name refused
-  Given the name `a-b`
-  When a toolset is built with it
-  Then it fails with InvalidToolset
+Scenario: nom de module invalide refusé
+  Given le nom `a-b`
+  When un toolset est construit avec lui
+  Then il échoue avec InvalidToolset
 
 Tasks:
   [x] #3 Test d'un nom de module qui est un mot réservé de Rhai (`fn`), relevé par le validateur le 2026-10-29.

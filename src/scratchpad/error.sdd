@@ -55,81 +55,81 @@ Must:
   Aucune panique : une variante inconnue de Rhai tombe dans `Runtime` avec le texte de Rhai.
   Le texte d'une erreur peut contenir des noms et des fragments du script du LLM : l'appelant (./run.sdd) masque les secrets avant de le rendre ou de l'enregistrer ; ce type ne les connaît pas.
 
-Scenario: display texts are stable
-  Given each variant built with sample data and a position at line 3 and column 5
-  When formatted with Display
-  Then the text matches the documented wording
-  And a variant without position omits the ` at line, column` part
+Scenario: les textes d'affichage sont stables
+  Given chaque variante construite avec des données d'exemple et une position à la ligne 3, colonne 5
+  When formaté avec Display
+  Then le texte correspond à la formulation documentée
+  And une variante sans position omet la partie ` at line, column`
 
-Scenario: syntax error carries its position
-  Given the script `let x = ;` compiled by Rhai
-  When the error is converted with from_rhai
-  Then it is a Syntax error with a position on line 1
+Scenario: une erreur de syntaxe porte sa position
+  Given le script `let x = ;` compilé par Rhai
+  When l'erreur est convertie avec from_rhai
+  Then c'est une erreur Syntax avec une position à la ligne 1
 
-Scenario: runtime error from throw
-  Given the script `throw "boom"` evaluated by Rhai
-  When the error is converted
-  Then it is a Runtime error whose message contains `boom`
+Scenario: une erreur d'exécution issue de throw
+  Given le script `throw "boom"` évalué par Rhai
+  When l'erreur est convertie
+  Then c'est une erreur Runtime dont le message contient `boom`
 
-Scenario: function not found without argument types
-  Given the script `grafana::loki_queryy("x")` evaluated on an engine with module `grafana`
-  When the error is converted
-  Then it is a NotFound error of kind function whose name is `grafana::loki_queryy` without argument types
+Scenario: fonction introuvable sans types d'arguments
+  Given le script `grafana::loki_queryy("x")` évalué sur un moteur avec le module `grafana`
+  When l'erreur est convertie
+  Then c'est une erreur NotFound de genre fonction dont le nom est `grafana::loki_queryy`, sans types d'arguments
 
-Scenario: module and variable not found
-  Given the scripts `nomod::f()` and `unknown_var + 1`
-  When each error is converted
-  Then they are NotFound errors of kind module (name `nomod`) and variable (name `unknown_var`)
+Scenario: module et variable introuvables
+  Given les scripts `nomod::f()` et `unknown_var + 1`
+  When chaque erreur est convertie
+  Then ce sont des erreurs NotFound de genre module (nom `nomod`) et variable (nom `unknown_var`)
 
-Scenario: call depth exceeded is a limit
-  Given a recursive function that exceeds the call depth
-  When the error is converted
-  Then it is a Limit error of kind call depth
+Scenario: la profondeur d'appels dépassée est une limite
+  Given une fonction récursive qui dépasse la profondeur d'appels
+  When l'erreur est convertie
+  Then c'est une erreur Limit de genre profondeur d'appels
 
-Scenario: oversized data is a limit of the matching kind
-  Given an engine with a maximum string size and a script that builds a longer string
-  When the error is converted
-  Then it is a Limit error of kind string size
+Scenario: une donnée trop grande est une limite du genre correspondant
+  Given un moteur avec une taille de chaîne maximale et un script qui construit une chaîne plus longue
+  When l'erreur est convertie
+  Then c'est une erreur Limit de genre taille de chaîne
 
-Scenario: termination is a cancellation
-  Given a script stopped by the progress hook
-  When the error is converted
-  Then it is Cancelled and its class is `Cancelled`
+Scenario: l'arrêt est une annulation
+  Given un script arrêté par le hook de progression
+  When l'erreur est convertie
+  Then c'est Cancelled et sa classe est `Cancelled`
 
-Scenario: inner position and function name are kept
-  Given the function `fn f() { missing_fn() }` called from a script
-  When the error is converted
-  Then it is a NotFound error whose position is the inner call and whose function name is `f`
+Scenario: la position interne et le nom de fonction sont conservés
+  Given la fonction `fn f() { missing_fn() }` appelée depuis un script
+  When l'erreur est convertie
+  Then c'est une erreur NotFound dont la position est l'appel interne et dont le nom de fonction est `f`
 
-Scenario: suggestions are appended
-  Given a NotFound error and the suggestions `grafana::loki_query`
-  When with_suggestions is applied and the error formatted
-  Then the text ends with `. Closest candidates: grafana::loki_query`
+Scenario: les suggestions sont ajoutées
+  Given une erreur NotFound et les suggestions `grafana::loki_query`
+  When with_suggestions est appliqué et l'erreur formatée
+  Then le texte se termine par `. Closest candidates: grafana::loki_query`
 
-Scenario: zero position refused
-  Given a line of zero
-  When a position is built
-  Then nothing is produced
+Scenario: position à zéro refusée
+  Given une ligne à zéro
+  When une position est construite
+  Then rien n'est produit
 
-Scenario: a module wrapper names the module in front of the message
-  Given an error of module `grafana` wrapping the runtime error `inside`
-  When it is classified
-  Then the message is `in module grafana: inside`
+Scenario: un enveloppeur de module nomme le module devant le message
+  Given une erreur du module `grafana` qui enveloppe l'erreur d'exécution `inside`
+  When elle est classée
+  Then le message est `in module grafana: inside`
 
-Scenario: the innermost function of a nested call is kept
-  Given a function `g` calling a missing function, itself called by `f`
-  When the error is classified
-  Then the not-found error names `g`, at the position of the inner call
+Scenario: la fonction la plus interne d'un appel imbriqué est conservée
+  Given une fonction `g` qui appelle une fonction absente, elle-même appelée par `f`
+  When l'erreur est classée
+  Then l'erreur de nom introuvable nomme `g`, à la position de l'appel interne
 
-Scenario: the message does not repeat the position of the error
-  Given a division by zero
-  When the error is classified
-  Then the message is Rhai's text without the position appended to it
+Scenario: le message ne répète pas la position de l'erreur
+  Given une division par zéro
+  When l'erreur est classée
+  Then le message est le texte de Rhai, sans position ajoutée
 
-Scenario: each limit kind has its own text
-  Given the six kinds of limit
-  When each error is displayed
-  Then each text is `limit exceeded (kind): message`, with the kinds `call depth`, `expression depth`, `string size`, `array size`, `map size` and `other`
+Scenario: chaque genre de limite a son propre texte
+  Given les six genres de limite
+  When chaque erreur est affichée
+  Then chaque texte est `limit exceeded (kind): message`, avec les genres `call depth`, `expression depth`, `string size`, `array size`, `map size` et `other`
 
 Tasks:
   [x] #1 Tests des textes `Display`, des classements de `from_rhai` (un test par variante de Rhai listée) et du dépliage des erreurs enveloppées, puis l'énumération.

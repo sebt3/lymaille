@@ -45,36 +45,36 @@ Depends on:
   serde
   serde_json
 
-Scenario: messages keep their order and content
-  Given a user message, an assistant message with reasoning and a tool call, and its result
-  When serialized then deserialized
-  Then order, reasoning emitter and tool output as received are identical
+Scenario: les messages gardent leur ordre et leur contenu
+  Given un message utilisateur, un message assistant avec raisonnement et un appel d'outil, et son résultat
+  When sérialisés puis désérialisés
+  Then l'ordre, l'émetteur du raisonnement et la sortie d'outil telle que reçue sont identiques
 
-Scenario: user message waits for tool results
-  Given an assistant message with a tool call whose result is missing
-  When push_user_during_turn is called
-  Then it fails with PendingToolCall and the history is unchanged
+Scenario: le message utilisateur attend les résultats d'outils
+  Given un message assistant avec un appel d'outil dont le résultat manque
+  When push_user_during_turn est appelé
+  Then il échoue avec PendingToolCall et l'historique est inchangé
 
-Scenario: user message accepted after the result
-  Given the same call with its result now pushed
-  When push_user_during_turn is called
-  Then the message is appended after the result
+Scenario: message utilisateur accepté après le résultat
+  Given le même appel avec son résultat désormais ajouté
+  When push_user_during_turn est appelé
+  Then le message est ajouté après le résultat
 
-Scenario: pending calls derive from messages
-  Given an assistant message with two tool calls and one result
-  When pending_tool_calls is read
-  Then only the call without result is listed
-  And after a round trip through JSON the answer is the same
+Scenario: les appels en attente se déduisent des messages
+  Given un message assistant avec deux appels d'outil et un résultat
+  When pending_tool_calls est lu
+  Then seul l'appel sans résultat est listé
+  And après un aller-retour JSON la réponse est la même
 
-Scenario: truncated output keeps the original size
-  Given a tool result truncated from 5000 characters
-  When read back
-  Then the content is the truncated text and the original size 5000 is kept
+Scenario: la sortie tronquée garde la taille d'origine
+  Given un résultat d'outil tronqué depuis 5000 caractères
+  When relu
+  Then le contenu est le texte tronqué et la taille d'origine 5000 est conservée
 
-Scenario: a result with an unknown call changes nothing
-  Given an assistant message with one pending call `c1`
-  When a tool result for the unknown call `c9` is pushed
-  Then it is appended and `c1` is still pending
+Scenario: un résultat pour un appel inconnu ne change rien
+  Given un message assistant avec un appel en attente `c1`
+  When un résultat pour l'appel inconnu `c9` est ajouté
+  Then il est ajouté et `c1` reste en attente
 
 Tasks:
   [x] #3 Test du Scenario « unknown call » ci-dessus (comportement déjà en place).

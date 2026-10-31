@@ -29,27 +29,27 @@ Depends on:
   serde
   serde_json
 
-Scenario: empty identifiers are refused
-  Given an empty string
-  When a @SessionId or a @RunId is built from it
-  Then no identifier is produced
+Scenario: identifiants vides refusés
+  Given une chaîne vide
+  When un @SessionId ou un @RunId est construit à partir d'elle
+  Then aucun identifiant n'est produit
 
-Scenario: identifiers serialize bare
-  Given @SessionId `abc` and @TurnId 3
-  When serialized to JSON
-  Then the texts are `"abc"` and `3`
+Scenario: les identifiants se sérialisent nus
+  Given @SessionId `abc` et @TurnId 3
+  When sérialisés en JSON
+  Then les textes sont `"abc"` et `3`
 
-Scenario: deserialization refuses the empty identifier
-  Given the JSON texts `"abc"` and `""`
-  When deserialized as @SessionId and as @RunId
-  Then `"abc"` gives the identifier and `""` fails
-  And a @TurnId deserializes from a bare number
+Scenario: la désérialisation refuse l'identifiant vide
+  Given les textes JSON `"abc"` et `""`
+  When désérialisés en @SessionId puis en @RunId
+  Then `"abc"` donne l'identifiant et `""` échoue
+  And un @TurnId se désérialise à partir d'un nombre nu
 
-Scenario: turn ids are successive
+Scenario: les identifiants de tour se succèdent
   Given @TurnId 1
-  When next is called
-  Then it is 2
-  And next of the maximum value is the maximum value
+  When next est appelé
+  Then il vaut 2
+  And next de la valeur maximale est la valeur maximale
 
 Tasks:
   [x] #1 Tests puis implémentation.

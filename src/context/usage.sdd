@@ -38,50 +38,50 @@ Must:
 Depends on:
   serde
 
-Scenario: reported usage is the truth
-  Given a provider reporting a prompt of 5000 tokens while the local estimate was 4000
-  When the response is recorded
-  Then session_tokens is 5000, unmarked up
+Scenario: l'usage rapporté fait foi
+  Given un fournisseur rapportant un prompt de 5000 tokens alors que l'estimation locale était de 4000
+  When la réponse est enregistrée
+  Then session_tokens vaut 5000, sans majoration
 
-Scenario: estimate replaces missing usage
-  Given no reported usage and a local estimate of 1000 tokens
-  When the response is recorded
-  Then session_tokens is 1100 (10 percent margin)
+Scenario: l'estimation remplace un usage absent
+  Given aucun usage rapporté et une estimation locale de 1000 tokens
+  When la réponse est enregistrée
+  Then session_tokens vaut 1100 (marge de 10 pour cent)
 
-Scenario: zero or lower usage is replaced by the estimate
-  Given a first reported prompt of 5000 then a reported prompt of 3000 without compaction in between, with an estimate of 5200
-  When the second response is recorded
-  Then session_tokens is 5720 (estimate with margin)
+Scenario: un usage nul ou inférieur est remplacé par l'estimation
+  Given un premier prompt rapporté de 5000 puis un prompt rapporté de 3000 sans compaction entre les deux, avec une estimation de 5200
+  When la seconde réponse est enregistrée
+  Then session_tokens vaut 5720 (estimation avec marge)
 
-Scenario: lower usage accepted after a compaction
-  Given a first reported prompt of 5000, a compaction noted, then a reported prompt of 800
-  When the second response is recorded
-  Then session_tokens is 800
+Scenario: un usage inférieur accepté après une compaction
+  Given un premier prompt rapporté de 5000, une compaction notée, puis un prompt rapporté de 800
+  When la seconde réponse est enregistrée
+  Then session_tokens vaut 800
 
-Scenario: added messages count with margin
-  Given a base of 5000 reported tokens
-  When messages of 100 and 50 estimated tokens are noted
-  Then session_tokens is 5165
+Scenario: les messages ajoutés comptent avec marge
+  Given une base de 5000 tokens rapportés
+  When des messages de 100 et 50 tokens estimés sont notés
+  Then session_tokens vaut 5165
 
-Scenario: added messages reset on new usage
-  Given pending added messages
-  When a new response is recorded
-  Then the pending added size is zero
+Scenario: les messages ajoutés se remettent à zéro à un nouvel usage
+  Given des messages ajoutés en attente
+  When une nouvelle réponse est enregistrée
+  Then la taille ajoutée en attente vaut zéro
 
-Scenario: cumulative per agent
-  Given two responses by `main` (3000+200 and 3500+300) and one by `sub1` (1000+100)
-  When cumulative is read
-  Then `main` is 7000, `sub1` is 1100 and the session total is 8100
+Scenario: cumul par agent
+  Given deux réponses de `main` (3000+200 et 3500+300) et une de `sub1` (1000+100)
+  When le cumul est lu
+  Then `main` vaut 7000, `sub1` vaut 1100 et le total de session vaut 8100
 
-Scenario: fill rate
-  Given session_tokens 5000 and max 20000
-  When fill_permille is read
-  Then it is 250
+Scenario: taux de remplissage
+  Given session_tokens 5000 et max 20000
+  When fill_permille est lu
+  Then il vaut 250
 
-Scenario: estimate rounds up twice
-  Given 1001 characters at 2500 milli and a 10 percent margin
-  When estimate_tokens is called
-  Then the characters convert to 401 tokens (rounded up) and the margin gives 442 (rounded up)
+Scenario: l'estimation arrondit deux fois au supérieur
+  Given 1001 caractères à 2500 millièmes et une marge de 10 pour cent
+  When estimate_tokens est appelé
+  Then les caractères donnent 401 tokens (arrondi au supérieur) et la marge donne 442 (arrondi au supérieur)
 
 Tasks:
   [x] #3 Remplacer le test « estimate rounds up » par celui du Scenario corrigé (1001 caractères, 442).

@@ -66,87 +66,87 @@ Must:
   @limits_notice rend un texte anglais court qui contient, au minimum : les fonctions définies par `fn` ne voient pas les variables du scope mais reçoivent leurs arguments (et lisent le ToolsetContext par `session_context()`) ; une closure ou un pointeur de fonction n'est pas persisté, définir une `fn` ; `const` n'existe pas ; aucune limite de durée ; le plafond de rendu en caractères et les plafonds de mémoire de la session (valeurs de ./limits.sdd) ; un résultat tronqué se réduit en extrayant la partie utile avec les fonctions de ./format.sdd. Le skill intégré de `toolsets` (`agent-sessions/toolsets#FR-18`) l'embarque.
   Les fonctions d'introspection n'écrivent ni ne lisent rien d'autre que cet état : pas de E/S, pas d'horloge.
 
-Scenario: search returns functions and skills limited to the granted modules
-  Given grants with a module `grafana` exposing `loki_query` documented as `Runs a Loki query`, a skill `loki-debug`, and an ungranted module `other` exposing `loki_secret`
-  When a script evaluates `find("loki")`
-  Then the results hold `grafana::loki_query` and the skill `loki-debug`
-  And nothing names `other::loki_secret`
+Scenario: la recherche rend les fonctions et les skills limités aux modules accordés
+  Given des accords avec un module `grafana` qui expose `loki_query` documenté comme `Runs a Loki query`, un skill `loki-debug`, et un module non accordé `other` qui expose `loki_secret`
+  When un script évalue `find("loki")`
+  Then les résultats portent `grafana::loki_query` et le skill `loki-debug`
+  And rien ne nomme `other::loki_secret`
 
-Scenario: search is case insensitive and multi word
-  Given the same grants
-  When a script evaluates `find("LOKI query")`
-  Then `grafana::loki_query` is returned and a skill without both words is not
+Scenario: la recherche ignore la casse et accepte plusieurs mots
+  Given les mêmes accords
+  When un script évalue `find("LOKI query")`
+  Then `grafana::loki_query` est rendu et un skill qui n'a pas les deux mots ne l'est pas
 
-Scenario: search ranking
-  Given functions named `query`, `loki_query` and a function whose documentation mentions `query`
-  When a script evaluates `find("query")`
-  Then the exact name comes first, then the name containing `query`, then the documentation match
+Scenario: classement de la recherche
+  Given des fonctions nommées `query`, `loki_query` et une fonction dont la documentation mentionne `query`
+  When un script évalue `find("query")`
+  Then le nom exact vient en premier, puis le nom qui contient `query`, puis la correspondance dans la documentation
 
-Scenario: search is bounded and rejects an empty query
-  Given more than 50 matching functions
-  When `find("a")` is evaluated, then `find("  ")`
-  Then 50 results are returned and the second call fails with a script error
+Scenario: la recherche est bornée et refuse une requête vide
+  Given plus de 50 fonctions correspondantes
+  When `find("a")` est évalué, puis `find("  ")`
+  Then 50 résultats sont rendus et le second appel échoue par une erreur de script
 
-Scenario: toolset dependency is invisible
-  Given a toolset module `ts` built from a script that imported a dependency `dep`
-  When `modules()`, `functions()` and `find("secret")` are evaluated
-  Then none mentions `dep` or `secret`, while `ts` and its own functions appear
+Scenario: la dépendance d'un toolset est invisible
+  Given un module de toolset `ts` construit à partir d'un script qui a importé une dépendance `dep`
+  When `modules()`, `functions()` et `find("secret")` sont évalués
+  Then aucun ne mentionne `dep` ni `secret`, alors que `ts` et ses propres fonctions apparaissent
 
-Scenario: ungranted groups are absent
-  Given an engine whose grants hold no group
-  When `functions("global")` is evaluated
-  Then it lists the pure group and the format functions and none of `get_env`, `sleep`, `file_read`, `shell_run`
+Scenario: les groupes non accordés sont absents
+  Given un moteur dont les accords ne portent aucun groupe
+  When `functions("global")` est évalué
+  Then il liste le groupe pur et les fonctions de format, et aucune de `get_env`, `sleep`, `file_read`, `shell_run`
 
-Scenario: functions carry signature and documentation
-  Given the pure group
-  When `functions()` is evaluated
-  Then `json_encode` appears with the signature `json_encode(value: Dynamic) -> string` and a non empty documentation
+Scenario: les fonctions portent signature et documentation
+  Given le groupe pur
+  When `functions()` est évalué
+  Then `json_encode` apparaît avec la signature `json_encode(value: Dynamic) -> string` et une documentation non vide
 
-Scenario: functions defined by the LLM are listed with their documentation
-  Given a pad where `/// Doubles a.\nfn f(a) { a * 2 }` was defined and the shared state updated
-  When `functions("script")` is evaluated
-  Then `f` appears with the documentation `Doubles a.`
-  And a `private fn` does not
+Scenario: les fonctions définies par le LLM sont listées avec leur documentation
+  Given un pad où `/// Doubles a.\nfn f(a) { a * 2 }` a été défini et l'état partagé mis à jour
+  When `functions("script")` est évalué
+  Then `f` apparaît avec la documentation `Doubles a.`
+  And un `private fn` n'apparaît pas
 
-Scenario: variables are listed with type and preview
-  Given a scope holding `let n = 3` and `let s = "hello"`
-  When `vars()` is evaluated after the state is updated
-  Then the entries are `n` with type `i64` and preview `3`, and `s` with type `string` and preview `hello`
+Scenario: les variables sont listées avec leur type et leur aperçu
+  Given un scope qui porte `let n = 3` et `let s = "hello"`
+  When `vars()` est évalué après la mise à jour de l'état
+  Then les entrées sont `n` de type `i64` et d'aperçu `3`, et `s` de type `string` et d'aperçu `hello`
 
-Scenario: modules and unknown origin
-  Given grants with modules `grafana` and `k8s`
-  When `modules()` is evaluated, then `functions("nope")`
-  Then both modules appear with their kind and function count, and the second call fails with a script error listing `grafana` and `k8s`
+Scenario: modules et origine inconnue
+  Given des accords avec les modules `grafana` et `k8s`
+  When `modules()` est évalué, puis `functions("nope")`
+  Then les deux modules apparaissent avec leur genre et leur nombre de fonctions, et le second appel échoue par une erreur de script qui liste `grafana` et `k8s`
 
-Scenario: toolsets and skills
-  Given grants with a toolset and two skills, one attached to it
-  When `toolsets()` and `skills()` are evaluated
-  Then the lists hold the names and descriptions and the unattached skill has `()` as its toolset
+Scenario: toolsets et skills
+  Given des accords avec un toolset et deux skills, dont un rattaché à celui-ci
+  When `toolsets()` et `skills()` sont évalués
+  Then les listes portent les noms et descriptions, et le skill non rattaché a `()` comme toolset
 
-Scenario: rules mention the sandbox limits
-  Given limits with a render cap of 8000
-  When `rules()` is evaluated
-  Then the text says that functions do not see the scope variables, that closures are not persisted, that `const` does not exist, that nothing limits duration and that output is capped at 8000 characters
+Scenario: les règles mentionnent les limites du sandbox
+  Given des plafonds avec un plafond de rendu de 8000
+  When `rules()` est évalué
+  Then le texte dit que les fonctions ne voient pas les variables du scope, que les closures ne sont pas persistées, que `const` n'existe pas, que rien ne limite la durée et que la sortie est plafonnée à 8000 caractères
 
-Scenario: introspection is independent of the shared state lock
-  Given the shared state with a poisoned lock
-  When any introspection function is evaluated
-  Then it returns its result and nothing panics
+Scenario: l'introspection est indépendante du verrou de l'état partagé
+  Given l'état partagé avec un verrou empoisonné
+  When une fonction d'introspection quelconque est évaluée
+  Then elle rend son résultat et rien ne panique
 
-Scenario: rules state each memory limit in its place
-  Given limits with an array limit of 7 and a map limit of 9
-  When the rules are read
-  Then the text says `strings up to 16777216 bytes, arrays up to 7 elements, maps up to 9 entries`
+Scenario: les règles énoncent chaque plafond de mémoire à sa place
+  Given des plafonds avec un plafond de tableau de 7 et un plafond de table de 9
+  When les règles sont lues
+  Then le texte dit `strings up to 16777216 bytes, arrays up to 7 elements, maps up to 9 entries`
 
-Scenario: documentation keeps one line per comment
-  Given a granted module function documented by two `///` comments
-  When the catalog is built
-  Then its documentation is the two lines joined by a newline
+Scenario: la documentation garde une ligne par commentaire
+  Given une fonction de module accordé documentée par deux commentaires `///`
+  When le catalogue est construit
+  Then sa documentation est les deux lignes jointes par un saut de ligne
 
-Scenario: find searches the description of a toolset
-  Given a toolset `grafana` described as `Grafana queries`
-  When `find("queries")` is evaluated
-  Then the toolset `grafana` of kind `toolset` is among the results
+Scenario: find cherche dans la description d'un toolset
+  Given un toolset `grafana` décrit comme `Grafana queries`
+  When `find("queries")` est évalué
+  Then le toolset `grafana` de genre `toolset` figure parmi les résultats
 
 Tasks:
   [x] #1 Tests puis implémentation : @Catalog (filtrage et attribution) d'abord, puis les fonctions Rhai.

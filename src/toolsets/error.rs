@@ -108,7 +108,7 @@ fn known_note(known: &[String]) -> String {
 mod tests {
     use super::ToolsetsError;
 
-    // Scenario: messages hide values
+    // Scenario: les messages cachent les valeurs
     #[test]
     fn messages_hide_values() {
         let error = ToolsetsError::InvalidContext {

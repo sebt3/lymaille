@@ -990,7 +990,7 @@ mod tests {
         assert!(snapshot.functions().contains_key("f/0"), "keyed f/0");
     }
 
-    // Scenario: redefinition replaces a function (failed extraction: the stale source is removed)
+    // Scenario: une redéfinition remplace une fonction (failed extraction: the stale source is removed)
     #[tokio::test]
     async fn failed_extraction_removes_the_stale_source_of_a_redefined_function() {
         let pad = Scratchpad::new(plain());
@@ -1026,7 +1026,7 @@ mod tests {
         );
     }
 
-    // Scenario: redefinition replaces a function (failed extraction, arity one: the stale source is removed)
+    // Scenario: une redéfinition remplace une fonction (failed extraction, arity one: the stale source is removed)
     #[tokio::test]
     async fn failed_extraction_removes_the_stale_source_of_an_arity_one_function() {
         let pad = Scratchpad::new(plain());
@@ -1057,7 +1057,7 @@ mod tests {
         );
     }
 
-    // Scenario: redefinition replaces a function (failed extraction: the sources of the other functions are kept)
+    // Scenario: une redéfinition remplace une fonction (failed extraction: the sources of the other functions are kept)
     #[tokio::test]
     async fn failed_extraction_keeps_the_source_of_another_function() {
         let pad = Scratchpad::new(plain());
@@ -1637,7 +1637,7 @@ mod tests {
         );
     }
 
-    // Scenario: warnings are computed on a failed run
+    // Scenario: les avertissements sont calculés sur une exécution échouée
     #[tokio::test]
     async fn warnings_are_computed_on_a_failed_run() {
         let pad = Scratchpad::new(plain());
@@ -1660,7 +1660,7 @@ mod tests {
         );
     }
 
-    // Scenario: extraction failure keeps the value
+    // Scenario: l'échec d'extraction conserve la valeur
     #[tokio::test]
     async fn extraction_failure_keeps_the_value() {
         let pad = Scratchpad::new(plain());
@@ -1691,7 +1691,7 @@ mod tests {
         );
     }
 
-    // Scenario: introspection snapshot is set before evaluation
+    // Scenario: l'instantané d'introspection est posé avant l'évaluation
     #[tokio::test]
     async fn introspection_snapshot_is_set_before_evaluation() {
         let pad = Scratchpad::new(plain());
@@ -1705,7 +1705,7 @@ mod tests {
         );
     }
 
-    // Scenario: a warning returns after the variable disappears
+    // Scenario: un avertissement revient après la disparition de la variable
     #[tokio::test]
     async fn a_warning_returns_after_the_variable_disappears() {
         let pad = Scratchpad::new(plain());
@@ -1722,7 +1722,7 @@ mod tests {
         );
     }
 
-    // Scenario: function excluded by masking is reported
+    // Scenario: une fonction exclue par le masquage est signalée
     #[tokio::test]
     async fn function_excluded_by_masking_is_reported() {
         let pad = Scratchpad::new(plain());
@@ -1778,7 +1778,7 @@ mod tests {
         );
     }
 
-    // Scenario: current-thread runtime
+    // Scenario: runtime current_thread
     #[tokio::test]
     async fn current_thread_runtime_renders_the_bridge_error() {
         let engine = engine_with(Grants::new(), ScratchpadLimits::new(), |engine| {

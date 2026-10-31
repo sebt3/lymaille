@@ -23,20 +23,20 @@ Must:
 Depends on:
   std::time::Duration
 
-Scenario: delays double up to the cap
-  Given a new @Backoff
-  When next_delay is called eleven times
-  Then the delays are 1, 2, 4, 8, 16, 32, 64, 128, 256, 300 and 300 seconds
+Scenario: les délais doublent jusqu'au plafond
+  Given un nouveau @Backoff
+  When next_delay est appelé onze fois
+  Then les délais sont 1, 2, 4, 8, 16, 32, 64, 128, 256, 300 et 300 secondes
 
-Scenario: reset restarts the schedule
-  Given a @Backoff that has produced five delays
-  When reset is called
-  Then the next delay is 1 second and attempts is 0
+Scenario: reset remet le calendrier à zéro
+  Given un @Backoff qui a rendu cinq délais
+  When reset est appelé
+  Then le délai suivant vaut 1 seconde et attempts vaut 0
 
-Scenario: very many attempts never overflow
-  Given a new @Backoff
-  When next_delay is called one hundred thousand times
-  Then the last delay is 300 seconds
+Scenario: un très grand nombre de tentatives ne déborde jamais
+  Given un nouveau @Backoff
+  When next_delay est appelé cent mille fois
+  Then le dernier délai vaut 300 secondes
 
 Tasks:
   [x] #1 Tests puis implémentation.

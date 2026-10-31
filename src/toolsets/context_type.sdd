@@ -53,60 +53,60 @@ Depends on:
   serde_json
   vynil-core
 
-Scenario: including a type requires both field sets
-  Given a type `cluster` requiring `namespace` and a type `k8s-prod` including `cluster@1.0` and requiring `region`
-  When `k8s-prod` is flattened
-  Then the required parameters are `namespace` and `region`
+Scenario: inclure un type exige les deux ensembles de champs
+  Given un type `cluster` exigeant `namespace` et un type `k8s-prod` qui inclut `cluster@1.0` et exige `region`
+  When `k8s-prod` est aplati
+  Then les paramètres requis sont `namespace` et `region`
 
-Scenario: optional field is a minor change
-  Given a type in 1.0 and the same type with one optional field added
-  When the bump is computed
-  Then it is Minor
+Scenario: un champ optionnel est un changement mineur
+  Given un type en 1.0 et le même type auquel un champ optionnel est ajouté
+  When le saut de version est calculé
+  Then il est Minor
 
-Scenario: required field is a major change
-  Given a type in 1.0 and the same type with one required field added
-  When the bump is computed
-  Then it is Major
+Scenario: un champ requis est un changement majeur
+  Given un type en 1.0 et le même type auquel un champ requis est ajouté
+  When le saut de version est calculé
+  Then il est Major
 
-Scenario: removal is a major change
-  Given a type in 1.0 and the same type without one of its roles
-  When the bump is computed
-  Then it is Major
+Scenario: une suppression est un changement majeur
+  Given un type en 1.0 et le même type sans l'un de ses rôles
+  When le saut de version est calculé
+  Then il est Major
 
-Scenario: optional becoming required is a major change
-  Given a type in 1.0 with an optional field and the same type with that field required
-  When the bump is computed
-  Then it is Major
+Scenario: un champ optionnel devenu requis est un changement majeur
+  Given un type en 1.0 avec un champ optionnel et le même type avec ce champ requis
+  When le saut de version est calculé
+  Then il est Major
 
-Scenario: secret-like default refused
-  Given a parameter schema whose default value is `sk-abcdef`
-  When the type is built
-  Then it fails with InvalidContextType
+Scenario: défaut ressemblant à un secret refusé
+  Given un schéma de paramètre dont la valeur par défaut est `sk-abcdef`
+  When le type est construit
+  Then il échoue avec InvalidContextType
 
-Scenario: inclusion cycle refused
-  Given two types that include each other
-  When one is flattened
-  Then it fails with InvalidContextType
+Scenario: cycle d'inclusion refusé
+  Given deux types qui s'incluent mutuellement
+  When l'un est aplati
+  Then il échoue avec InvalidContextType
 
-Scenario: schema that does not compile is refused
-  Given a parameter schema `{"type": "foo"}`
-  When the type is built
-  Then it fails with InvalidContextType, and the message does not quote the schema
+Scenario: schéma qui ne compile pas refusé
+  Given un schéma de paramètre `{"type": "foo"}`
+  When le type est construit
+  Then il échoue avec InvalidContextType, et le message ne cite pas le schéma
 
-Scenario: remote reference is refused
-  Given a parameter schema whose `$ref` points to `https://example.com/schema.json`
-  When the type is built
-  Then it fails with InvalidContextType, with no network access
+Scenario: référence distante refusée
+  Given un schéma de paramètre dont `$ref` pointe vers `https://example.com/schema.json`
+  When le type est construit
+  Then il échoue avec InvalidContextType, sans accès réseau
 
-Scenario: every value is validated against every flattened schema
-  Given a type `cluster` requiring the text parameter `namespace`, and a type `k8s-prod` that includes it and declares the integer parameter `region`
-  When the values `namespace` = 5 and `region` = "eu" are checked on `k8s-prod`
-  Then two violations of the rule `type`, one on `namespace` and one on `region`
+Scenario: chaque valeur est validée contre chaque schéma aplati
+  Given un type `cluster` exigeant le paramètre texte `namespace`, et un type `k8s-prod` qui l'inclut et déclare le paramètre entier `region`
+  When les valeurs `namespace` = 5 et `region` = "eu" sont vérifiées sur `k8s-prod`
+  Then deux violations de la règle `type`, une sur `namespace` et une sur `region`
 
-Scenario: undeclared key is rendered as a marker
-  Given a schema whose `additionalProperties` is `{"type": "integer"}` and no declared property
-  When the undeclared key `leaked-key` = "texte" is checked
-  Then one violation of the rule `type` on the parameter `*`, and the text `leaked-key` appears nowhere
+Scenario: clé non déclarée rendue par un marqueur
+  Given un schéma dont `additionalProperties` vaut `{"type": "integer"}` et aucune propriété déclarée
+  When la clé non déclarée `leaked-key` = "texte" est vérifiée
+  Then une violation de la règle `type` sur le paramètre `*`, et le texte `leaked-key` n'apparaît nulle part
 
 Tasks:
   [x] #1 Tests puis implémentation.

@@ -89,82 +89,82 @@ Tasks:
   [x] #10 Validation du 2026-10-29 : `from_json` refuse (SessionError::Serialization, message sans contenu) un état dont la nature n'est pas `Sub` et qui porte un parent, ou dont la nature n'est pas `Config` et qui porte une cible d'inspection ; `set_inspection_target(None)` accepté sur toute nature, testé ; accesseurs `kind()`, `parent()`, `inspection_target()` ajoutés à `Exposes` ; Debug manuel de @SessionState (identifiant, nature, tailles, jamais l'historique ni les valeurs) ; `#[expect(clippy::trivially_copy_pass_by_ref)]` de `SessionKind::is_work` conservé (raison précise).
       Validé le 2026-10-29 (validator, 76 mutants, `scripts/check` complet vert).
 
-Scenario: full round trip
-  Given a state with history, two variables, one function source, a todo entry, token counters and labels
-  When serialized then deserialized
-  Then every field is equal to the original
+Scenario: aller-retour complet
+  Given un état avec historique, deux variables, une source de fonction, une entrée de todo, des compteurs de tokens et des étiquettes
+  When sérialisé puis désérialisé
+  Then chaque champ est égal à l'original
 
-Scenario: variable types survive
-  Given variables holding a char, a blob and an integer
-  When the state is saved and restored
-  Then the restored variables are a char, a blob and an integer
+Scenario: les types des variables survivent
+  Given des variables contenant un caractère, un blob et un entier
+  When l'état est sauvegardé puis restauré
+  Then les variables restaurées sont un caractère, un blob et un entier
 
-Scenario: newer minor with unknown field
-  Given a JSON document of format 1.9 carrying an unknown field
-  When read
-  Then it loads and the unknown field is ignored
+Scenario: mineure plus récente avec champ inconnu
+  Given un document JSON de format 1.9 portant un champ inconnu
+  When lu
+  Then il se charge et le champ inconnu est ignoré
 
-Scenario: rewritten state holds the current format
-  Given a JSON document of format 1.9 carrying an unknown field
-  When it is read then saved again
-  Then the saved document has format 1.0, the current version, and no unknown field
+Scenario: l'état réécrit porte le format courant
+  Given un document JSON de format 1.9 portant un champ inconnu
+  When il est lu puis sauvegardé à nouveau
+  Then le document sauvegardé a le format 1.0, la version courante, et aucun champ inconnu
 
-Scenario: absent creation date is the Unix epoch
-  Given a minimal JSON document of format 1.0 without creation date
-  When read
-  Then the creation date is 0
+Scenario: la date de création absente vaut l'époque Unix
+  Given un document JSON minimal de format 1.0 sans date de création
+  When lu
+  Then la date de création vaut 0
 
-Scenario: different major refused before reading
-  Given a JSON document of format 2.0 with an otherwise invalid body
-  When read
-  Then it fails with IncompatibleFormat
+Scenario: majeure différente refusée avant lecture
+  Given un document JSON de format 2.0 au corps par ailleurs invalide
+  When lu
+  Then il échoue avec IncompatibleFormat
 
-Scenario: no secret in the state
-  Given a state referencing a ToolsetContext by name
-  When serialized
-  Then the text contains the name and no credential field
+Scenario: aucun secret dans l'état
+  Given un état référençant un ToolsetContext par son nom
+  When sérialisé
+  Then le texte contient le nom et aucun champ d'identifiants
 
-Scenario: absent optional fields default
-  Given a minimal JSON document of format 1.0 holding only identifier, agent and format
-  When read
-  Then empty history, tables and counters are used
+Scenario: les champs optionnels absents prennent leur valeur par défaut
+  Given un document JSON minimal de format 1.0 ne portant que l'identifiant, l'agent et le format
+  When lu
+  Then l'historique, les tables et les compteurs vides sont utilisés
 
-Scenario: kind defaults to work
+Scenario: la nature vaut Work par défaut
   Given un JSON d'état écrit sans champ de nature
   When il est lu
   Then la nature est Work
 
-Scenario: sub-agent keeps its parent
+Scenario: un sous-agent garde son parent
   Given un état de nature Sub avec une session parente
   When il est sérialisé puis relu
   Then la nature et la session parente sont égales à l'original
 
-Scenario: inspection target round trip
+Scenario: la cible d'inspection fait l'aller-retour
   Given un état de nature Config avec une cible Definition puis une cible Session
   When chacun est sérialisé puis relu
   Then la cible est égale à l'original
 
-Scenario: inspection target refused outside config
+Scenario: cible d'inspection refusée hors Config
   Given un état de nature Work
   When une cible d'inspection est posée
   Then l'opération échoue et l'état est inchangé
 
-Scenario: parent refused outside sub-agent
+Scenario: parent refusé hors sous-agent
   Given un état de nature Work
   When une session parente est posée
   Then l'opération échoue avec NotSubSession
 
-Scenario: changing kind drops the target
+Scenario: changer de nature retire la cible
   Given un état de nature Config avec une cible d'inspection
   When sa nature devient Work
   Then il n'a plus de cible
 
-Scenario: changing kind drops the parent
+Scenario: changer de nature retire le parent
   Given un état de nature Sub avec une session parente
   When sa nature devient Work
   Then il n'a plus de session parente
 
-Scenario: clearing the inspection target
+Scenario: effacer la cible d'inspection
   Given un état de nature Config avec une cible d'inspection
   When la cible est posée à None
   Then il n'a plus de cible

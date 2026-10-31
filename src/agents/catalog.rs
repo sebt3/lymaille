@@ -534,7 +534,7 @@ mod tests {
         );
     }
 
-    // Scenario: put writes to the top layer only
+    // Scenario: put n'écrit que dans la couche haute
     #[tokio::test]
     async fn put_writes_to_top_layer_only() {
         let layered = Layered::new(InMemoryCatalog::new(), InMemoryCatalog::new());
@@ -570,7 +570,7 @@ mod tests {
         );
     }
 
-    // Scenario: put writes to the top layer only
+    // Scenario: put n'écrit que dans la couche haute
     #[tokio::test]
     async fn put_writes_to_top_layer_only_for_agent_and_profile() {
         let layered = Layered::new(InMemoryCatalog::new(), InMemoryCatalog::new());
@@ -765,7 +765,7 @@ mod tests {
         );
     }
 
-    // Scenario: layers are readable
+    // Scenario: les couches sont lisibles
     #[tokio::test]
     async fn layers_are_readable() {
         let top = InMemoryCatalog::new();

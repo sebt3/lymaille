@@ -42,40 +42,40 @@ Must:
 Must not:
   Dépendre de `toolsets` ni de `modules` : ces domaines produisent des @GrantedModule, @GrantedToolset et @GrantedSkill, le scratchpad ne les connaît pas.
 
-Scenario: nothing is granted by default
-  Given a new @Grants
-  When read
-  Then it has no group, module, toolset or skill
+Scenario: rien n'est accordé par défaut
+  Given un nouveau @Grants
+  When la lecture est effectuée
+  Then il ne contient ni groupe, ni module, ni toolset, ni skill
 
-Scenario: groups accumulate in a set
-  Given a @Grants to which Host is added twice and Sleep once
-  When the groups are read
-  Then they are Host and Sleep
+Scenario: les groupes s'accumulent dans un ensemble
+  Given un @Grants auquel Host est ajouté deux fois et Sleep une fois
+  When les groupes sont lus
+  Then ce sont Host et Sleep
 
-Scenario: duplicate names refused
-  Given a @Grants holding a module `grafana`
-  When another module `grafana` is added
-  Then nothing is produced and the first module is kept
+Scenario: noms en double refusés
+  Given un @Grants qui porte un module `grafana`
+  When un autre module `grafana` est ajouté
+  Then rien n'est produit et le premier module est conservé
 
-Scenario: invalid module name refused
-  Given the names `1abc`, `a-b`, ``, `fn` and `let`
-  When a @GrantedModule is built with each
-  Then nothing is produced for each
+Scenario: nom de module invalide refusé
+  Given les noms `1abc`, `a-b`, ``, `fn` et `let`
+  When un @GrantedModule est construit avec chacun
+  Then rien n'est produit pour chacun
 
-Scenario: valid module name accepted
-  Given the name `grafana_prod`
-  When a @GrantedModule is built
-  Then it is produced and exposes its name
+Scenario: nom de module valide accepté
+  Given le nom `grafana_prod`
+  When un @GrantedModule est construit
+  Then il est produit et expose son nom
 
-Scenario: blank toolset and skill refused
-  Given a toolset with an empty name and a skill with a blank description
-  When each is built
-  Then nothing is produced
+Scenario: toolset et skill vides refusés
+  Given un toolset au nom vide et un skill à la description blanche
+  When chacun est construit
+  Then rien n'est produit
 
-Scenario: debug hides the module content
-  Given a @GrantedModule holding functions
-  When formatted with Debug
-  Then only the name appears
+Scenario: le débogage masque le contenu du module
+  Given un @GrantedModule qui porte des fonctions
+  When formaté avec Debug
+  Then seul le nom apparaît
 
 Tasks:
   [x] #1 Tests puis implémentation.

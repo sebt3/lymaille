@@ -31,25 +31,25 @@ Depends on:
   ./id.sdd
   ./error.sdd
 
-Scenario: second turn is refused
-  Given a permit held for session `s1`
-  When try_begin is called for `s1`
-  Then it fails with TurnActive
+Scenario: un second tour est refusé
+  Given un permis détenu pour la session `s1`
+  When try_begin est appelé pour `s1`
+  Then il échoue avec TurnActive
 
-Scenario: other sessions are independent
-  Given a permit held for `s1`
-  When try_begin is called for `s2`
-  Then a permit is returned
+Scenario: les autres sessions sont indépendantes
+  Given un permis détenu pour `s1`
+  When try_begin est appelé pour `s2`
+  Then un permis est rendu
 
-Scenario: dropping releases
-  Given a permit for `s1`
-  When it is dropped
-  Then try_begin for `s1` succeeds and is_active was true before the drop and is false after
+Scenario: la destruction du permis libère la session
+  Given un permis pour `s1`
+  When il est détruit
+  Then try_begin pour `s1` réussit, et is_active valait vrai avant la destruction et faux après
 
-Scenario: concurrent attempts
-  Given eight threads calling try_begin for the same session at once
-  When they all run
-  Then exactly one obtains a permit
+Scenario: tentatives concurrentes
+  Given huit threads appelant try_begin pour la même session en même temps
+  When ils s'exécutent tous
+  Then exactement un obtient un permis
 
 Tasks:
   [x] #1 Tests puis implémentation.

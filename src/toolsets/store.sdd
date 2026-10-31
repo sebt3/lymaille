@@ -46,27 +46,27 @@ Depends on:
   [x] #6 Trois tests relevés par le validateur le 2026-10-29 : un skill dont la description ne compile pas est refusé par `put_draft` (Template) ; `activate` sans brouillon rend `InvalidToolset` sans panique ; verrou empoisonné rend `Poisoned` sur toutes les opérations (et le `Debug` s'affiche). Assertion du nom du toolset dans l'erreur de `validate_draft` et des noms de `drafts` dans le `Debug`.
       Validé le 2026-10-29 (implémentation vérifiée par mutations de l'auteur), validation par le validator groupée avec T6.
 
-Scenario: put then get round trips
-  Given an in-memory store and a type, a context and an active toolset
-  When each is put then fetched
-  Then each equals the original
+Scenario: put puis get font un aller-retour
+  Given un stockage en mémoire, un type, un contexte et un toolset actif
+  When chacun est enregistré puis relu
+  Then chacun est égal à l'original
 
-Scenario: a draft is invisible until activated
-  Given a toolset put as a draft
-  When the active version is read, then the host activates it and it is read again
-  Then the first read finds nothing and the second finds the toolset
+Scenario: un brouillon est invisible tant qu'il n'est pas activé
+  Given un toolset enregistré comme brouillon
+  When la version active est lue, puis l'hôte l'active et elle est relue
+  Then la première lecture ne trouve rien et la seconde trouve le toolset
 
-Scenario: the trait cannot activate
-  Given the public surface of the store traits
-  When it is read
-  Then no operation activates a draft
+Scenario: le trait ne peut pas activer
+  Given la surface publique des traits de stockage
+  When elle est lue
+  Then aucune opération n'active un brouillon
 
-Scenario: invalid draft refused
-  Given a toolset whose source does not compile
-  When it is put as a draft
-  Then it fails with InvalidToolset and nothing is stored
+Scenario: brouillon invalide refusé
+  Given un toolset dont la source ne compile pas
+  When il est enregistré comme brouillon
+  Then il échoue avec InvalidToolset et rien n'est stocké
 
-Scenario: layered stores cascade
+Scenario: les stockages en couches forment une cascade
   Given un @Layered dont la couche haute contient le toolset actif `ops` et la basse `ops` et `base-only`
   When `ops` et `base-only` sont lus, puis un brouillon est écrit
   Then `ops` vient de la haute en remplaçant entièrement celui de la base, `base-only` vient de la basse, et le brouillon n'est écrit que dans la haute

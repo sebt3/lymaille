@@ -46,46 +46,46 @@ Can modify:
   /Cargo.toml: ajout de `serde_json` seulement.
   ./error.rs: variante `SecretTooShort` seulement (voir ./error.sdd).
 
-Scenario: a secret is masked everywhere
-  Given a redactor holding `tok-123`
-  When redacting `Bearer tok-123 and tok-123`
-  Then the result is `Bearer *** and ***`
+Scenario: un secret est masqué partout
+  Given un redactor contenant `tok-123`
+  When on masque `Bearer tok-123 and tok-123`
+  Then le résultat vaut `Bearer *** and ***`
 
-Scenario: longest secret first
-  Given secrets `abcdef` and `abcdefgh`
-  When redacting `xabcdefghx`
-  Then the result is `x***x`
+Scenario: le secret le plus long d'abord
+  Given les secrets `abcdef` et `abcdefgh`
+  When on masque `xabcdefghx`
+  Then le résultat vaut `x***x`
 
-Scenario: short secret refused
-  Given a redactor
-  When the secret `abc` is added
-  Then it fails with SecretTooShort, the text of the error does not contain `abc`
-  And redacting `abc` leaves `abc` unchanged
+Scenario: secret trop court refusé
+  Given un redactor
+  When le secret `abc` est ajouté
+  Then il échoue avec SecretTooShort, le texte de l'erreur ne contient pas `abc`
+  And masquer `abc` laisse `abc` inchangé
 
-Scenario: secret of six characters accepted
-  Given a redactor
-  When the secret `s3cr3t` is added
-  Then it is accepted and redacting `s3cr3t` gives `***`
+Scenario: secret de six caractères accepté
+  Given un redactor
+  When le secret `s3cr3t` est ajouté
+  Then il est accepté et masquer `s3cr3t` donne `***`
 
-Scenario: length counted in characters
-  Given a redactor
-  When a secret of five `é` is added, then a secret of six `é`
-  Then the five are refused with SecretTooShort and the six are accepted
+Scenario: longueur comptée en caractères
+  Given un redactor
+  When un secret de cinq `é` est ajouté, puis un secret de six `é`
+  Then les cinq sont refusés avec SecretTooShort et les six sont acceptés
 
-Scenario: json strings and keys
-  Given a redactor holding `s3cr3t`
-  When redacting `{"s3cr3t": ["a s3cr3t b", 1]}`
-  Then the result is `{"***": ["a *** b", 1]}`
+Scenario: chaînes et clés JSON
+  Given un redactor contenant `s3cr3t`
+  When on masque `{"s3cr3t": ["a s3cr3t b", 1]}`
+  Then le résultat vaut `{"***": ["a *** b", 1]}`
 
-Scenario: debug hides the secrets
-  Given a redactor holding `s3cr3t`
-  When formatted with Debug
-  Then the text does not contain `s3cr3t`
+Scenario: le Debug cache les secrets
+  Given un redactor contenant `s3cr3t`
+  When formaté avec Debug
+  Then le texte ne contient pas `s3cr3t`
 
-Scenario: empty secret ignored
-  Given a redactor to which an empty secret is added
-  When redacting `hello`
-  Then the result is `hello`
+Scenario: secret vide ignoré
+  Given un redactor auquel un secret vide est ajouté
+  When on masque `hello`
+  Then le résultat vaut `hello`
 
 Tasks:
   [x] #1 Tests puis implémentation.

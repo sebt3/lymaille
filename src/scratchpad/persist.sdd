@@ -84,156 +84,156 @@ Must:
     Observed in: spikes scratchpad B (20 cas ; détection des appels de natives retirées, de fonctions de script non persistées, de modules et de fonctions de modules absents ; faux positif sous `is_def_fn`).
   Aucune fonction restaurée n'élargit les capacités de la session : elle est recompilée par le moteur de la session, qui ne connaît que les modules accordés (`agent-sessions#BR-2`). Le moteur est lu par son accès `rhai()` (./engine.sdd), dont l'attribut `expect(dead_code)` est retiré par cette tâche (engine.sdd #14).
 
-Scenario: variable types survive a round trip
-  Given a scope holding the char `x`, a blob of three bytes, the integer 7, the float 7.0, the string `x` and a map holding an array
-  When snapshot_scope then restore_scope are applied
-  Then the restored values are a char, a blob, an integer, a float, a string and the same map, each of the original type
+Scenario: les types des variables survivent à un aller-retour
+  Given un scope qui porte le caractère `x`, un blob de trois octets, l'entier 7, le flottant 7.0, la chaîne `x` et une table qui porte un tableau
+  When snapshot_scope puis restore_scope sont appliquées
+  Then les valeurs restaurées sont un caractère, un blob, un entier, un flottant, une chaîne et la même table, chacune du type d'origine
 
-Scenario: closure is excluded with a warning
-  Given a scope holding `let n = 3` and `let f = |x| x + 1`
-  When snapshot_scope is called
-  Then the snapshot holds `n` and not `f`
-  And one warning names `f`, says it holds a closure and suggests defining a `fn`
+Scenario: une closure est exclue avec un avertissement
+  Given un scope qui porte `let n = 3` et `let f = |x| x + 1`
+  When snapshot_scope est appelée
+  Then l'instantané porte `n` et non `f`
+  And un avertissement nomme `f`, indique qu'il porte une closure et suggère de définir une `fn`
 
-Scenario: function pointer is excluded
-  Given a scope holding `let p = Fn("foo")`
-  When snapshot_scope is called
-  Then the warning names `p` and says it holds a function pointer
+Scenario: un pointeur de fonction est exclu
+  Given un scope qui porte `let p = Fn("foo")`
+  When snapshot_scope est appelée
+  Then l'avertissement nomme `p` et indique qu'il porte un pointeur de fonction
 
-Scenario: closure nested in a container
-  Given a scope holding `let m = #{ok: 1, cb: |x| x}` and `let a = [1, |x| x]`
-  When snapshot_scope is called
-  Then both `m` and `a` are excluded, each with a warning, and neither is persisted partially
+Scenario: une closure imbriquée dans un conteneur
+  Given un scope qui porte `let m = #{ok: 1, cb: |x| x}` et `let a = [1, |x| x]`
+  When snapshot_scope est appelée
+  Then `m` et `a` sont exclues, chacune avec un avertissement, et aucune n'est persistée partiellement
 
-Scenario: captured variable stays persistable
+Scenario: une variable capturée reste persistable
   Given `let k = 5; let g = |x| x + k`
-  When snapshot_scope is called
-  Then `k` is persisted with the value 5 and `g` is excluded with a warning
+  When snapshot_scope est appelée
+  Then `k` est persistée avec la valeur 5 et `g` est exclue avec un avertissement
 
-Scenario: unsupported and non finite values
-  Given a scope holding a value from `timestamp()` and the float NaN
-  When snapshot_scope is called
-  Then both are excluded with their own warning text
+Scenario: valeurs non prises en charge et non finies
+  Given un scope qui porte une valeur issue de `timestamp()` et le flottant NaN
+  When snapshot_scope est appelée
+  Then les deux sont exclues, chacune avec son propre texte d'avertissement
 
-Scenario: warnings are ordered by variable name
-  Given two excluded variables `b` and `a`
-  When snapshot_scope is called
-  Then the warnings come in the order `a`, `b`
+Scenario: les avertissements sont ordonnés par nom de variable
+  Given deux variables exclues `b` et `a`
+  When snapshot_scope est appelée
+  Then les avertissements arrivent dans l'ordre `a`, `b`
 
-Scenario: excluded variable stays usable until the session ends
-  Given a live scope holding an excluded closure
-  When snapshot_scope is called
-  Then the live scope still holds and can still call the closure
+Scenario: une variable exclue reste utilisable jusqu'à la fin de la session
+  Given un scope actif qui porte une closure exclue
+  When snapshot_scope est appelée
+  Then le scope actif la porte encore et peut toujours appeler la closure
 
-Scenario: restore keeps the rest of the scope
-  Given a snapshot taken with one excluded closure and three plain variables
-  When the scope is restored
-  Then the closure variable is absent and the three variables are present
+Scenario: la restauration conserve le reste du scope
+  Given un instantané pris avec une closure exclue et trois variables simples
+  When le scope est restauré
+  Then la variable closure est absente et les trois variables sont présentes
 
-Scenario: functions keep their source and documentation
-  Given the script `/// Doubles a.\nfn f(a) { a * 2 }\nlet x = 3;`
-  When extract_function_sources is called
-  Then one source is returned under the key `f/1` and its text is exactly the two lines of the function with the comment
+Scenario: les fonctions conservent leur source et leur documentation
+  Given le script `/// Doubles a.\nfn f(a) { a * 2 }\nlet x = 3;`
+  When extract_function_sources est appelée
+  Then une source est rendue sous la clé `f/1` et son texte est exactement les deux lignes de la fonction avec son commentaire
 
-Scenario: braces in strings and comments do not confuse the extraction
-  Given a function whose body holds the string `"}"` and a comment `// }`
-  When extract_function_sources is called
-  Then the source holds the whole function
+Scenario: les accolades dans les chaînes et les commentaires ne trompent pas l'extraction
+  Given une fonction dont le corps porte la chaîne `"}"` et un commentaire `// }`
+  When extract_function_sources est appelée
+  Then la source porte la fonction entière
 
-Scenario: two functions and overloads
-  Given the script `fn f(a) { a }\nfn f(a, b) { a + b }\nprivate fn h() { 1 }`
-  When extract_function_sources is called
-  Then the keys are `f/1`, `f/2` and `h/0`
+Scenario: deux fonctions et surcharges
+  Given le script `fn f(a) { a }\nfn f(a, b) { a + b }\nprivate fn h() { 1 }`
+  When extract_function_sources est appelée
+  Then les clés sont `f/1`, `f/2` et `h/0`
 
-Scenario: functions reused after recompilation
-  Given the function source `fn f(a) { a * 2 }` and a restored scope holding `let x = 3`
-  When recompile_functions is called and `f(x)` is evaluated with the AST
-  Then the result is 6 and nothing is reported broken
+Scenario: fonctions réutilisées après recompilation
+  Given la source de fonction `fn f(a) { a * 2 }` et un scope restauré qui porte `let x = 3`
+  When recompile_functions est appelée, puis `f(x)` est évalué avec l'AST
+  Then le résultat est 6 et rien n'est signalé comme cassé
 
-Scenario: top level statements are never replayed
-  Given a source that defines `fn f() { 1 }` and a native counter incremented by a top level statement of the same text
-  When recompile_functions is called
-  Then the counter is not incremented
+Scenario: les instructions de premier niveau ne sont jamais rejouées
+  Given une source qui définit `fn f() { 1 }` et un compteur natif incrémenté par une instruction de premier niveau du même texte
+  When recompile_functions est appelée
+  Then le compteur n'est pas incrémenté
 
-Scenario: source that no longer compiles
-  Given the sources `fn ok() { 1 }` and `fn bad( { }`
-  When recompile_functions is called
-  Then `ok` is in the AST and `bad/0` is reported broken
+Scenario: source qui ne compile plus
+  Given les sources `fn ok() { 1 }` et `fn bad( { }`
+  When recompile_functions est appelée
+  Then `ok` est dans l'AST et `bad/0` est signalée comme cassée
 
-Scenario: vanished toolset API
-  Given the source `fn list() { grafana::loki_query("x") }` and an engine whose module `grafana` no longer has `loki_query`
-  When recompile_functions is called
-  Then nothing is reported broken, one warning names `list/0` and the call `grafana::loki_query`, and the other functions are kept
+Scenario: API de toolset disparue
+  Given la source `fn list() { grafana::loki_query("x") }` et un moteur dont le module `grafana` n'a plus `loki_query`
+  When recompile_functions est appelée
+  Then rien n'est signalé comme cassé, un avertissement nomme `list/0` et l'appel `grafana::loki_query`, et les autres fonctions sont conservées
 
-Scenario: still valid toolset API
-  Given the same source and an engine whose module `grafana` exposes `loki_query` with one parameter
-  When recompile_functions is called
-  Then nothing is reported broken and no warning is given
+Scenario: API de toolset toujours valide
+  Given la même source et un moteur dont le module `grafana` expose `loki_query` avec un paramètre
+  When recompile_functions est appelée
+  Then rien n'est signalé comme cassé et aucun avertissement n'est donné
 
-Scenario: unqualified call is not checked as broken at restore
-  Given a source calling an unknown global function `nothing_here()`
-  When recompile_functions is called
-  Then the source is not reported broken and one warning names `nothing_here`
+Scenario: un appel non qualifié n'est pas signalé comme cassé à la restauration
+  Given une source qui appelle une fonction globale inconnue `nothing_here()`
+  When recompile_functions est appelée
+  Then la source n'est pas signalée comme cassée et un avertissement nomme `nothing_here`
 
-Scenario: source defining another function than its key
-  Given the key `f/1` with a source that defines `g(a)`
-  When recompile_functions is called
-  Then `f/1` is reported broken
+Scenario: source qui définit une autre fonction que sa clé
+  Given la clé `f/1` avec une source qui définit `g(a)`
+  When recompile_functions est appelée
+  Then `f/1` est signalée comme cassée
 
-Scenario: typed method refused at extraction
-  Given the script `fn int.double() { this * 2 }`
-  When extract_function_sources is called
-  Then it fails with a syntax error that names the plain `fn` as the way out, and no function is returned
+Scenario: méthode typée refusée à l'extraction
+  Given le script `fn int.double() { this * 2 }`
+  When extract_function_sources est appelée
+  Then il échoue par une erreur de syntaxe qui nomme `fn` simple comme solution, et aucune fonction n'est rendue
 
-Scenario: position beyond the u16 limit refused
-  Given a script whose line holds 70 000 characters before a `fn`
-  When extract_function_sources is called
-  Then it fails with a limit error and no function is returned
+Scenario: position au-delà de la limite u16 refusée
+  Given un script dont la ligne porte 70 000 caractères avant un `fn`
+  When extract_function_sources est appelée
+  Then il échoue par une erreur de limite, et aucune fonction n'est rendue
 
-Scenario: closures inside a function are not functions of the script
-  Given the script `fn g(v) { v.map(|x| x + 1) }`
-  When extract_function_sources is called
-  Then the only key is `g/1`
+Scenario: les closures dans une fonction ne sont pas des fonctions du script
+  Given le script `fn g(v) { v.map(|x| x + 1) }`
+  When extract_function_sources est appelée
+  Then la seule clé est `g/1`
 
-Scenario: data nested beyond 60 levels is excluded
-  Given a scope holding a variable made of 61 nested arrays
-  When snapshot_scope is called
-  Then the variable is excluded with a warning that says it nests too deeply; a variable of 60 nested arrays is persisted and makes the round trip through the session state, `to_json` then `from_json`, unchanged
+Scenario: une donnée imbriquée au-delà de 60 niveaux est exclue
+  Given un scope qui porte une variable faite de 61 tableaux imbriqués
+  When snapshot_scope est appelée
+  Then la variable est exclue avec un avertissement qui dit qu'elle est trop imbriquée ; une variable de 60 tableaux imbriqués est persistée et traverse inchangée l'état de session, `to_json` puis `from_json`
 
-Scenario: standard surface is never reported at restore
-  Given the function `fn f(v) { let n = v.len() + 1 * 2 == 3; print(n); let m = v.map(|x| x + 1); to_string(n) }` on an engine with no granted group
-  When recompile_functions is called
-  Then nothing is broken and no warning is given
+Scenario: la surface standard n'est jamais signalée à la restauration
+  Given la fonction `fn f(v) { let n = v.len() + 1 * 2 == 3; print(n); let m = v.map(|x| x + 1); to_string(n) }` sur un moteur sans groupe accordé
+  When recompile_functions est appelée
+  Then rien n'est cassé et aucun avertissement n'est donné
 
-Scenario: a real unknown call gives exactly one warning
-  Given the function `fn f(v) { let n = v.len() + 1; ghost(n); v.map(|x| x + 1) }` on an engine with no granted group
-  When recompile_functions is called
-  Then exactly one warning names the call `ghost`
+Scenario: un vrai appel inconnu donne exactement un avertissement
+  Given la fonction `fn f(v) { let n = v.len() + 1; ghost(n); v.map(|x| x + 1) }` sur un moteur sans groupe accordé
+  When recompile_functions est appelée
+  Then exactement un avertissement nomme l'appel `ghost`
 
-Scenario: depth limit is 60 levels, pinned by literals
-  Given a variable of 60 nested arrays, and a variable of 61 nested arrays
-  When snapshot_scope is called
-  Then the first is persisted and round-trips through the session state, the second is excluded with the warning `warning: variable `deep` nests deeper than 60 levels and was not persisted.`
+Scenario: la limite de profondeur est de 60 niveaux, figée par des littéraux
+  Given une variable de 60 tableaux imbriqués et une variable de 61 tableaux imbriqués
+  When snapshot_scope est appelée
+  Then la première est persistée et traverse l'état de session, la seconde est exclue avec l'avertissement `warning: variable `deep` nests deeper than 60 levels and was not persisted.`
 
-Scenario: unsupported type names the type
-  Given a variable holding the value of `timestamp()`
-  When snapshot_scope is called
-  Then the warning is `warning: variable `t` holds a value of type `timestamp` that cannot be persisted and was not persisted.` and the reason carries the type name `timestamp`
+Scenario: un type non pris en charge est nommé
+  Given une variable qui porte la valeur de `timestamp()`
+  When snapshot_scope est appelée
+  Then l'avertissement est `warning: variable `t` holds a value of type `timestamp` that cannot be persisted and was not persisted.` et la raison porte le nom de type `timestamp`
 
-Scenario: position bounds at 65 534 and 65 535
-  Given a function whose closing brace is at column 65 534, and another whose closing brace is at column 65 535
-  When extract_function_sources is called on each
-  Then the first is located and the second is refused with a limit error; the same holds for the line of the closing brace
+Scenario: bornes de position à 65 534 et 65 535
+  Given une fonction dont l'accolade fermante est à la colonne 65 534, et une autre dont l'accolade fermante est à la colonne 65 535
+  When extract_function_sources est appelée sur chacune
+  Then la première est localisée et la seconde est refusée par une erreur de limite ; il en va de même pour la ligne de l'accolade fermante
 
-Scenario: a tab is one column
-  Given the script `\t\tfn g() { 1 }`
-  When extract_function_sources is called
-  Then the text is `fn g() { 1 }` and column 3 is the keyword
+Scenario: une tabulation vaut une colonne
+  Given le script `\t\tfn g() { 1 }`
+  When extract_function_sources est appelée
+  Then le texte est `fn g() { 1 }` et la colonne 3 est le mot-clé
 
-Scenario: unknown call names are reported with their line
-  Given the source `fn f() {\n  1\n  ghost(2)\n}`
-  When recompile_functions is called
-  Then one warning names `f/0`, the call `ghost` and the line 3
+Scenario: les noms d'appels inconnus sont signalés avec leur ligne
+  Given la source `fn f() {\n  1\n  ghost(2)\n}`
+  When recompile_functions est appelée
+  Then un avertissement nomme `f/0`, l'appel `ghost` et la ligne 3
 
 Tasks:
   [x] #1 Tests puis implémentation, dans l'ordre : conversion `Dynamic` et @TaggedValue, détection et avertissements, extraction des sources, recompilation.

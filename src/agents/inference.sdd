@@ -49,50 +49,50 @@ Depends on:
   ../session/history.sdd
   serde_json
 
-Scenario: status classification
-  Given the status codes 429, 500, 503, 400, 401, 403, 404, 418 and 200
-  When classified
-  Then 429, 500 and 503 are Transient, 400 401 403 404 and 418 are Permanent, and 200 gives nothing
+Scenario: classement des statuts
+  Given les codes de statut 429, 500, 503, 400, 401, 403, 404, 418 et 200
+  When ils sont classés
+  Then 429, 500 et 503 sont Transient, 400, 401, 403, 404 et 418 sont Permanent, et 200 ne rend rien
 
-Scenario: context overflow is its own class
-  Given status 400 with a body flag signalling context overflow
-  When classified
-  Then the class is ContextOverflow
+Scenario: le dépassement de contexte forme sa propre classe
+  Given un statut 400 dont le corps signale un dépassement de contexte
+  When il est classé
+  Then la classe est ContextOverflow
 
-Scenario: scripted provider replays its script
-  Given a scripted provider with two failures then a response
-  When complete is called three times
-  Then the first two return the scripted errors and the third the response
+Scenario: le fournisseur scripté rejoue son script
+  Given un fournisseur scripté avec deux échecs puis une réponse
+  When complete est appelé trois fois
+  Then les deux premières rendent les erreurs scriptées et la troisième la réponse
 
-Scenario: scripted provider records requests
-  Given a scripted provider and two requests
-  When both are completed
-  Then requests returns the two in order
+Scenario: le fournisseur scripté enregistre les requêtes
+  Given un fournisseur scripté et deux requêtes
+  When les deux sont complétées
+  Then requests rend les deux dans l'ordre
 
-Scenario: exhausted script is a permanent error
-  Given an empty scripted provider
-  When complete is called
-  Then it fails Permanent with the message `script exhausted`
+Scenario: un script épuisé est une erreur permanente
+  Given un fournisseur scripté vide
+  When complete est appelé
+  Then il échoue en Permanent avec le message `script exhausted`
 
-Scenario: shared between tasks
-  Given a scripted provider shared by four tasks
-  When each completes one request
-  Then four requests are recorded and no result is used twice
+Scenario: partagé entre tâches
+  Given un fournisseur scripté partagé par quatre tâches
+  When chacune complète une requête
+  Then quatre requêtes sont enregistrées et aucun résultat n'est utilisé deux fois
 
-Scenario: default stream emits the whole answer as one fragment
-  Given a provider that only implements complete and answers `Bonjour`
-  When stream is called with a receiver that collects the fragments
-  Then the receiver got the single fragment `Bonjour` and the response is the one complete returns
+Scenario: le flux par défaut émet la réponse entière en un seul fragment
+  Given un fournisseur qui n'implémente que complete et répond `Bonjour`
+  When stream est appelé avec un récepteur qui collecte les fragments
+  Then le récepteur a reçu le fragment unique `Bonjour`, et la réponse est celle que rend complete
 
-Scenario: scripted fragments arrive in order
-  Given a scripted provider whose reply is scripted with the fragments `Bon`, `jour` and `!`
-  When stream is called
-  Then the receiver got `Bon`, `jour` and `!` in that order, the response text is `Bonjour!`, and the request is recorded
+Scenario: les fragments scriptés arrivent dans l'ordre
+  Given un fournisseur scripté dont la réponse est scriptée avec les fragments `Bon`, `jour` et `!`
+  When stream est appelé
+  Then le récepteur a reçu `Bon`, `jour` et `!` dans cet ordre, le texte de la réponse est `Bonjour!`, et la requête est enregistrée
 
-Scenario: a failed stream emits no fragment
-  Given a scripted provider whose next reply is a transient error
-  When stream is called
-  Then it fails Transient and the receiver got nothing
+Scenario: un flux en échec n'émet aucun fragment
+  Given un fournisseur scripté dont la prochaine réponse est une erreur transitoire
+  When stream est appelé
+  Then il échoue en Transient et le récepteur n'a rien reçu
 
 Scenario: défaut de stream quand complete échoue : aucun fragment
   Given un fournisseur qui n'implémente que complete, et dont complete échoue en transitoire

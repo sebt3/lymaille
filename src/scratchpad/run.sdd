@@ -87,7 +87,7 @@ Must:
   Si l'extraction des sources de fonctions échoue après une évaluation réussie (méthode typée, position saturée : ./persist.sdd #9), le run garde sa valeur et son statut `Ok` ; un avertissement dit que les fonctions du script ne sont pas persistées, et elles restent connues du pad (décidé le 2026-10-29 par le développeur principal).
   Les avertissements des fonctions exclues de la persistance (forme masquée irrecevable) sont rendus dans le texte seulement : ils ne figurent pas dans les @PersistWarning de @RunOutcome.
   Un moteur (@ScratchpadEngine) sert une seule session : l'état d'introspection qu'il porte (@IntrospectionSource) est mis à jour avant chaque run et n'est pas partagé entre pads concurrents.
-  Le fil d'évaluation entre dans le runtime de l'hôte (`Handle::enter`) : les appels natifs asynchrones s'exécutent sur ce runtime, et sur un runtime `current_thread` ils rendent l'erreur explicite de `vynil-core` (Scenario « current-thread runtime »).
+  Le fil d'évaluation entre dans le runtime de l'hôte (`Handle::enter`) : les appels natifs asynchrones s'exécutent sur ce runtime, et sur un runtime `current_thread` ils rendent l'erreur explicite de `vynil-core` (Scenario « runtime current_thread »).
   Quand l'extraction des sources de fonctions échoue, l'avertissement « the functions of this script were not persisted; they stay callable in this session only. » est rendu dans le texte seulement (comme celui des fonctions exclues), et les sources de l'état portant les clés `nom/arité` des fonctions du script sont retirées : l'état ne garde jamais une ancienne version d'une fonction que le pad a redéfinie.
   `Scratchpad::inspection` (`pub(in crate::scratchpad)`, usage de ./inspect.sdd) construit un pad dont les variables sont des constantes et dont les fonctions de session sont seulement listées (jamais fusionnées dans l'arbre appelable) ; son état de sources est vide. Le `RunOutcome` d'un pad d'inspection porte un instantané vide (décidé le 2026-10-29).
   Un seul run évalue à la fois par pad : le verrou du pad sérialise les runs concurrents ; l'exclusion d'un tour actif par session (@TurnGate) rend ce cas exceptionnel.
@@ -101,146 +101,146 @@ Must not:
   Interrompre un run sur le temps écoulé ou le nombre d'opérations (`agent-sessions#FR-5`).
   Rendre au LLM un texte non masqué.
 
-Scenario: variables and functions persist across calls
-  Given a first call `let x = 3; fn f(a) { a * 2 }` and a second call `f(x)`
-  When both runs complete in the same pad
-  Then the second result text is `6` and the status is Ok
+Scenario: les variables et les fonctions persistent d'un appel à l'autre
+  Given un premier appel `let x = 3; fn f(a) { a * 2 }` et un second appel `f(x)`
+  When les deux exécutions se terminent dans le même pad
+  Then le texte du second résultat est `6` et le statut est Ok
 
-Scenario: persistence survives a restore
-  Given the same two calls, a snapshot taken after the first, and a pad restored from that snapshot on a fresh engine
-  When `f(x)` is run on the restored pad
-  Then the result is `6` and no function is reported broken
+Scenario: la persistance survit à une restauration
+  Given les mêmes deux appels, un instantané pris après le premier, et un pad restauré à partir de cet instantané sur un moteur neuf
+  When `f(x)` est exécuté sur le pad restauré
+  Then le résultat est `6` et aucune fonction n'est signalée comme cassée
 
-Scenario: syntax error leaves the pad untouched
-  Given a pad holding `let x = 3`
-  When the script `let y = ;` is run
-  Then the status is Failed(Syntax), the text has the position, and `x` is still 3 and `y` does not exist
+Scenario: une erreur de syntaxe laisse le pad intact
+  Given un pad qui porte `let x = 3`
+  When le script `let y = ;` est exécuté
+  Then le statut est Failed(Syntax), le texte porte la position, `x` vaut toujours 3 et `y` n'existe pas
 
-Scenario: runtime error keeps earlier effects
-  Given the script `let a = 1; throw "boom"; let b = 2`
-  When it is run
-  Then the status is Failed(Runtime), the text contains `boom`, and `a` exists and `b` does not
+Scenario: une erreur d'exécution conserve les effets précédents
+  Given le script `let a = 1; throw "boom"; let b = 2`
+  When il est exécuté
+  Then le statut est Failed(Runtime), le texte contient `boom`, et `a` existe alors que `b` n'existe pas
 
-Scenario: redefinition replaces a function
-  Given a pad where `fn f() { 1 }` was defined
-  When `fn f() { 2 }` is run, then `f()` is run
-  Then the last result is `2` and the snapshot holds a single `f/0`
+Scenario: une redéfinition remplace une fonction
+  Given un pad où `fn f() { 1 }` a été défini
+  When `fn f() { 2 }` est exécuté, puis `f()`
+  Then le dernier résultat est `2` et l'instantané ne porte qu'un seul `f/0`
 
-Scenario: call depth is an error rendered to the LLM
-  Given a script function that calls itself without end
-  When it is run
-  Then the status is Failed(Limit) and the text is a limit error naming the call depth
+Scenario: la profondeur d'appels est une erreur rendue au LLM
+  Given une fonction de script qui s'appelle elle-même sans fin
+  When il est exécuté
+  Then le statut est Failed(Limit) et le texte est une erreur de limite nommant la profondeur d'appels
 
-Scenario: long scripts are not interrupted
-  Given a script that runs a long native wait
-  When it is run without cancelling
-  Then it completes normally with the status Ok
+Scenario: les scripts longs ne sont pas interrompus
+  Given un script qui fait une longue attente native
+  When il est exécuté sans annulation
+  Then il se termine normalement avec le statut Ok
 
-Scenario: oversized result is truncated with a notice
-  Given a render cap of 1000 and a script returning a string of 5000 characters
-  When it is run
-  Then the text has at most 1000 characters with the start, the end and the truncation notice, truncated is true and the status is Ok
+Scenario: un résultat trop grand est tronqué avec un avis
+  Given un plafond de rendu de 1000 et un script qui rend une chaîne de 5000 caractères
+  When il est exécuté
+  Then le texte fait au plus 1000 caractères avec le début, la fin et l'avis de troncature, truncated vaut true et le statut est Ok
 
-Scenario: string beyond the memory limit
-  Given default limits and a script that doubles a string until it exceeds 16 mebibytes
-  When it is run
-  Then the status is Failed(Limit), the text is the limit error, and a second pad on another engine in the same process runs normally
+Scenario: chaîne au-delà du plafond de mémoire
+  Given les plafonds par défaut et un script qui double une chaîne jusqu'à dépasser 16 mébioctets
+  When il est exécuté
+  Then le statut est Failed(Limit), le texte est l'erreur de limite, et un second pad sur un autre moteur du même processus s'exécute normalement
 
-Scenario: closure variable warns without failing
-  Given the script `let n = 3; let f = |x| x + n; n`
-  When it is run, then the snapshot is taken
-  Then the text is `3` followed by the closure warning naming `f`, the status is Ok, and the snapshot lacks `f` but holds `n`
+Scenario: une variable closure avertit sans échouer
+  Given le script `let n = 3; let f = |x| x + n; n`
+  When il est exécuté, puis l'instantané est pris
+  Then le texte est `3` suivi de l'avertissement de closure nommant `f`, le statut est Ok, et l'instantané ne porte pas `f` mais porte `n`
 
-Scenario: the warning is not repeated
-  Given a pad where the previous run already warned about `f`
-  When another script `n + 1` is run
-  Then its text carries no warning
+Scenario: l'avertissement n'est pas répété
+  Given un pad où l'exécution précédente a déjà signalé `f`
+  When un autre script `n + 1` est exécuté
+  Then son texte ne porte aucun avertissement
 
-Scenario: restored pad lacks the excluded variable
-  Given the pad above and a pad restored from its snapshot
-  When `n` and then `f` are evaluated on the restored pad
-  Then `n` is 3 and `f` is a variable-not-found error
+Scenario: le pad restauré n'a pas la variable exclue
+  Given le pad ci-dessus et un pad restauré à partir de son instantané
+  When `n` puis `f` sont évalués sur le pad restauré
+  Then `n` vaut 3 et `f` est une erreur de variable introuvable
 
-Scenario: cancellation of a never returning native call
-  Given a native function that blocks on a future that never completes through the `vynil-core` bridge
-  When the handle is cancelled 100 milliseconds after the run starts
-  Then the run ends with the status Cancelled in under 500 milliseconds and the future was dropped
+Scenario: annulation d'un appel natif qui ne rend jamais
+  Given une fonction native qui bloque sur un futur qui ne se termine jamais, via le pont `vynil-core`
+  When le handle est annulé 100 millisecondes après le démarrage de l'exécution
+  Then l'exécution se termine avec le statut Cancelled en moins de 500 millisecondes, et le futur a été abandonné
 
-Scenario: cancellation of a Rhai loop
-  Given the script `loop { }`
-  When the handle is cancelled after 100 milliseconds
-  Then the run ends with the status Cancelled in under one second
+Scenario: annulation d'une boucle Rhai
+  Given le script `loop { }`
+  When le handle est annulé après 100 millisecondes
+  Then l'exécution se termine avec le statut Cancelled en moins d'une seconde
 
-Scenario: cancelled before start
-  Given a handle already cancelled
-  When a script is run
-  Then the status is Cancelled and the pad is unchanged and the script did not execute
+Scenario: annulé avant le démarrage
+  Given un handle déjà annulé
+  When un script est exécuté
+  Then le statut est Cancelled, le pad est inchangé et le script n'a pas été exécuté
 
-Scenario: cancellation wins over the error it caused
-  Given a native function that returns the `vynil-core` cancellation error when cancelled
-  When the handle is cancelled during the run
-  Then the status is Cancelled, not Failed(Runtime)
+Scenario: l'annulation l'emporte sur l'erreur qu'elle a causée
+  Given une fonction native qui rend l'erreur d'annulation de `vynil-core` lorsqu'elle est annulée
+  When le handle est annulé pendant l'exécution
+  Then le statut est Cancelled, et non Failed(Runtime)
 
-Scenario: the evaluation does not use a runtime worker
-  Given a runtime with two worker threads and a script that loops for one second
-  When two such runs are started together with another async task that increments a counter every 10 milliseconds
-  Then the counter keeps advancing during both runs
+Scenario: l'évaluation n'utilise pas de worker du runtime
+  Given un runtime à deux fils de travail et un script qui boucle pendant une seconde
+  When deux de ces exécutions sont lancées ensemble avec une autre tâche asynchrone qui incrémente un compteur toutes les 10 millisecondes
+  Then le compteur continue d'avancer pendant les deux exécutions
 
-Scenario: a panic is contained
-  Given a native function that panics
-  When a script calls it
-  Then the status is Failed(Internal), no panic crosses run, and the next script on the same pad runs normally
+Scenario: une panique est contenue
+  Given une fonction native qui panique
+  When un script l'appelle
+  Then le statut est Failed(Internal), aucune panique ne traverse run, et le script suivant sur le même pad s'exécute normalement
 
-Scenario: secrets are masked in text and audit
-  Given a redactor holding `tok-123456` and a script returning `Bearer tok-123456`
-  When it is run
-  Then the text contains `***` and not the secret, and the audit record holds neither the secret in the script, the result nor the error
+Scenario: les secrets sont masqués dans le texte et l'audit
+  Given un masqueur qui porte `tok-123456` et un script qui rend `Bearer tok-123456`
+  When il est exécuté
+  Then le texte contient `***` et non le secret, et l'enregistrement d'audit ne porte le secret ni dans le script, ni dans le résultat, ni dans l'erreur
 
-Scenario: errors are masked and suggested
-  Given a redactor holding `tok-123456` and the script `grafana::loki_queryy("tok-123456")` with a granted module `grafana::loki_query`
-  When it is run
-  Then the text names `grafana::loki_query` as the closest candidate and does not contain the secret
-  And no suggestion names a function of an ungranted module
+Scenario: les erreurs sont masquées et suggérées
+  Given un masqueur qui porte `tok-123456` et le script `grafana::loki_queryy("tok-123456")` avec un module accordé `grafana::loki_query`
+  When il est exécuté
+  Then le texte nomme `grafana::loki_query` comme candidat le plus proche et ne contient pas le secret
+  And aucune suggestion ne nomme une fonction d'un module non accordé
 
-Scenario: print output is rendered before the value
-  Given the script `print("step 1"); 42`
-  When it is run
-  Then the text is `step 1` on its own line followed by `42`, and nothing reached the process output
+Scenario: la sortie de print est rendue avant la valeur
+  Given le script `print("step 1"); 42`
+  When il est exécuté
+  Then le texte est `step 1` sur sa propre ligne suivi de `42`, et rien n'est parvenu à la sortie du processus
 
-Scenario: warnings and value share the render cap
-  Given a render cap of 300, a script returning 5000 characters and creating a closure variable
-  When it is run
-  Then the whole text is at most 300 characters and still ends with the closure warning
+Scenario: les avertissements et la valeur partagent le plafond de rendu
+  Given un plafond de rendu de 300, un script qui rend 5000 caractères et crée une variable closure
+  When il est exécuté
+  Then le texte entier fait au plus 300 caractères et finit toujours par l'avertissement de closure
 
-Scenario: audit record carries the script and the duration
-  Given a manual clock advanced by 250 milliseconds during the run
-  When a script is run
-  Then the audit record holds the full script text, the agent name and a duration of 250 milliseconds
+Scenario: l'enregistrement d'audit porte le script et la durée
+  Given une horloge manuelle avancée de 250 millisecondes pendant l'exécution
+  When un script est exécuté
+  Then l'enregistrement d'audit porte le texte complet du script, le nom de l'agent et une durée de 250 millisecondes
 
-Scenario: audit record is built on failure
-  Given a failing script
-  When it is run
-  Then the audit record holds the masked error and the status is Failed
+Scenario: l'enregistrement d'audit est construit en cas d'échec
+  Given un script en échec
+  When il est exécuté
+  Then l'enregistrement d'audit porte l'erreur masquée et le statut est Failed
 
-Scenario: const is refused
-  Given the script `const C = #{a: 1}; C.a = 2`
-  When it is run
-  Then the status is Failed(Syntax) and no panic occurs, and `let c = #{a: 1}; c.a = 2; c.a` returns `2`
+Scenario: const est refusé
+  Given le script `const C = #{a: 1}; C.a = 2`
+  When il est exécuté
+  Then le statut est Failed(Syntax) et aucune panique ne survient, et `let c = #{a: 1}; c.a = 2; c.a` rend `2`
 
-Scenario: only granted modules are reachable, even through a function the LLM defined (domain AC-1)
-  Given a pad on an agent granted only a read toolset, and a script defining `fn w() { writer::delete() }`
-  When `w()` is run
-  Then the status is Failed(NotFound) with no suggestion naming `writer`, and the module `writer` was not reached
+Scenario: seuls les modules accordés sont atteignables, même par une fonction définie par le LLM (domaine AC-1)
+  Given un pad sur un agent auquel seul un toolset de lecture est accordé, et un script qui définit `fn w() { writer::delete() }`
+  When `w()` est exécutée
+  Then le statut est Failed(NotFound) sans suggestion nommant `writer`, et le module `writer` n'a pas été atteint
 
-Scenario: runs on one pad are serialized
-  Given two runs started together on the same pad
-  When both complete
-  Then their effects are applied one after the other and the scope holds both results
+Scenario: les exécutions sur un même pad sont sérialisées
+  Given deux exécutions lancées ensemble sur le même pad
+  When les deux se terminent
+  Then leurs effets sont appliqués l'un après l'autre et le scope porte les deux résultats
 
-Scenario: secrets are masked before the state keeps the variables and the function sources
-  Given a session whose agent declares the secret `API_TOKEN` with the value `s3cr3t-value`, and a script that stores `let k = "s3cr3t-value";` and defines `fn key() { "s3cr3t-value" }`
-  When the run ends and the state is saved
-  Then the saved state holds neither the value `s3cr3t-value` in its variables nor in its function sources, and the rendered result shows the masked form instead
+Scenario: les secrets sont masqués avant que l'état ne conserve les variables et les sources des fonctions
+  Given une session dont l'agent déclare le secret `API_TOKEN` de valeur `s3cr3t-value`, et un script qui stocke `let k = "s3cr3t-value";` et définit `fn key() { "s3cr3t-value" }`
+  When l'exécution se termine et l'état est sauvegardé
+  Then l'état sauvegardé ne porte la valeur `s3cr3t-value` ni dans ses variables ni dans les sources de ses fonctions, et le résultat rendu montre la forme masquée à la place
 
 Tasks:
   [x] #1 Tests puis implémentation, dans l'ordre : pad et persistance entre appels, erreurs et rendu, avertissements, annulation (jeton miroir), audit et masquage, restauration.
@@ -261,8 +261,8 @@ Tasks:
       Validé le 2026-10-29 par le développeur principal. À confirmer avec la boucle de tour (session.sdd #2).
   [x] #9 Posé : `run` ne borne pas le nombre de scripts simultanés au-delà d'un fil dédié par run (`agent-sessions/scratchpad#DEC-3`, amendé) ; la pression sur les fils relève de l'hôte.
       Validé le 2026-10-29 par le développeur principal.
-  [x] #10 Masquage des secrets avant la remise de l'état : masquer les secrets déclarés dans les valeurs de variables et les sources de fonctions avant de les remettre à l'état de session (Redactor, CON-3 ; persist.sdd #14 ne masque rien). Scenario « secrets are masked before the state keeps the variables and the function sources ».
-      Implémenté et testé (constaté par le validator le 2026-10-29, Scenario « secrets are masked before the state keeps… »).
+  [x] #10 Masquage des secrets avant la remise de l'état : masquer les secrets déclarés dans les valeurs de variables et les sources de fonctions avant de les remettre à l'état de session (Redactor, CON-3 ; persist.sdd #14 ne masque rien). Scenario « les secrets sont masqués avant que l'état ne conserve les variables et les sources des fonctions ».
+      Implémenté et testé (constaté par le validator le 2026-10-29, Scenario « les secrets sont masqués avant que l'état ne conserve… »).
   [x] #11 Faire passer `scripts/check` : corriger les 27 erreurs clippy du validateur du 2026-10-29 (`run.rs`, code et tests) sans `allow` ni changement du harnais ; regrouper les 7 arguments de `settle` dans une structure d'entrée nommée.
       Validé le 2026-10-29 (validator) sous `SKIP=deny scripts/check` : l'étape `cargo deny` échoue faute de `deny.toml` (lymaille.sdd #1, #5).
   [x] #12 Renforcer les tests faibles : texte de l'erreur de limite (« string beyond the memory limit »), absence du secret dans l'erreur de l'enregistrement d'audit, absence de suggestion d'un module non accordé, module `writer` non atteint (sans dépendre du libellé « Closest candidates »), sérialisation réelle des runs.
@@ -270,35 +270,35 @@ Tasks:
   [x] #13 Scenarios ajoutés le 2026-10-29 (ci-dessous), tests puis implémentation : avertissements sur run en échec, échec d'extraction après évaluation, instantané d'introspection posé avant l'évaluation, avertissement qui redevient possible, fonction exclue par masquage, runtime `current_thread`.
       Validé le 2026-10-29 (validator) sous `SKIP=deny scripts/check` : l'étape `cargo deny` échoue faute de `deny.toml` (lymaille.sdd #1, #5).
 
-Scenario: warnings are computed on a failed run
+Scenario: les avertissements sont calculés sur une exécution échouée
   Given un script qui pose une variable non persistable puis échoue à l'exécution
   When il est exécuté
   Then le statut est Failed(Runtime) et le texte contient l'erreur puis l'avertissement de persistance de cette variable
 
-Scenario: extraction failure keeps the value
+Scenario: l'échec d'extraction conserve la valeur
   Given un script qui définit une fonction à méthode typée et rend 5
   When il est exécuté
   Then le statut est Ok, le texte contient 5 et un avertissement dit que les fonctions du script ne sont pas persistées, et la fonction reste appelable dans le même pad
 
-Scenario: introspection snapshot is set before evaluation
+Scenario: l'instantané d'introspection est posé avant l'évaluation
   Given un pad où `let x = 1` a été exécuté
   When le script `vars()` est exécuté
   Then le résultat nomme `x`
 
-Scenario: a warning returns after the variable disappears
+Scenario: un avertissement revient après la disparition de la variable
   Given une variable non persistable déjà signalée, puis supprimée du scope
   When elle est de nouveau posée non persistable au run suivant
   Then l'avertissement est rendu une seconde fois
 
-Scenario: function excluded by masking is reported
+Scenario: une fonction exclue par le masquage est signalée
   Given un secret déclaré présent dans le texte source d'une fonction
   When le script qui la définit est exécuté
   Then le texte rendu signale que la fonction est exclue de la persistance et ne contient pas le secret, et `warnings()` reste vide
   And un script dont l'extraction des fonctions échoue rend le texte « the functions of this script were not persisted » avec `warnings()` vide
 
-Scenario: current-thread runtime
+Scenario: runtime current_thread
   Given un runtime tokio `current_thread`
   When un script appelle une fonction native asynchrone
   Then le statut est Failed(Runtime) avec l'erreur explicite de `vynil-core`, sans blocage
-  [x] #14 Validation du 2026-10-29 : (a) test du retrait des sources périmées (définir `fn f(){1}`, puis lancer `fn f(){2}` avec une fonction à méthode typée dans le même script, vérifier que l'instantané ne contient plus l'ancienne `f/0`) ; (b) remplacer la copie privée de `key_of` par un `pub(super)` de ./persist.rs ; (c) justifier par un commentaire ou repasser en `current_thread` le test `call_depth_is_an_error_rendered_to_the_llm` ; (d) étendre le Scenario « function excluded » aux deux avertissements rendus en texte seulement (Scenario étendu le 2026-10-29) ; (e) deux tests relevés par le validateur : retrait d'une fonction d'arité 1 ou plus, et conservation de la source d'une autre fonction `g/0` après l'échec d'extraction.
+  [x] #14 Validation du 2026-10-29 : (a) test du retrait des sources périmées (définir `fn f(){1}`, puis lancer `fn f(){2}` avec une fonction à méthode typée dans le même script, vérifier que l'instantané ne contient plus l'ancienne `f/0`) ; (b) remplacer la copie privée de `key_of` par un `pub(super)` de ./persist.rs ; (c) justifier par un commentaire ou repasser en `current_thread` le test `call_depth_is_an_error_rendered_to_the_llm` ; (d) étendre le Scenario « une fonction exclue par le masquage est signalée » aux deux avertissements rendus en texte seulement (Scenario étendu le 2026-10-29) ; (e) deux tests relevés par le validateur : retrait d'une fonction d'arité 1 ou plus, et conservation de la source d'une autre fonction `g/0` après l'échec d'extraction.
       Validé le 2026-10-29 (validator, 12 mutants tués) sous `SKIP=deny scripts/check`.

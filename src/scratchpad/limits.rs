@@ -306,7 +306,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(ms));
     }
 
-    // Scenario: no time limit over two real minutes
+    // Scenario: pas de limite de durée au-delà de deux minutes réelles
     #[test]
     #[ignore = "two real minutes: run with cargo test -- --ignored"]
     fn no_time_limit_over_two_real_minutes() {

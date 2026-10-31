@@ -380,7 +380,7 @@ mod tests {
         )
     }
 
-    // Scenario: invalid name refused
+    // Scenario: nom invalide refusé
     #[test]
     fn invalid_name_refused() {
         for name in ["Grafana", "a b", ""] {
@@ -499,7 +499,7 @@ mod tests {
     /// A complete `SKILL.md`: the frontmatter between two `---` lines, then the body.
     const SKILL_FILE: &str = "---\nname: grafana\ndescription: Query the dashboards\nlicense: BSD-3-Clause\ncompatibility: any Rhai scratchpad\nmetadata:\n  owner: team\n---\nUse the dashboards.\n\nSecond paragraph.\n";
 
-    // Scenario: valid skill file is parsed
+    // Scenario: un fichier de skill valide est analysé
     #[test]
     fn valid_skill_file_is_parsed() {
         let parsed = Skill::parse(SKILL_FILE).expect("a valid SKILL.md must parse");
@@ -535,7 +535,7 @@ mod tests {
         );
     }
 
-    // Scenario: allowed-tools is ignored
+    // Scenario: allowed-tools est ignoré
     #[test]
     fn allowed_tools_is_ignored() {
         let plain = Skill::parse("---\nname: grafana\ndescription: d\n---\nbody\n").expect("parses");
@@ -660,7 +660,7 @@ mod tests {
         assert_eq!(parsed.metadata().get("version").map(String::as_str), Some("1.0"));
     }
 
-    // Scenario: oversized body refused
+    // Scenario: corps trop volumineux refusé
     #[test]
     fn oversized_body_refused() {
         let built =

@@ -40,11 +40,11 @@ Must:
     `a user message cannot be inserted between a tool call and its result`, `an internal lock was poisoned`,
     `a secret must be at least 6 characters long`.
 
-Scenario: display texts are stable
-  Given each variant built with sample data
-  When it is formatted with Display
-  Then the text matches the documented wording
-  And none contains message or value content of a session
+Scenario: les textes Display sont stables
+  Given chaque variante construite avec des données d'exemple
+  When elle est formatée avec Display
+  Then le texte correspond à la formulation documentée
+  And aucun ne reprend de contenu de message ou de valeur de session
 
 Tasks:
   [x] #1 Tests des textes Display, puis l'énumération.

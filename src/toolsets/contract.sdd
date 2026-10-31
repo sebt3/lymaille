@@ -40,40 +40,40 @@ Depends on:
   rhai
   vynil-core
 
-Scenario: adding a function is a minor change
-  Given a module with one public function and the same module with a second one
-  When the contracts are compared
-  Then the bump is Minor
+Scenario: ajouter une fonction est un changement mineur
+  Given un module avec une fonction publique, et le même module avec une seconde
+  When les contrats sont comparés
+  Then le saut est Minor
 
-Scenario: body change leaves the contract
-  Given two modules with the same signatures and different bodies and docs
-  When the contracts are compared
-  Then the bump is None and the contracts are equal
+Scenario: un changement de corps ne touche pas le contrat
+  Given deux modules aux mêmes signatures, avec des corps et des docs différents
+  When les contrats sont comparés
+  Then le saut est None et les contrats sont égaux
 
-Scenario: removal is a major change
-  Given a module with two public functions and the same module without one
-  When the contracts are compared
-  Then the bump is Major
+Scenario: une suppression est un changement majeur
+  Given un module avec deux fonctions publiques, et le même module sans l'une d'elles
+  When les contrats sont comparés
+  Then le saut est Major
 
-Scenario: parameter change is a major change
-  Given a function `f(a)` and the same function as `f(a, b)`
-  When the contracts are compared
-  Then the bump is Major
+Scenario: un changement de paramètres est un changement majeur
+  Given une fonction `f(a)`, et la même fonction en `f(a, b)`
+  When les contrats sont comparés
+  Then le saut est Major
 
-Scenario: private functions are outside the contract
-  Given a module with a private function
-  When the contract is extracted
-  Then the function is absent
+Scenario: les fonctions privées sont hors contrat
+  Given un module avec une fonction privée
+  When le contrat est extrait
+  Then la fonction est absente
 
-Scenario: under-declared version is warned
-  Given a removed function and a declared minor version bump
-  When the declared version is checked
-  Then a warning names the under-declared change and nothing is refused
+Scenario: une version sous-déclarée donne un avertissement
+  Given une fonction retirée et un saut de version mineur déclaré
+  When la version déclarée est vérifiée
+  Then un avertissement nomme le changement sous-déclaré, et rien n'est refusé
 
-Scenario: undeclared change is warned
-  Given a removed function and an unchanged declared version
-  When the declared version is checked
-  Then a warning names the divergence and nothing is refused
+Scenario: un changement non déclaré donne un avertissement
+  Given une fonction retirée et une version déclarée inchangée
+  When la version déclarée est vérifiée
+  Then un avertissement nomme l'écart, et rien n'est refusé
 
 Tasks:
   [x] #1 Tests puis implémentation.

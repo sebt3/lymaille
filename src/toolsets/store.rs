@@ -365,7 +365,7 @@ mod tests {
         )
     }
 
-    // Scenario: put then get round trips
+    // Scenario: put puis get font un aller-retour
     #[tokio::test]
     async fn put_then_get_round_trips() {
         let store = InMemoryToolsets::new(CAP);
@@ -398,7 +398,7 @@ mod tests {
         );
     }
 
-    // Scenario: a draft is invisible until activated
+    // Scenario: un brouillon est invisible tant qu'il n'est pas activé
     #[tokio::test]
     async fn draft_is_invisible_until_activated() {
         let store = InMemoryToolsets::new(CAP);
@@ -462,7 +462,7 @@ mod tests {
         }
     }
 
-    // Scenario: the trait cannot activate
+    // Scenario: le trait ne peut pas activer
     #[tokio::test]
     async fn trait_cannot_activate() {
         async fn read_both<S: ToolsetStore>(store: &S) -> (Option<Toolset>, Option<Toolset>) {
@@ -482,7 +482,7 @@ mod tests {
         assert!(draft.is_some(), "the draft is readable as a draft");
     }
 
-    // Scenario: invalid draft refused
+    // Scenario: brouillon invalide refusé
     #[tokio::test]
     async fn invalid_draft_refused() {
         let store = InMemoryToolsets::new(CAP);

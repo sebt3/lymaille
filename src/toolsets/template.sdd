@@ -40,35 +40,35 @@ Depends on:
   serde_json
   [x] #6 Décidé le 2026-10-29 : une erreur de gabarit répète des fragments du gabarit (jetons, ligne) ; le texte est celui de l'auteur du toolset et revient à lui, donc rien n'est masqué. Un secret n'a pas sa place dans un gabarit (`agent-sessions#CON-3`).
 
-Scenario: same template, two contexts
-  Given one prompt template and two resolved contexts with different parameter values
-  When both are rendered
-  Then the texts differ only by those values
+Scenario: même gabarit, deux contextes
+  Given un gabarit de prompt et deux contextes résolus aux valeurs de paramètres différentes
+  When les deux sont rendus
+  Then les textes ne diffèrent que par ces valeurs
 
-Scenario: absent role removes its section
-  Given a template with a section conditional on the role `k8s`
-  When it is rendered with a context without that role
-  Then the section is absent
+Scenario: un rôle absent retire sa section
+  Given un gabarit avec une section conditionnée par le rôle `k8s`
+  When il est rendu avec un contexte sans ce rôle
+  Then la section est absente
 
-Scenario: skill names without bodies
-  Given granted skills `deploy` and `triage`
-  When the system prompt is rendered
-  Then it contains both names and neither description nor body
+Scenario: les skills ne donnent que leur nom
+  Given les skills accordés `deploy` et `triage`
+  When le prompt système est rendu
+  Then il contient les deux noms, ni description ni corps
 
-Scenario: skill sees its toolset parameters
+Scenario: le skill voit les paramètres de son toolset
   Given un skill du toolset `ops` dont le paramètre `region` a le défaut `eu` et le contexte porte `region = us` pour `ops` seulement
   When le skill est rendu avec `{{context.params.region}}`
   Then le texte contient `us`, et le même gabarit rendu pour un autre toolset contient son propre défaut
 
-Scenario: unknown variable is an error
-  Given a template that uses `{{context.params.missing}}`
-  When it is rendered
-  Then it fails with Template naming the variable
+Scenario: variable inconnue est une erreur
+  Given un gabarit qui utilise `{{context.params.missing}}`
+  When il est rendu
+  Then il échoue avec Template en nommant la variable
 
-Scenario: rendering is deterministic
-  Given the same template and data
-  When rendered twice
-  Then the texts are equal
+Scenario: le rendu est déterministe
+  Given le même gabarit et les mêmes données
+  When il est rendu deux fois
+  Then les textes sont égaux
 
 Tasks:
   [x] #1 Tests puis implémentation.

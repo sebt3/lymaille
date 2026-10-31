@@ -1107,7 +1107,7 @@ mod tests {
         .with_modules(modules.iter().map(|module| (*module).to_owned()).collect())
     }
 
-    // Scenario: configuration agent cannot delegate
+    // Scenario: un agent de configuration ne peut pas déléguer
     #[test]
     fn configuration_agent_cannot_delegate() {
         let config = AgentDefinition::new(
@@ -1120,7 +1120,7 @@ mod tests {
         assert_invalid(&config, "a configuration agent declaring a delegable sub-agent");
     }
 
-    // Scenario: configuration agent with its modules is valid
+    // Scenario: un agent de configuration avec ses modules est valide
     #[test]
     fn configuration_agent_with_its_modules_is_valid() {
         let config = with_modules_of(
@@ -1134,14 +1134,14 @@ mod tests {
         );
     }
 
-    // Scenario: work agent cannot receive the creation module
+    // Scenario: un agent de travail ne peut pas recevoir le module de création
     #[test]
     fn work_agent_cannot_receive_the_creation_module() {
         let work = with_modules_of(AgentKind::Work, &["toolset_creator"]);
         assert_invalid(&work, "a work agent granted the toolset-creation module");
     }
 
-    // Scenario: sub-agent cannot receive an inspection module
+    // Scenario: un sous-agent ne peut pas recevoir un module d'inspection
     #[test]
     fn sub_agent_cannot_receive_an_inspection_module() {
         let sub = with_modules_of(AgentKind::Sub, &["inspect"]);

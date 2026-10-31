@@ -41,30 +41,30 @@ Depends on:
   serde
   serde_json
 
-Scenario: result truncated at the cap with original size
-  Given a result of 50 characters and a cap of 20
-  When a @ScriptRecord is built
-  Then the result has 20 characters, original_len is 50 and truncated is true
+Scenario: résultat tronqué au plafond avec la taille d'origine
+  Given un résultat de 50 caractères et un plafond de 20
+  When un @ScriptRecord est construit
+  Then le résultat fait 20 caractères, original_len vaut 50 et truncated vaut vrai
 
-Scenario: result under the cap is untouched
-  Given a result of 10 characters and a cap of 20
-  When a @ScriptRecord is built
-  Then truncated is false and the result is unchanged
+Scenario: résultat sous le plafond inchangé
+  Given un résultat de 10 caractères et un plafond de 20
+  When un @ScriptRecord est construit
+  Then truncated vaut faux et le résultat est inchangé
 
-Scenario: script and result never leak a secret
-  Given a redactor holding `tok-123`, a script containing `tok-123` and a result containing `tok-123`
-  When a @ScriptRecord is built
-  Then neither the script nor the result nor the error contains `tok-123`
+Scenario: ni le script ni le résultat ne laissent fuir un secret
+  Given un redactor contenant `tok-123`, un script contenant `tok-123` et un résultat contenant `tok-123`
+  When un @ScriptRecord est construit
+  Then ni le script, ni le résultat, ni l'erreur ne contient `tok-123`
 
-Scenario: truncation does not split a multi-byte character
-  Given a result of twenty `é` characters and a cap of 7
-  When a @ScriptRecord is built
-  Then the result is seven `é` characters
+Scenario: la troncature ne coupe pas un caractère multi-octets
+  Given un résultat de vingt caractères `é` et un plafond de 7
+  When un @ScriptRecord est construit
+  Then le résultat fait sept caractères `é`
 
-Scenario: MCP arguments are masked
-  Given a redactor holding `tok-123` and arguments `{"auth": "tok-123"}`
-  When an @McpRecord is built
-  Then the arguments are `{"auth": "***"}`
+Scenario: les arguments MCP sont masqués
+  Given un redactor contenant `tok-123` et des arguments `{"auth": "tok-123"}`
+  When un @McpRecord est construit
+  Then les arguments valent `{"auth": "***"}`
 
 Tasks:
   [x] #1 Tests puis implémentation.

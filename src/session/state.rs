@@ -697,7 +697,7 @@ mod tests {
         );
     }
 
-    // Scenario: rewritten state holds the current format
+    // Scenario: l'état réécrit porte le format courant
     #[test]
     fn rewritten_state_holds_the_current_format() {
         let text = json!({
@@ -722,7 +722,7 @@ mod tests {
         );
     }
 
-    // Scenario: absent creation date is the Unix epoch
+    // Scenario: la date de création absente vaut l'époque Unix
     #[test]
     fn absent_creation_date_is_the_epoch() {
         let state = SessionState::from_json(&minimal_document(&json!({})))
@@ -932,7 +932,7 @@ mod tests {
         SessionState::from_json(&text).expect("the text written by to_json must load")
     }
 
-    // Scenario: kind defaults to work
+    // Scenario: la nature vaut Work par défaut
     #[test]
     fn kind_defaults_to_work() {
         let state = SessionState::from_json(&minimal_document(&json!({})))
@@ -944,7 +944,7 @@ mod tests {
         );
     }
 
-    // Scenario: sub-agent keeps its parent
+    // Scenario: un sous-agent garde son parent
     #[test]
     fn sub_agent_keeps_its_parent() {
         let state = minimal()
@@ -968,7 +968,7 @@ mod tests {
         );
     }
 
-    // Scenario: inspection target round trip
+    // Scenario: la cible d'inspection fait l'aller-retour
     #[test]
     fn inspection_target_round_trips() {
         let mut state = minimal().with_kind(SessionKind::Config);
@@ -1002,7 +1002,7 @@ mod tests {
         );
     }
 
-    // Scenario: inspection target refused outside config
+    // Scenario: cible d'inspection refusée hors Config
     #[test]
     fn inspection_target_refused_outside_config() {
         let mut state = minimal();
@@ -1034,7 +1034,7 @@ mod tests {
         );
     }
 
-    // Scenario: parent refused outside sub-agent
+    // Scenario: parent refusé hors sous-agent
     #[test]
     fn parent_refused_outside_sub_agent() {
         let parent = SessionId::new("s-parent").expect("a non-empty identifier");
@@ -1049,7 +1049,7 @@ mod tests {
         );
     }
 
-    // Scenario: changing kind drops the target
+    // Scenario: changer de nature retire la cible
     #[test]
     fn changing_kind_drops_the_target() {
         let mut state = minimal().with_kind(SessionKind::Config);

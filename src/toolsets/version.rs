@@ -135,7 +135,7 @@ mod tests {
         TypeRequirement::parse("cluster@1.2").expect("the sample requirement must parse")
     }
 
-    // Scenario: same major, higher or equal minor
+    // Scenario: même majeure, mineure supérieure ou égale
     #[test]
     fn same_major_higher_or_equal_minor_is_satisfied() {
         let requirement = cluster_1_2();
@@ -149,7 +149,7 @@ mod tests {
         );
     }
 
-    // Scenario: lower minor or other major
+    // Scenario: mineure inférieure ou autre majeure
     #[test]
     fn lower_minor_or_other_major_is_not_satisfied() {
         let requirement = cluster_1_2();
@@ -163,7 +163,7 @@ mod tests {
         );
     }
 
-    // Scenario: malformed requirement
+    // Scenario: exigence mal formée
     #[test]
     fn malformed_requirement_fails_with_invalid_toolset() {
         for text in ["cluster", "@1.2", "cluster@x"] {

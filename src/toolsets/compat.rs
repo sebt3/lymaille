@@ -549,7 +549,7 @@ mod tests {
         );
     }
 
-    // Scenario: missing role removes a sub-agent
+    // Scenario: un rôle manquant retire un sous-agent
     #[test]
     fn missing_role_removes_a_sub_agent() {
         let role_toolset = Toolset::new(
@@ -585,7 +585,7 @@ mod tests {
         );
     }
 
-    // Scenario: main agent fails to start
+    // Scenario: l'agent principal ne démarre pas
     #[test]
     fn main_agent_fails_to_start_with_every_gap() {
         let main = main_agent(Vec::new()).with_toolsets(vec!["grafana".to_owned()]);
@@ -642,7 +642,7 @@ mod tests {
         );
     }
 
-    // Scenario: incompatible type version is a gap
+    // Scenario: une version de type incompatible est un écart
     #[test]
     fn incompatible_type_version_is_a_gap() {
         let toolsets = vec![grafana_requiring_cluster("cluster@1.2")];
@@ -691,7 +691,7 @@ mod tests {
         );
     }
 
-    // Scenario: creation module refused for a sub-agent
+    // Scenario: module de création refusé pour un sous-agent
     #[test]
     fn creation_module_refused_for_a_sub_agent() {
         let sub = AgentDefinition::new(

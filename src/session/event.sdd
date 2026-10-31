@@ -43,35 +43,35 @@ Depends on:
   ../clock.sdd
   serde
 
-Scenario: events keep emission order
-  Given a @RecordingSink and three events emitted
-  When events is read
-  Then the three events come back in the same order
+Scenario: les événements gardent l'ordre d'émission
+  Given un @RecordingSink et trois événements émis
+  When events est lu
+  Then les trois événements reviennent dans le même ordre
 
-Scenario: event round trips through JSON
-  Given an @Event of each kind
-  When serialized then deserialized
-  Then it equals the original
+Scenario: un événement fait l'aller-retour JSON
+  Given un @Event de chaque sorte
+  When sérialisé puis désérialisé
+  Then il est égal à l'original
 
-Scenario: text fragments keep their order
-  Given a @RecordingSink and three `TextDelta` events of one turn carrying `Bon`, `jour` and `!`
-  When events is read
-  Then the three fragments come back in the same order, each with its turn and its text
+Scenario: les fragments de texte gardent leur ordre
+  Given un @RecordingSink et trois événements `TextDelta` d'un tour portant `Bon`, `jour` et `!`
+  When events est lu
+  Then les trois fragments reviennent dans le même ordre, chacun avec son tour et son texte
 
-Scenario: recording sink is shareable across threads
-  Given a @RecordingSink shared by four threads each emitting ten events
-  When all finish
-  Then forty events were recorded
+Scenario: le @RecordingSink est partageable entre threads
+  Given un @RecordingSink partagé par quatre threads émettant chacun dix événements
+  When tous ont fini
+  Then quarante événements ont été enregistrés
 
-Scenario: every variant round trips and is listed
-  Given one @Event of each variant of @EventKind, `RunInterrupted` included
-  When each is serialized then deserialized
-  Then each comes back equal, and the list of samples names each of the fourteen variants
+Scenario: chaque variante fait l'aller-retour et est listée
+  Given un @Event de chaque variante de @EventKind, `RunInterrupted` compris
+  When chacune est sérialisée puis désérialisée
+  Then chacune revient égale, et la liste des exemples nomme chacune des quatorze variantes
 
-Scenario: interrupted run names its run and its sub-agent session
-  Given a `RunInterrupted` for run `run-7` and the session `sub-7` of its sub-agent
-  When it is serialized to JSON
-  Then the run and the session are bare identifiers, and the event deserializes to the same value
+Scenario: un run interrompu nomme son run et sa session de sous-agent
+  Given un `RunInterrupted` pour le run `run-7` et la session `sub-7` de son sous-agent
+  When il est sérialisé en JSON
+  Then le run et la session sont des identifiants nus, et l'événement se désérialise à la même valeur
 
 Tasks:
   [x] #1 Tests puis implémentation.

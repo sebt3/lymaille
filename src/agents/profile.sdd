@@ -40,36 +40,36 @@ Depends on:
   serde
   serde_json
 
-Scenario: override beats detection
-  Given a detected context of 8192 and a profile overriding it to 262144
-  When the profile is resolved
-  Then the resolved context size is 262144
+Scenario: le remplacement l'emporte sur la détection
+  Given un contexte détecté de 8192 et un profil qui le remplace par 262144
+  When le profil est résolu
+  Then la taille de contexte résolue est 262144
 
-Scenario: detection fills what is not overridden
-  Given a detected context of 32768 and a profile without context override
-  When the profile is resolved
-  Then the resolved context size is 32768
+Scenario: la détection remplit ce qui n'est pas remplacé
+  Given un contexte détecté de 32768 et un profil sans remplacement de contexte
+  When le profil est résolu
+  Then la taille de contexte résolue est 32768
 
-Scenario: undetected model needs an override
-  Given no detected model
-  When a profile with a context override is resolved
-  Then it resolves
-  And a profile without it fails with ContextSizeUnknown naming the profile
+Scenario: un modèle non détecté exige un remplacement
+  Given aucun modèle détecté
+  When un profil avec un remplacement de contexte est résolu
+  Then il se résout
+  And un profil sans remplacement échoue avec ContextSizeUnknown en nommant le profil
 
-Scenario: defaults documented
-  Given a detected context of 40000 and nothing else
-  When resolved
-  Then max response is 5000 (an eighth of the context), tools are supported, replay is none, concurrency is 1 and the tokenization hint is 2500
+Scenario: valeurs par défaut documentées
+  Given un contexte détecté de 40000 et rien d'autre
+  When il est résolu
+  Then la réponse maximale vaut 5000 (un huitième du contexte), les tools sont pris en charge, replay vaut none, la concurrence vaut 1 et l'indication de tokenisation vaut 2500
 
-Scenario: compaction uses the profile context size
-  Given a provider announcing 8192 and a profile overriding to 262144
-  When the resolved profile builds its budget with a summary prompt of 500 tokens and a render cap of 10000 characters
-  Then the budget needs no compaction for a session of 100000 tokens
+Scenario: la compaction utilise la taille de contexte du profil
+  Given un fournisseur annonçant 8192 et un profil qui remplace par 262144
+  When le profil résolu construit son budget avec un prompt de résumé de 500 tokens et un plafond de rendu de 10000 caractères
+  Then le budget n'exige aucune compaction pour une session de 100000 tokens
 
-Scenario: profile round trips
-  Given a profile with every override and extra sampling parameters
-  When serialized then deserialized
-  Then it is identical, and a profile without overrides serializes without those fields
+Scenario: aller-retour du profil
+  Given un profil avec tous les remplacements et des paramètres d'échantillonnage supplémentaires
+  When il est sérialisé puis désérialisé
+  Then il est identique, et un profil sans remplacement se sérialise sans ces champs
 
 Tasks:
   [x] #6 Tests manquants : surcharge face à une détection plus grande ET plus petite ; `max_response` et `tools` surchargés puis détectés ; @ResolvedProfile::budget qui dépend de l'indice de tokenisation (le plafond de rendu converti change avec l'indice) ;

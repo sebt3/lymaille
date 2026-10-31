@@ -439,7 +439,7 @@ mod tests {
         }
     }
 
-    // Scenario: shell function lists with its documentation
+    // Scenario: la fonction de coquille est listée avec sa documentation
     #[tokio::test]
     async fn shell_function_lists_with_its_documentation() {
         let pad = InspectionPad::new(
@@ -469,7 +469,7 @@ mod tests {
         );
     }
 
-    // Scenario: shell call fails without side effect
+    // Scenario: l'appel à une coquille échoue sans effet de bord
     #[tokio::test]
     async fn shell_call_fails_without_side_effect() {
         let Ok(pad) = InspectionPad::new(
@@ -493,7 +493,7 @@ mod tests {
         );
     }
 
-    // Scenario: session variables are read-only
+    // Scenario: les variables de session sont en lecture seule
     #[tokio::test]
     async fn session_variables_are_read_only() {
         let snapshot = snapshot_of("let n = 3;").await;
@@ -519,7 +519,7 @@ mod tests {
         assert_eq!(again.text(), "3", "the failed write left the variable unchanged");
     }
 
-    // Scenario: session functions are listed but not callable
+    // Scenario: les fonctions de session sont listées mais non appelables
     #[tokio::test]
     async fn session_functions_are_listed_but_not_callable() {
         let snapshot = snapshot_of("fn f(x) { x + 1 }").await;
@@ -555,7 +555,7 @@ mod tests {
         );
     }
 
-    // Scenario: session functions are listed but not callable (the source of a function is read by `source`, on the
+    // Scenario: les fonctions de session sont listées mais non appelables (the source of a function is read by `source`, on the
     // inspection pad only)
     #[tokio::test]
     async fn source_is_refused_on_a_definition_target() {
@@ -636,7 +636,7 @@ mod tests {
         );
     }
 
-    // Scenario: no filesystem or shell group (the host group is absent too)
+    // Scenario: aucun groupe fs ni shell (the host group is absent too)
     #[tokio::test]
     async fn host_group_is_absent_even_when_the_target_grants_it() {
         let target = Grants::new()
@@ -782,7 +782,7 @@ mod tests {
         );
     }
 
-    // Scenario: definition target has no variables
+    // Scenario: une cible de définition n'a aucune variable
     #[tokio::test]
     async fn definition_target_has_no_variables() {
         let Ok(pad) = InspectionPad::new(
@@ -803,7 +803,7 @@ mod tests {
         assert_eq!(outcome.text(), "0", "a definition has no variable");
     }
 
-    // Scenario: no filesystem or shell group
+    // Scenario: aucun groupe fs ni shell
     #[tokio::test]
     async fn no_filesystem_or_shell_group() {
         let target = Grants::new()

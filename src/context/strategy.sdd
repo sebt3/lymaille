@@ -44,40 +44,40 @@ Depends on:
   ../session/history.sdd
   ../session/segment.sdd
 
-Scenario: default strategy sends the whole session
-  Given a history of four messages and a recording summarizer
-  When the default strategy compacts it
-  Then the summarizer received all four messages in order and the result is a Compaction boundary followed by the summary as a user message
+Scenario: la stratégie par défaut envoie la session entière
+  Given un historique de quatre messages et un résumeur enregistreur
+  When la stratégie par défaut compacte cet historique
+  Then le résumeur a reçu les quatre messages dans l'ordre et le résultat est une frontière Compaction suivie du résumé en message utilisateur
 
-Scenario: tool calls and tool names are in the transcript
-  Given an assistant message with a tool call `rhai_pad` with arguments `{"script": "1+1"}` and its result
-  When the transcript is built
-  Then it contains the tool name `rhai_pad`, the arguments and the result content, in order
+Scenario: les appels d'outils et les noms d'outils sont dans la transcription
+  Given un message assistant avec un appel d'outil `rhai_pad` aux arguments `{"script": "1+1"}` et son résultat
+  When la transcription est construite
+  Then elle contient le nom d'outil `rhai_pad`, les arguments et le contenu du résultat, dans l'ordre
 
-Scenario: reasoning follows the replay mode
-  Given an assistant message with reasoning, with replay mode AllTurns then None
-  When the transcript is built
-  Then the reasoning is present with AllTurns and absent with None
+Scenario: le raisonnement suit le mode de rejeu
+  Given un message assistant avec raisonnement, avec le mode de rejeu AllTurns puis None
+  When la transcription est construite
+  Then le raisonnement est présent avec AllTurns et absent avec None
 
-Scenario: no compaction between a tool call and its result
-  Given a history ending with an assistant tool call that has no result
-  When compact is called
-  Then it fails with PendingToolCall and the summarizer was never called
+Scenario: aucune compaction entre un appel d'outil et son résultat
+  Given un historique se terminant par un appel d'outil de l'assistant sans résultat
+  When compact est appelé
+  Then il échoue avec PendingToolCall et le résumeur n'a jamais été appelé
 
-Scenario: digest carries counts only
-  Given a digest of 3 open tasks and 7 memories
-  When rendered and appended to the summary
-  Then the text contains 3 and 7 and none of the task or memory text
+Scenario: le digest ne porte que des nombres
+  Given un digest de 3 tâches ouvertes et 7 Memory
+  When rendu et ajouté au résumé
+  Then le texte contient 3 et 7 et aucun texte de tâche ou de Memory
 
-Scenario: empty summary refused
-  Given a summarizer that returns blank text
-  When compact is called
-  Then it fails with EmptySummary
+Scenario: résumé vide refusé
+  Given un résumeur qui rend un texte blanc
+  When compact est appelé
+  Then il échoue avec EmptySummary
 
-Scenario: summarizer failure is reported
-  Given a summarizer that fails
-  When compact is called
-  Then it fails with Summarizer and the history given is unchanged
+Scenario: l'échec du résumeur est signalé
+  Given un résumeur qui échoue
+  When compact est appelé
+  Then il échoue avec Summarizer et l'historique donné est inchangé
 
 Tasks:
   [x] #1 Tests (résumeur simulé) puis implémentation.

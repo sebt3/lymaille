@@ -854,7 +854,7 @@ mod tests {
         assert_eq!(*kind, LimitKind::ArraySize, "the kind");
     }
 
-    // Scenario: a module wrapper names the module in front of the message
+    // Scenario: un enveloppeur de module nomme le module devant le message
     #[test]
     fn module_wrapper_names_the_module_in_its_message() {
         let cause = EvalAltResult::ErrorRuntime(Dynamic::from("inside"), Position::new(4, 7));
@@ -870,7 +870,7 @@ mod tests {
         );
     }
 
-    // Scenario: the innermost function of a nested call is kept
+    // Scenario: la fonction la plus interne d'un appel imbriqué est conservée
     #[test]
     fn innermost_function_of_two_nested_levels_is_kept() {
         let script = "fn g() {\n    missing_fn()\n}\nfn f() {\n    g()\n}\nf()";
@@ -888,7 +888,7 @@ mod tests {
         assert_eq!(position.line(), 2, "the position of the inner call");
     }
 
-    // Scenario: the message does not repeat the position of the error
+    // Scenario: le message ne répète pas la position de l'erreur
     #[test]
     fn runtime_message_does_not_repeat_the_position() {
         let error = failure("let a = 1 / 0; a");
@@ -907,7 +907,7 @@ mod tests {
         assert!(position.is_some(), "the position is kept apart from the message");
     }
 
-    // Scenario: each limit kind has its own text
+    // Scenario: chaque genre de limite a son propre texte
     #[test]
     fn each_limit_kind_has_its_text() {
         let cases = [

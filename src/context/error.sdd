@@ -24,10 +24,10 @@ Must:
   @ContextError est `#[non_exhaustive]`, dérive `thiserror::Error`, chaque variante a un texte Display en anglais qui nomme la cause et les nombres en jeu (aucun contenu de session).
   @ContextResult est l'alias `Result<T, ContextError>`.
 
-Scenario: display names the cause
-  Given each variant built with sample numbers
-  When formatted
-  Then the text names the cause and contains the numbers
+Scenario: le texte d'erreur nomme la cause
+  Given chaque variante construite avec des nombres d'exemple
+  When formatée
+  Then le texte nomme la cause et contient les nombres
 
 Tasks:
   [x] #1 Tests puis implémentation.

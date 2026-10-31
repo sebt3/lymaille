@@ -91,92 +91,92 @@ Tasks:
       Prose corrigée (Accepts, rustdocs) le 2026-10-29 ; validé.
   [ ] #18 Sérialisation texte (frontmatter YAML + prompt en corps) : `to_text` et `from_text`, avec les Scenarios de fin de ce fichier ; tests rouges puis implémentation, à valider.
 
-Scenario: model by profile name only
-  Given a definition built with profile `strix-qwen`
-  When serialized
-  Then the JSON has the profile name and no provider field
+Scenario: modèle désigné par le seul nom du profil
+  Given une définition construite avec le profil `strix-qwen`
+  When elle est sérialisée
+  Then le JSON porte le nom du profil et aucun champ provider
 
-Scenario: fingerprint is stable and sensitive
-  Given a definition
-  When its fingerprint is computed twice, after a JSON round trip, and after changing one toolset
-  Then the first three are equal and the last differs
+Scenario: l'empreinte est stable et sensible
+  Given une définition
+  When son empreinte est calculée deux fois, après un aller-retour JSON, et après la modification d'un toolset
+  Then les trois premières sont égales et la dernière diffère
 
-Scenario: no capability by default
-  Given a definition with only the required fields
-  When read
-  Then modules and toolsets are empty
+Scenario: aucune capacité par défaut
+  Given une définition ne renseignant que les champs requis
+  When elle est lue
+  Then les modules et les toolsets sont vides
 
-Scenario: sub-agent cannot delegate
-  Given a sub-agent definition declaring delegable sub-agents
-  When validated
-  Then it fails with InvalidDefinition
+Scenario: un sous-agent ne peut pas déléguer
+  Given une définition de sous-agent qui déclare des sous-agents délégables
+  When elle est validée
+  Then elle échoue avec InvalidDefinition
 
-Scenario: main agent has no output schema
-  Given a main agent declaring an output schema
-  When validated
-  Then it fails with InvalidDefinition
+Scenario: l'agent principal n'a pas de schéma de sortie
+  Given un agent principal qui déclare un schéma de sortie
+  When elle est validée
+  Then elle échoue avec InvalidDefinition
 
-Scenario: duplicate delegable sub-agent refused
+Scenario: sous-agent délégable en double refusé
   Given une définition de nature Work qui déclare deux fois le même sous-agent délégable
   When elle est validée
   Then elle échoue avec InvalidDefinition
 
-Scenario: self delegation and duplicates refused
-  Given a main agent listing itself as delegable, and a definition with a duplicated toolset
-  When validated
-  Then both fail with InvalidDefinition
+Scenario: délégation à soi-même et doublons refusés
+  Given un agent principal qui se liste lui-même comme délégable, et une définition avec un toolset en double
+  When elle est validée
+  Then les deux échouent avec InvalidDefinition
 
-Scenario: round trip
-  Given a main agent with every field set
-  When serialized then deserialized
-  Then it is identical
+Scenario: aller-retour
+  Given un agent principal dont tous les champs sont renseignés
+  When il est sérialisé puis désérialisé
+  Then il est identique
 
-Scenario: no memory right in the definition
-  Given a main agent, and a JSON of an older definition carrying a `memory` field
-  When the definition is serialized, and the old JSON is read
-  Then the serialized JSON has no `memory` field, and the old JSON reads as the definition without it, with the same fingerprint
+Scenario: aucun droit de mémoire dans la définition
+  Given un agent principal, et un JSON d'une ancienne définition portant un champ `memory`
+  When la définition est sérialisée, et l'ancien JSON est relu
+  Then le JSON sérialisé n'a aucun champ `memory`, et l'ancien JSON se relit comme la définition sans ce champ, avec la même empreinte
 
-Scenario: memory limits absent by default
-  Given a sandbox built with only the script delay and the render cap
-  When the three memory limits are read and the definition is serialized
-  Then the limits are `None` and the sandbox JSON has no memory limit key
+Scenario: plafonds de mémoire absents par défaut
+  Given un sandbox construit avec seulement le délai de script et le plafond de rendu
+  When les trois plafonds de mémoire sont lus et la définition est sérialisée
+  Then les plafonds valent `None` et le JSON du sandbox n'a aucune clé de plafond de mémoire
 
-Scenario: memory limits set and read back
-  Given a sandbox with a string limit of 1000 bytes, an array limit of 500 and a map limit of 200
-  When the limits are read, and the definition is serialized then deserialized
-  Then they report 1000, 500 and 200, and the deserialized definition is identical
+Scenario: plafonds de mémoire renseignés et relus
+  Given un sandbox avec un plafond de chaîne de 1000 octets, un plafond de tableau de 500 et un plafond de map de 200
+  When les plafonds sont lus, et la définition est sérialisée puis désérialisée
+  Then ils valent 1000, 500 et 200, et la définition désérialisée est identique
 
-Scenario: old sandbox JSON without memory limits
-  Given a JSON of an older definition whose sandbox carries only the script delay and the render cap
-  When the JSON is read
-  Then the three memory limits are `None`
+Scenario: ancien JSON de sandbox sans plafonds de mémoire
+  Given un JSON d'une ancienne définition dont le sandbox ne porte que le délai de script et le plafond de rendu
+  When le JSON est lu
+  Then les trois plafonds de mémoire valent `None`
 
-Scenario: zero memory limit refused
-  Given a main agent whose sandbox sets a string, an array or a map limit to zero
-  When validated
-  Then it fails with InvalidDefinition
+Scenario: plafond de mémoire nul refusé
+  Given un agent principal dont le sandbox fixe à zéro un plafond de chaîne, de tableau ou de map
+  When elle est validée
+  Then elle échoue avec InvalidDefinition
 
-Scenario: fingerprint sensitive to memory limits
-  Given a definition with the three memory limits set
-  When one limit changes value, or is removed
-  Then the fingerprint differs for each change
+Scenario: empreinte sensible aux plafonds de mémoire
+  Given une définition dont les trois plafonds de mémoire sont renseignés
+  When un plafond change de valeur, ou est retiré
+  Then l'empreinte diffère à chaque changement
 
-Scenario: configuration agent cannot delegate
+Scenario: un agent de configuration ne peut pas déléguer
   Given une définition de nature Config qui déclare un sous-agent délégable
   When elle est validée
   Then elle échoue avec InvalidDefinition
 
-Scenario: work agent cannot receive the creation module
+Scenario: un agent de travail ne peut pas recevoir le module de création
   Given une définition de nature Work qui accorde le module `toolset_creator`
   When elle est validée
   Then elle échoue avec InvalidDefinition
 
-Scenario: sub-agent cannot receive an inspection module
+Scenario: un sous-agent ne peut pas recevoir un module d'inspection
   Given une définition de nature Sub qui accorde le module `inspect`
   When elle est validée
   Then elle échoue avec InvalidDefinition
 
-Scenario: configuration agent with its modules is valid
+Scenario: un agent de configuration avec ses modules est valide
   Given une définition de nature Config qui accorde `toolset_creator`, `inspect`, `contexts` et `sessions`
   When elle est validée
   Then elle réussit

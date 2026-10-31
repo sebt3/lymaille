@@ -538,7 +538,7 @@ mod tests {
         move |name: &str| types.iter().find(|candidate| candidate.name == name).cloned()
     }
 
-    // Scenario: including a type requires both field sets
+    // Scenario: inclure un type exige les deux ensembles de champs
     #[test]
     fn including_a_type_requires_both_field_sets() {
         let k8s_prod = ContextType::new("k8s-prod".to_owned(), semver("1.0.0"), schema(&["region"], &[]))
@@ -577,7 +577,7 @@ mod tests {
         );
     }
 
-    // Scenario: optional field is a minor change
+    // Scenario: un champ optionnel est un changement mineur
     #[test]
     fn optional_field_is_a_minor_change() {
         let previous = cluster_1_0();
@@ -594,7 +594,7 @@ mod tests {
         );
     }
 
-    // Scenario: required field is a major change
+    // Scenario: un champ requis est un changement majeur
     #[test]
     fn required_field_is_a_major_change() {
         let previous = cluster_1_0();
@@ -611,7 +611,7 @@ mod tests {
         );
     }
 
-    // Scenario: optional becoming required is a major change
+    // Scenario: un champ optionnel devenu requis est un changement majeur
     #[test]
     fn optional_becoming_required_is_a_major_change() {
         let previous = ContextType::new(
@@ -669,7 +669,7 @@ mod tests {
         );
     }
 
-    // Scenario: secret-like default refused
+    // Scenario: défaut ressemblant à un secret refusé
     #[test]
     fn secret_like_default_refused() {
         let schema = json!({
@@ -700,7 +700,7 @@ mod tests {
         );
     }
 
-    // Scenario: removal is a major change
+    // Scenario: une suppression est un changement majeur
     #[test]
     fn removal_is_a_major_change() {
         let previous = cluster_1_0()
@@ -719,7 +719,7 @@ mod tests {
         );
     }
 
-    // Scenario: inclusion cycle refused
+    // Scenario: cycle d'inclusion refusé
     #[test]
     fn inclusion_cycle_refused() {
         let first = ContextType::new("first".to_owned(), semver("1.0.0"), schema(&[], &[]))
@@ -843,7 +843,7 @@ mod tests {
         .expect("the requirement is added")
     }
 
-    // Scenario: schema that does not compile is refused
+    // Scenario: schéma qui ne compile pas refusé
     #[test]
     fn schema_that_does_not_compile_is_refused() {
         let result = ContextType::new("cluster".to_owned(), semver("1.0.0"), json!({ "type": "foo" }));
@@ -853,7 +853,7 @@ mod tests {
         );
     }
 
-    // Scenario: remote reference is refused
+    // Scenario: référence distante refusée
     #[test]
     fn remote_and_file_references_are_refused() {
         for target in [
@@ -873,7 +873,7 @@ mod tests {
         }
     }
 
-    // Scenario: every value is validated against every flattened schema
+    // Scenario: chaque valeur est validée contre chaque schéma aplati
     #[test]
     fn every_value_is_validated_against_every_flattened_schema() {
         let k8s_prod = ContextType::new(
@@ -907,7 +907,7 @@ mod tests {
         );
     }
 
-    // Scenario: undeclared key is rendered as a marker
+    // Scenario: clé non déclarée rendue par un marqueur
     #[test]
     fn undeclared_key_is_rendered_as_a_marker() {
         let open = ContextType::new(

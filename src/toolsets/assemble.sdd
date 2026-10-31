@@ -35,20 +35,20 @@ Depends on:
   ../scratchpad/engine.sdd
   rhai
 
-Scenario: dependency works but stays hidden
-  Given a toolset `ops` that calls the module `helpers` and an agent that does not grant `helpers`
-  When the toolset is assembled and a function of `ops` that uses `helpers` is called
-  Then the call succeeds and `helpers` is absent from the grants
+Scenario: la dépendance fonctionne mais reste cachée
+  Given un toolset `ops` qui appelle le module `helpers` et un agent qui n'accorde pas `helpers`
+  When le toolset est assemblé et une fonction de `ops` qui utilise `helpers` est appelée
+  Then l'appel réussit et `helpers` est absent des modules accordés
 
-Scenario: dependency not available
-  Given a toolset that depends on a missing module
-  When it is assembled
-  Then the toolset is reported as failed and the others are granted
+Scenario: dépendance indisponible
+  Given un toolset qui dépend d'un module absent
+  When il est assemblé
+  Then le toolset est signalé en échec et les autres sont accordés
 
-Scenario: skills follow their toolset
-  Given two toolsets with one skill each and only one granted
-  When they are assembled
-  Then only the skill of the granted toolset is granted
+Scenario: les skills suivent leur toolset
+  Given deux toolsets portant chacun un skill, dont un seul est accordé
+  When ils sont assemblés
+  Then seul le skill du toolset accordé est accordé
 
 Tasks:
   [x] #1 Tests puis implémentation.

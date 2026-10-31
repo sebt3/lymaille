@@ -40,87 +40,87 @@ Must:
   Un texte vide n'est jamais tronqué.
   Le rendu est déterministe : même valeur, même texte. Il ne masque aucun secret (le masquage se fait avant la troncature, dans ./run.sdd) et ne lit aucune horloge ni E/S.
 
-Scenario: a string is rendered without quotes
-  Given the string value `hello`
-  When rendered with a cap of 100
-  Then the text is `hello` and truncated is false
+Scenario: une chaîne est rendue sans guillemets
+  Given la valeur chaîne `hello`
+  When rendu avec un plafond de 100
+  Then le texte est `hello` et truncated vaut false
 
-Scenario: a map is rendered as compact JSON
-  Given the map `#{b: 2, a: "x"}`
-  When rendered with a cap of 100
-  Then the text is `{"a":"x","b":2}`
+Scenario: une table est rendue en JSON compact
+  Given la table `#{b: 2, a: "x"}`
+  When rendu avec un plafond de 100
+  Then le texte est `{"a":"x","b":2}`
 
-Scenario: scalars and unit
-  Given the values `42`, `1.5`, `true`, the char `x` and `()`
-  When each is rendered
-  Then the texts are `42`, `1.5`, `true`, `x` and `()`
+Scenario: scalaires et unité
+  Given les valeurs `42`, `1.5`, `true`, le caractère `x` et `()`
+  When chacune est rendue
+  Then les textes sont `42`, `1.5`, `true`, `x` et `()`
 
-Scenario: non finite float keeps its Rhai text
-  Given the float NaN and the float infinity
-  When rendered
-  Then the texts are `NaN` and `inf`, never `null`
+Scenario: un flottant non fini garde son texte Rhai
+  Given le flottant NaN et le flottant infini
+  When le rendu est effectué
+  Then les textes sont `NaN` et `inf`, jamais `null`
 
-Scenario: blob is described, not dumped
-  Given a blob of three bytes
-  When rendered
-  Then the text is `[blob: 3 bytes]`
+Scenario: un blob est décrit, non déversé
+  Given un blob de trois octets
+  When le rendu est effectué
+  Then le texte est `[blob: 3 bytes]`
 
-Scenario: a non serializable value falls back to its display
-  Given a function pointer value
-  When rendered
-  Then a text is produced and nothing panics
+Scenario: une valeur non sérialisable revient à son affichage
+  Given une valeur de pointeur de fonction
+  When le rendu est effectué
+  Then un texte est produit et rien ne panique
 
-Scenario: text at exactly the cap is untouched
-  Given a string of 8000 characters
-  When rendered with a cap of 8000
-  Then the text is unchanged and truncated is false
+Scenario: un texte à exactement le plafond est inchangé
+  Given une chaîne de 8000 caractères
+  When le rendu est effectué avec un plafond de 8000
+  Then le texte est inchangé et truncated vaut false
 
-Scenario: oversized output is truncated with a notice
-  Given a string of 20000 characters
-  When rendered with a cap of 8000
-  Then the text has at most 8000 characters, starts with the first characters of the original and ends with its last characters
-  And the middle holds the notice stating the exact number of omitted characters (20000 minus the kept ones) out of `20000` and inviting to extract the useful part
-  And truncated is true and original_chars is 20000
+Scenario: une sortie trop grande est tronquée avec un avis
+  Given une chaîne de 20000 caractères
+  When le rendu est effectué avec un plafond de 8000
+  Then le texte fait au plus 8000 caractères, commence par les premiers caractères de l'original et finit par ses derniers caractères
+  And le milieu porte l'avis qui indique le nombre exact de caractères omis (20000 moins ceux qui sont conservés) sur `20000`, et invite à extraire la partie utile
+  And truncated vaut true et original_chars vaut 20000
 
-Scenario: head and tail sizes
-  Given a string of 1000 characters, a cap of 400 and a notice of known length
-  When rendered
-  Then the head holds ceil(place/2) characters, the tail floor(place/2), and the total equals the cap or is one character shorter
+Scenario: tailles de la tête et de la queue
+  Given une chaîne de 1000 caractères, un plafond de 400 et un avis de longueur connue
+  When le rendu est effectué
+  Then la tête porte ceil(place/2) caractères, la queue floor(place/2), et le total égale le plafond ou est d'un caractère de moins
 
-Scenario: truncation does not split a multi-byte character
-  Given 20000 characters `é` and a cap of 1000
-  When rendered
-  Then every character of the text is `é` or part of the notice, and the text is valid
+Scenario: la troncature ne coupe pas un caractère multi-octets
+  Given 20000 caractères `é` et un plafond de 1000
+  When le rendu est effectué
+  Then chaque caractère du texte est `é` ou fait partie de l'avis, et le texte est valide
 
-Scenario: cap smaller than the notice
-  Given a long string and a cap of 10
-  When rendered
-  Then the text is the first 10 characters of the notice and truncated is true
+Scenario: plafond plus petit que l'avis
+  Given une chaîne longue et un plafond de 10
+  When le rendu est effectué
+  Then le texte est les 10 premiers caractères de l'avis et truncated vaut true
 
-Scenario: zero cap
-  Given a non empty string and a cap of zero
-  When rendered
-  Then the text is empty and truncated is true
+Scenario: plafond à zéro
+  Given une chaîne non vide et un plafond à zéro
+  When le rendu est effectué
+  Then le texte est vide et truncated vaut true
 
-Scenario: empty text is never truncated
-  Given an empty string and a cap of zero
-  When rendered
-  Then the text is empty and truncated is false
+Scenario: un texte vide n'est jamais tronqué
+  Given une chaîne vide et un plafond à zéro
+  When le rendu est effectué
+  Then le texte est vide et truncated vaut false
 
-Scenario: full text has no cap
-  Given an array of 100000 integers
-  When full_text is called
-  Then the whole compact JSON is returned
+Scenario: le texte complet n'a pas de plafond
+  Given un tableau de 100000 entiers
+  When full_text est appelée
+  Then le JSON compact entier est rendu
 
-Scenario: rendering is deterministic
-  Given a map with ten keys inserted in two different orders
-  When both are rendered
-  Then the texts are equal
+Scenario: le rendu est déterministe
+  Given une table de dix clés insérées dans deux ordres différents
+  When les deux sont rendues
+  Then les textes sont égaux
 
-Scenario: a blob nested in a map or an array is described by its size
-  Given a map and an array holding blobs of three and one bytes
-  When the full text is computed
-  Then each blob is the JSON string `[blob: N bytes]`
+Scenario: un blob imbriqué dans une table ou un tableau est décrit par sa taille
+  Given une table et un tableau qui portent des blobs de trois et un octets
+  When le texte complet est calculé
+  Then chaque blob est la chaîne JSON `[blob: N bytes]`
 
 Tasks:
   [x] #1 Tests puis implémentation, vérifié le 2026-10-30.

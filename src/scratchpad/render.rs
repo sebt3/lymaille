@@ -213,7 +213,7 @@ mod tests {
         assert_eq!(full_text(&value), "[blob: 3 bytes]", "blob description");
     }
 
-    // Scenario: a blob nested in a map or an array is described by its size
+    // Scenario: un blob imbriqué dans une table ou un tableau est décrit par sa taille
     #[test]
     fn nested_blob_is_described_by_its_size() {
         let in_map = map_of(&[("b", Dynamic::from_blob(vec![1, 2, 3]))]);
