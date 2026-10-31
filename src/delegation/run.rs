@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use tokio::runtime::Handle;
 use tokio::sync::watch;
 
 use super::error::{DelegationError, DelegationResult};
@@ -320,7 +321,7 @@ impl<L: SubagentLauncher> RunRegistry<L> {
     /// Returns [`DelegationError::InvalidSchema`] when a schema does not compile as a JSON Schema.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the signature is the contract of src/delegation/run.sdd: the launcher, the declared sub-agents, the sink, the clock, the hub and the parent session"
+        reason = "six arguments, the signature of src/delegation/run.sdd (Accepts of @RunRegistry::new): the launcher, the declared sub-agents, the sink, the clock, the hub and the parent session; a struct would add a public type the spec does not name"
     )]
     pub fn new(
         launcher: Arc<L>,
@@ -393,6 +394,8 @@ impl<L: SubagentLauncher> RunRegistry<L> {
                 name: subagent.to_owned(),
             });
         };
+        // Checked before anything is registered: the spawn below needs the runtime, and a refusal must leave no entry behind.
+        let _runtime = Handle::try_current().map_err(|_absent| DelegationError::NoRuntime)?;
         let collector = Arc::new(ResultCollector::new(subagent, schema, *corrections)?);
         let child = cancel.child();
         let resumed = resume.is_some();
@@ -700,18 +703,20 @@ fn outcome_of(entry: &Entry) -> Option<SubagentOutcome> {
 }
 
 /// Spawns the run in a detached task. The task concludes the run and reports it even when the launcher panics or the task
-/// is stopped, so that no wait stays open.
+/// is stopped, so that no wait stays open. The finisher is built before the spawn: a task dropped before its first poll
+/// drops its future, and with it the finisher, which then concludes the run.
 fn spawn<L: SubagentLauncher>(
     launcher: Arc<L>,
     reporter: Arc<Reporter>,
     entry: Arc<Entry>,
     request: LaunchRequest,
 ) {
+    let finisher = Finisher {
+        entry: Some(entry),
+        reporter,
+    };
     drop(tokio::spawn(async move {
-        let mut finisher = Finisher {
-            entry: Some(entry),
-            reporter,
-        };
+        let mut finisher = finisher;
         let returned = launcher.launch(request).await;
         finisher.finish(Some(returned));
     }));
@@ -1610,6 +1615,17 @@ mod tests {
             interrupted_runs(&rig.sink).is_empty(),
             "no RunInterrupted is emitted by a refused restore"
         );
+        assert!(
+            matches!(
+                rig.registry.status(&run_id("run-1")),
+                Err(DelegationError::UnknownRun { .. })
+            ),
+            "the refused restore is atomic: run-1 stays unknown, even the first record that was valid"
+        );
+        assert!(
+            rig.registry.records().expect("records").is_empty(),
+            "the refused restore registers no run to persist"
+        );
     }
 
     // Scenario: les nouveaux runs ne réutilisent pas un identifiant restauré
@@ -2186,6 +2202,9 @@ mod tests {
             run_ended(&rig.sink).is_empty(),
             "RunEnded waits for the end of the run"
         );
+        // Not normalized yet for `wait`: it returns at the end of the run only, after `RunEnded` (`Must` of run.sdd).
+        let early = tokio::time::timeout(Duration::from_millis(20), rig.registry.wait(&run)).await;
+        assert!(early.is_err(), "wait does not return before the end of the run");
         rig.launcher.release();
         let finished = bounded_wait(&rig.registry, &run).await;
         assert_eq!(
@@ -2197,6 +2216,102 @@ mod tests {
             run_ended(&rig.sink),
             vec![(run.clone(), Outcome::Failed)],
             "RunEnded reports the same Failed"
+        );
+    }
+
+    // Scenario: un run est toujours conclu, même si la tâche est arrêtée (`Must` de run.sdd, « même si la tâche est arrêtée »)
+    #[test]
+    fn a_run_is_concluded_when_its_task_is_stopped_before_it_first_runs() {
+        let rig = rig(&["answering"]);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime builds");
+        let handle = {
+            let _entered = runtime.enter();
+            rig.registry
+                .start("answering", "task", &CancelHandle::new())
+                .expect("a declared sub-agent starts")
+        };
+        // Stopping the runtime drops the task of the run before its first poll.
+        drop(runtime);
+        let RunProgress::Ended(outcome) = rig.registry.status(handle.run()).expect("the run is known") else {
+            panic!("a run whose task was stopped must be concluded");
+        };
+        assert_eq!(
+            outcome.status(),
+            SubagentStatus::Failed,
+            "the run is concluded as failed"
+        );
+        assert_eq!(
+            outcome.reason(),
+            Some(NO_RESULT_REASON),
+            "the failure carries the fixed reason"
+        );
+        assert_eq!(
+            run_ended(&rig.sink),
+            vec![(handle.run().clone(), Outcome::Failed)],
+            "RunEnded is emitted for the stopped run"
+        );
+        assert_eq!(
+            ended_notices(&rig.hub),
+            vec![(handle.run().as_str().to_owned(), "failed".to_owned())],
+            "the notice ended is sent for the stopped run"
+        );
+    }
+
+    // Not a Scenario (correction 2): a start on a thread without runtime is refused with `NoRuntime`, and registers nothing,
+    // so that no wait is left on a run that never ran. The next run gets the number the refused one did not take.
+    #[test]
+    fn start_without_a_runtime_is_refused_and_registers_nothing() {
+        let rig = rig(&["answering"]);
+        let refused = rig.registry.start("answering", "task", &CancelHandle::new());
+        assert!(
+            matches!(refused, Err(DelegationError::NoRuntime)),
+            "a start without runtime is refused as NoRuntime"
+        );
+        assert!(
+            rig.registry.records().expect("records").is_empty(),
+            "the refused run is not registered"
+        );
+        assert_eq!(rig.launcher.launches(), 0, "the launcher is never called");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime builds");
+        let handle = {
+            let _entered = runtime.enter();
+            rig.registry
+                .start("answering", "task", &CancelHandle::new())
+                .expect("a declared sub-agent starts once a runtime is entered")
+        };
+        assert_eq!(
+            handle.run().as_str(),
+            "run-1",
+            "the refused start took no run number"
+        );
+    }
+
+    // Not a Scenario (correction 2): a resumption on a thread without runtime is refused, and the restored run stays listed
+    // and resumable.
+    #[test]
+    fn resume_without_a_runtime_keeps_the_restored_run() {
+        let rig = rig(&["awaiting"]);
+        rig.registry
+            .restore(vec![sample_record("run-7", "awaiting", "session-7")])
+            .expect("the record is restored");
+        let session = SessionId::new("session-7").expect("a non-empty identifier");
+        let refused = rig
+            .registry
+            .resume("awaiting", "task", &CancelHandle::new(), &session);
+        assert!(
+            matches!(refused, Err(DelegationError::NoRuntime)),
+            "a resumption without runtime is refused as NoRuntime"
+        );
+        assert_eq!(
+            rig.registry.records().expect("records"),
+            vec![sample_record("run-7", "awaiting", "session-7")],
+            "the restored run is not consumed by the refused resumption"
         );
     }
 
@@ -2418,6 +2533,11 @@ mod tests {
     fn a_numbering_exhausted_by_a_restored_identifier_is_refused_without_looping() {
         let (sender, receiver) = std::sync::mpsc::channel();
         drop(std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("a runtime builds");
+            let _entered = runtime.enter();
             let rig = rig(&["answering"]);
             let restored = rig.registry.restore(vec![sample_record(
                 "run-18446744073709551615",

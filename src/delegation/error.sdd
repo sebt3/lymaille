@@ -19,6 +19,7 @@ Raises:
   @DelegationError::InvalidTimer: durée nulle, identifiant vide ou en double.
   @DelegationError::InvalidSchema: schéma de résultat d'un sous-agent qui n'est pas un schéma JSON utilisable.
   @DelegationError::Launch: échec du lancement d'un sous-agent par l'hôte ; texte fixe, sans contenu.
+  @DelegationError::NoRuntime: `start` ou `resume` appelé sur un fil sans runtime tokio ; texte fixe, rendu avant toute inscription (ajout de la correction du 2026-10-31, à valider).
   @DelegationError::Poisoned: verrou interne empoisonné.
 
 Must:

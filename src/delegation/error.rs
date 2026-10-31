@@ -57,6 +57,9 @@ pub enum DelegationError {
     /// The host failed to launch a sub-agent. The text is fixed and carries no content.
     #[error("the host failed to launch the sub-agent")]
     Launch,
+    /// A run cannot be started on a thread that has no tokio runtime: nothing is registered. The text is fixed.
+    #[error("no tokio runtime on this thread: the runs need the runtime of the host")]
+    NoRuntime,
     /// An internal lock was poisoned.
     #[error("an internal lock was poisoned")]
     Poisoned,
@@ -143,6 +146,7 @@ mod tests {
                 ["extractor", "not a JSON schema"].as_slice(),
             ),
             (DelegationError::Launch, ["launch"].as_slice()),
+            (DelegationError::NoRuntime, ["no tokio runtime"].as_slice()),
             (DelegationError::Poisoned, ["poisoned"].as_slice()),
         ];
         for (error, expected) in cases {

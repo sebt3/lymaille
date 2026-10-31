@@ -346,6 +346,29 @@ mod tests {
         );
     }
 
+    // Not a Scenario: the local count follows the requests still in flight. Two requests taken and one released leave one in
+    // flight, so one place of the limit is taken and the limiter still offers the other seven.
+    #[test]
+    fn local_counter_counts_the_requests_still_in_flight() {
+        let counter: Arc<dyn RequestCounter> = Arc::new(LocalCounter::new());
+        let limiter = InferenceLimiter::new(limit(8), Arc::clone(&counter));
+        let first = acquire_now(&limiter);
+        let second = acquire_now(&limiter);
+        drop(first);
+        assert_eq!(
+            counter.in_flight(),
+            1,
+            "one request is still in flight after one of two is released"
+        );
+        assert_eq!(
+            limiter.available(),
+            7,
+            "a limit of 8 with one request in flight leaves 7 places"
+        );
+        drop(second);
+        assert_eq!(counter.in_flight(), 0, "no request is in flight at the end");
+    }
+
     // Scenario: capacité jamais négative
     #[test]
     fn capacity_is_never_negative() {

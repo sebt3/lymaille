@@ -559,6 +559,58 @@ mod tests {
         );
     }
 
+    // Not a Scenario: a legitimate predicate of a few thousand operations passes. The ceiling counts one operation per progress
+    // callback of Rhai; 1 200 elements of `map` make about 6 000 to 8 000 callbacks (measured: the ceiling is reached between
+    // 1 500 and 2 000 elements). A ceiling counted twice per callback would stop this predicate at about 5 000 callbacks.
+    #[test]
+    fn a_legitimate_predicate_of_a_few_thousand_operations_passes() {
+        let items = vec!["1"; 1_200].join(",");
+        let set = set_of(vec![inject(
+            "count",
+            "mcp",
+            &format!("[{items}].map(|x| x + 1).len() == 1200"),
+        )]);
+
+        let triggered = set.evaluate(&event("mcp", "x", json!({})));
+
+        assert_eq!(
+            ids(triggered.notifications()),
+            ["count"],
+            "a predicate under the ceiling of 10 000 operations accepts the event"
+        );
+        assert!(
+            triggered.failures().is_empty(),
+            "a predicate under the ceiling is not a failure"
+        );
+    }
+
+    // Not a Scenario: an instant beyond `i64::MAX` milliseconds cannot be given to the predicate as an integer. The conversion
+    // fails, so the predicate fails and triggers nothing (`Must` of watcher.sdd).
+    #[test]
+    fn an_instant_beyond_i64_fails_the_predicate() {
+        let set = set_of(vec![inject("late", "mcp", "true")]);
+        let beyond = WatchEvent::new("mcp", "x", json!({}), Timestamp::from_millis(u64::MAX));
+
+        let triggered = set.evaluate(&beyond);
+
+        assert!(
+            triggered.notifications().is_empty(),
+            "an event whose instant does not fit in i64 triggers nothing"
+        );
+        assert_eq!(
+            triggered.failures(),
+            ["late"],
+            "the failed conversion is reported as a failure of the predicate"
+        );
+        // Control: the same predicate accepts an event whose instant fits.
+        let fits = set.evaluate(&event("mcp", "x", json!({})));
+        assert_eq!(
+            ids(fits.notifications()),
+            ["late"],
+            "the control event with a representable instant is accepted"
+        );
+    }
+
     // Scenario: aller-retour persistant
     #[test]
     fn persisted_form_round_trips_in_order() {

@@ -21,7 +21,16 @@ use crate::session::{CancelHandle, Redactor, RunId};
 ///
 /// Only a definition of nature `Work` gives it. A sub-agent or a configuration agent gets none, so no code path builds the
 /// `delegate` module for them (`agent-sessions/delegation#FR-2`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// The proof is consumed by [`delegate_module`]: it is not `Clone`, so one definition gives one proof, and one proof builds
+/// one `delegate` module.
+///
+/// ```compile_fail,E0599
+/// fn duplicate(main: lymaille::MainAgent) {
+///     let _copy = main.clone();
+/// }
+/// ```
+#[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct MainAgent {
     delegable: Vec<String>,
@@ -1172,6 +1181,36 @@ mod tests {
         assert!(
             !text_field(&status, "reason").contains("tok-mask-91"),
             "status masks the reason too"
+        );
+    }
+
+    // Not a Scenario, documented limit (`Must` of module.sdd): the @Redactor is a snapshot taken when the module is built, and
+    // the module holds it behind an `Arc`, so a secret declared later is not masked in `reason`. This test pins that limit: it
+    // is not a guarantee.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_secret_absent_at_the_construction_is_not_masked_documented_limit() {
+        let registry = Arc::new(registry_over(
+            Arc::new(Failing {
+                reason: "missing key tok-late-5d".to_owned(),
+            }),
+            &["reviewer"],
+        ));
+        let counter = Arc::new(LocalCounter::new());
+        let engine = engine_with(
+            main_agent(&["reviewer"]),
+            &registry,
+            limiter_over(&counter, 8),
+            &CancelHandle::new(),
+            Redactor::new(),
+        );
+        let id = start_reviewer(&engine);
+        let table = engine
+            .eval::<Map>(&format!(r#"delegate::wait("{id}")"#))
+            .expect("wait returns the final table");
+        assert_eq!(
+            text_field(&table, "reason"),
+            "missing key tok-late-5d",
+            "a secret the redactor did not hold at its construction stays in the reason: the snapshot is the limit"
         );
     }
 
