@@ -410,7 +410,7 @@ impl<T: ToolsetStore, D: DraftStore> Builder<T, D> {
         Ok(toolset.name().to_owned())
     }
 
-    /// Adds `skill` to the draft of `toolset`, created from the active version when there is no draft.
+    /// Adds `skill` to the draft of `toolset` (replacing the skill of the same name), created from the active version when there is no draft.
     fn add_skill(&self, toolset: &str, skill: Skill) -> Result<String, Refusal> {
         let base = match await_store(self.toolsets.get_draft(toolset))? {
             Some(draft) => draft,
@@ -418,7 +418,7 @@ impl<T: ToolsetStore, D: DraftStore> Builder<T, D> {
                 .ok_or_else(|| format!("toolset `{toolset}` has neither a draft nor an active version"))?,
         };
         let name = skill.name().to_owned();
-        let updated = base.with_skill(skill).map_err(|error| error.to_string())?;
+        let updated = base.replace_skill(skill).map_err(|error| error.to_string())?;
         self.write_toolset(&updated)?;
         Ok(name)
     }
@@ -583,6 +583,8 @@ mod tests {
         active: Arc<Mutex<BTreeMap<String, Toolset>>>,
         types: Arc<Mutex<BTreeMap<String, ContextType>>>,
         broken: Arc<AtomicBool>,
+        /// When set, `put_draft` applies this render cap to the skills, as the in-memory store does.
+        render_cap: Option<u64>,
     }
 
     impl Host {
@@ -645,7 +647,17 @@ mod tests {
         }
 
         fn put_draft(&self, toolset: &Toolset) -> impl Future<Output = ToolsetsResult<()>> + Send {
-            std::future::ready(self.failure().map(|()| self.seed_draft(toolset.clone())))
+            let capped = self.render_cap.map_or(Ok(()), |cap| {
+                toolset
+                    .skills()
+                    .values()
+                    .try_for_each(|skill| skill.check_size(cap))
+            });
+            std::future::ready(
+                self.failure()
+                    .and(capped)
+                    .map(|()| self.seed_draft(toolset.clone())),
+            )
         }
     }
 
@@ -901,6 +913,60 @@ mod tests {
             refused.text()
         );
         assert_eq!(host.draft("grafana").map(|stored| stored.skills().len()), Some(2));
+    }
+
+    // Scenario: un skill de même nom est remplacé dans le brouillon
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_skill_of_the_same_name_is_replaced_in_the_draft() {
+        let host = Host::default();
+        host.seed_active(stored_toolset("grafana", "fn query() { 1 }"));
+        host.seed_draft(
+            stored_toolset("grafana", "fn query() { 1 }")
+                .with_skill(
+                    Skill::new("deploy".to_owned(), "d".to_owned(), "first".to_owned()).expect("a skill"),
+                )
+                .expect("the skill is added"),
+        );
+        let script = r#"
+            toolset_builder::put_skill_draft("grafana", #{ name: "deploy", description: "d", body: "second" });
+            toolset_builder::put_skill_draft_text("grafana", "---\nname: deploy\ndescription: d\n---\nthird\n")
+        "#;
+        let outcome = run(&pad(&host), script).await;
+        assert_eq!(outcome.status(), RunStatus::Ok, "{}", outcome.text());
+        let draft = host.draft("grafana").expect("the draft is readable");
+        assert_eq!(draft.skills().len(), 1, "a single `deploy`");
+        let deploy = draft.skills().get("deploy").expect("deploy is there");
+        assert!(
+            deploy.body().starts_with("third"),
+            "the last one wins: {}",
+            deploy.body()
+        );
+        let active = host
+            .active_version("grafana")
+            .expect("the active version is there");
+        assert!(active.skills().is_empty(), "the active version did not move");
+    }
+
+    // Scenario: le plafond de rendu est appliqué par le store
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_render_cap_is_applied_by_the_store() {
+        let host = Host {
+            render_cap: Some(10),
+            ..Host::default()
+        };
+        host.seed_draft(stored_toolset("grafana", "fn query() { 1 }"));
+        let script = r#"toolset_builder::put_skill_draft("grafana", #{
+            name: "big", description: "d", body: "this body is far longer than ten characters"
+        })"#;
+        let outcome = run(&pad(&host), script).await;
+        assert_eq!(
+            outcome.status(),
+            RunStatus::Failed(ScriptErrorClass::Runtime),
+            "{}",
+            outcome.text()
+        );
+        let draft = host.draft("grafana").expect("the draft is readable");
+        assert!(!draft.skills().contains_key("big"), "the skill is not stored");
     }
 
     // Not a Scenario: without a draft, the skill is added to a draft created from the active version.

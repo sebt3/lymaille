@@ -27,7 +27,7 @@ Returns:
 
 Raises:
   @SessionError::UnknownSession: aucun état sauvegardé sous l'identifiant (nouvelle variante, à ajouter à ../session/error.sdd ; porte l'identifiant ; `Display` : « no saved session `<id>` »).
-  @SessionError::IncompatibleFormat: version majeure de format différente (../session/format.sdd).
+  @SessionError::IncompatibleFormat: version majeure de format différente (../session/format.sdd), levée à la lecture de l'état par le store (`SessionState::from_json`) et propagée telle quelle : un @SessionState ne peut pas porter un format incompatible (champ privé), `restore_session` n'a donc pas de second contrôle (décision du 2026-10-31 : un contrôle inatteignable est du code mort).
   @SessionError::Store: échec du stockage de l'hôte.
 
 Must:
@@ -68,3 +68,4 @@ Scenario: session inconnue ou format incompatible
 Tasks:
   [x] #1 Tests puis implémentation (lot S1), variante `UnknownSession` dans ../session/error.sdd (domaine `session`), déclaration dans ./mod.rs et ré-export dans ../lib.rs.
   [x] #2 Scenario « une fonction dont une API a disparu » (lot S1, décision du 2026-10-31) : dépend de ../scratchpad/run.sdd #15 et de ../session/notice.sdd #P6.
+  [x] #3 Test relevé à la validation de S1 (2026-10-31) : le Scenario « rien n'est modifié » est asserté (fait) ; le contrôle explicite de format de `restore_session`, inatteignable, est retiré avec son code (décision du 2026-10-31).

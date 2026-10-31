@@ -467,14 +467,10 @@ pub async fn detect_models(config: &RigConfig) -> Result<Vec<(String, DetectedMo
         .send::<NoBody, Vec<u8>>(request)
         .await
         .map_err(|error| classify_transport(&error))?;
-    let status = response.status();
     let body = response
         .into_body()
         .await
         .map_err(|error| classify_transport(&error))?;
-    if !status.is_success() {
-        return Err(classify_http(status.as_u16(), std::str::from_utf8(&body).ok()));
-    }
     parse_models(&body)
         .ok_or_else(|| failure(ErrorClass::Permanent, "the server answer is not a list of models"))
 }
@@ -1111,6 +1107,27 @@ mod tests {
         }
     }
 
+    // Scenario: les erreurs sont classées sans fuite (flux coupé avant l'événement final)
+    #[tokio::test]
+    async fn stream_ended_without_final_event_is_transient() {
+        let body = format!("data: {}\n\n", delta(&json!({"content": "Bon"})));
+        let server = fake(Reply::Http {
+            status: 200,
+            content_type: "text/event-stream",
+            body,
+        })
+        .await;
+        let result = RigProvider::new(&server.config(Some("sk-secret")))
+            .complete(simple_request())
+            .await;
+        assert_failure(
+            result,
+            ErrorClass::Transient,
+            &["sk-secret", &server.host],
+            "a stream cut before its final event",
+        );
+    }
+
     // Scenario: les erreurs sont classées sans fuite (connexion refusée)
     #[tokio::test]
     async fn refused_connection_is_transient_without_leak() {
@@ -1227,6 +1244,14 @@ mod tests {
             (
                 json_reply(200, &json!({"unexpected": "s3cr3t-body"})),
                 ErrorClass::Permanent,
+            ),
+            // The status and the body reach the classification through the error of the HTTP client (`non_success_*`).
+            (
+                json_reply(
+                    413,
+                    &json!({"error": {"message": "maximum context length s3cr3t-body", "code": "context_length_exceeded"}}),
+                ),
+                ErrorClass::ContextOverflow,
             ),
             (Reply::Drop, ErrorClass::Transient),
         ];

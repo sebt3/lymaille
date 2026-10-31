@@ -26,7 +26,7 @@ Accepts:
 Returns:
   Module `toolset_builder` :
   `put_toolset_draft(definition)` : une map Rhai (nom, version, description, fonctions, paramètres, dépendances) ; construit un @Toolset, le valide (compilation des fonctions, plafond de rendu, `Skill`, défauts de paramètres sans secret) et l'écrit comme brouillon ; rend le nom.
-  `put_skill_draft(toolset, definition)` : une map (nom, description, corps, documents annexes) ; ajoute le skill au brouillon du toolset nommé (le crée à partir de la version active si aucun brouillon n'existe) ; rend le nom du skill.
+  `put_skill_draft(toolset, definition)` : une map (nom, description, corps, documents annexes) ; ajoute le skill au brouillon du toolset nommé, ou remplace le skill de même nom (@Toolset::replace_skill) (le crée à partir de la version active si aucun brouillon n'existe) ; rend le nom du skill.
   `put_skill_draft_text(toolset, texte)` : même effet à partir d'un texte `SKILL.md` (frontmatter et corps, @Skill::parse).
   `put_context_type_draft(definition)` : une map (nom, version, schéma, rôles, inclusions) ; construit un @ContextType validé et l'écrit comme brouillon par le @DraftStore ; rend le nom.
   `validate_draft(genre, nom)` : revalide un brouillon et rend un tableau d'écarts en texte (vide si valide), sans rien écrire.
@@ -85,7 +85,20 @@ Scenario: aucune activation n'existe
   When functions("toolset_builder") est lu
   Then aucune fonction ne porte `activate` ni n'écrit une version active
 
+Scenario: un skill de même nom est remplacé dans le brouillon
+  Given un brouillon qui porte un skill `deploy`
+  When put_skill_draft puis put_skill_draft_text reçoivent un autre `deploy`
+  Then le brouillon porte le dernier `deploy` seul, et le brouillon actif n'a pas bougé
+
+Scenario: le plafond de rendu est appliqué par le store
+  Given un store de test qui applique le plafond de rendu à put_draft et un skill qui le dépasse
+  When put_skill_draft est appelé
+  Then le script reçoit l'erreur du store et get_draft ne rend pas le skill
+
 Tasks:
   [x] #1 Tests puis implémentation (lot T1), déclaration dans ./mod.rs et ré-export dans ../lib.rs.
-  [?] #2 Posé : les types de contexte n'ont pas de brouillon dans @ContextTypeStore ; le brouillon vit dans le @DraftStore de l'hôte (`put_type_draft`, `get_type_draft`). À confirmer par le développeur principal.
-  [?] #3 Posé : seuls les skills admettent la forme texte (`SKILL.md`), le seul format texte existant ; toolsets et types de contexte se donnent en map. À confirmer.
+  [x] #2 Posé : les types de contexte n'ont pas de brouillon dans @ContextTypeStore ; le brouillon vit dans le @DraftStore de l'hôte (`put_type_draft`, `get_type_draft`). À confirmer par le développeur principal.
+      Validé le 2026-10-31 (accord du développeur principal).
+  [x] #3 Posé : seuls les skills admettent la forme texte (`SKILL.md`), le seul format texte existant ; toolsets et types de contexte se donnent en map. À confirmer.
+      Validé le 2026-10-31 (accord du développeur principal).
+  [x] #4 Remplacement de skill et test du plafond de rendu (Décision du 2026-10-31 (lot T2, lacune relevée à la validation de T1)) : dépend de ./toolset.sdd #P7.

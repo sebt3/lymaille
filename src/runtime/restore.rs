@@ -63,13 +63,11 @@ pub async fn restore_session<S: SessionStore>(
     engine: Arc<ScratchpadEngine>,
     current: &Provenance,
 ) -> SessionResult<RestoredSession> {
-    // The format is checked by the reading of the state (`SessionState::from_json`); a store that hands over a state
-    // another way is checked here as well.
+    // The format is checked by the reading of the state (`SessionState::from_json`) and its error is propagated as is.
     let state = store
         .load(id)
         .await?
         .ok_or_else(|| SessionError::UnknownSession { id: id.clone() })?;
-    state.format().check()?;
     let saved = Provenance::new(state.agent().fingerprint(), state.toolset_versions().clone());
     let restored = Scratchpad::restore(engine, state.variables(), state.functions());
     let mut notices = restore_notices(&saved, current, restored.broken());
@@ -87,6 +85,7 @@ pub async fn restore_session<S: SessionStore>(
 mod tests {
     use std::collections::BTreeMap;
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use serde_json::json;
 
@@ -252,6 +251,74 @@ mod tests {
             Err(other) => panic!("an other major version must give IncompatibleFormat, not {other}"),
             Ok(_) => panic!("an other major version must not restore anything"),
         }
+    }
+
+    /// A store that counts the saves it receives and otherwise delegates to an in-memory store.
+    struct CountingStore {
+        inner: InMemoryStore,
+        saves: AtomicUsize,
+    }
+
+    impl SessionStore for CountingStore {
+        fn load(&self, id: &SessionId) -> impl Future<Output = SessionResult<Option<SessionState>>> + Send {
+            self.inner.load(id)
+        }
+
+        fn save(&self, state: &SessionState) -> impl Future<Output = SessionResult<()>> + Send {
+            let _previous = self.saves.fetch_add(1, Ordering::SeqCst);
+            self.inner.save(state)
+        }
+    }
+
+    // Scenario: session inconnue ou format incompatible (rien n'est modifié)
+    #[tokio::test]
+    async fn a_refused_restore_modifies_nothing() {
+        let store = CountingStore {
+            inner: saved(&document("s-1", "sha-1", "1.0.0")).await,
+            saves: AtomicUsize::new(0),
+        };
+        let before = store
+            .load(&session("s-1"))
+            .await
+            .expect("the saved state loads")
+            .expect("the state is there")
+            .to_json()
+            .expect("the state serializes");
+        let unknown = restore_session(
+            &store,
+            &session("unknown"),
+            engine(),
+            &provenance("sha-1", "1.0.0"),
+        )
+        .await;
+        assert!(
+            matches!(unknown, Err(SessionError::UnknownSession { .. })),
+            "an unknown identifier is refused"
+        );
+        let incompatible = restore_session(
+            &RawStore(document("s-1", "sha-1", "1.0.0").replace("\"major\":1", "\"major\":2")),
+            &session("s-1"),
+            engine(),
+            &provenance("sha-1", "1.0.0"),
+        )
+        .await;
+        assert!(
+            matches!(incompatible, Err(SessionError::IncompatibleFormat { .. })),
+            "an incompatible format is refused"
+        );
+        assert_eq!(
+            store.saves.load(Ordering::SeqCst),
+            0,
+            "the store received no save"
+        );
+        let after = store
+            .load(&session("s-1"))
+            .await
+            .expect("the saved state loads")
+            .expect("the state is still there")
+            .to_json()
+            .expect("the state serializes");
+        assert_eq!(before, after, "the saved state is unchanged");
     }
 
     // Scenario: une fonction dont une API a disparu n'empêche pas la restauration

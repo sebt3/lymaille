@@ -184,6 +184,22 @@ impl Toolset {
         Ok(self)
     }
 
+    /// Replaces the skill of the same name, or adds `skill` when none has that name. Unlike [`Toolset::with_skill`], a
+    /// skill of the same name is not an error.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ToolsetsError::InvalidToolset`] under the same rules as [`Toolset::with_skill`], except the duplicate one;
+    /// the skill itself was validated when it was built.
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "the signature is the contract of the spec: the checks of with_skill may grow and must stay fallible"
+    )]
+    pub fn replace_skill(mut self, skill: Skill) -> ToolsetsResult<Self> {
+        let _previous = self.skills.insert(skill.name().to_owned(), skill);
+        Ok(self)
+    }
+
     /// Adds a requirement on a context type.
     ///
     /// # Errors
@@ -642,6 +658,29 @@ mod tests {
         assert!(
             !text.contains("detector"),
             "the detector is not serialized: {text}"
+        );
+    }
+
+    // Scenario: replace_skill remplace un skill de même nom
+    #[test]
+    fn replace_skill_replaces_a_skill_of_the_same_name() {
+        let newer = Skill::new("deploy".to_owned(), "newer".to_owned(), "the new body".to_owned())
+            .expect("a valid skill builds");
+        let built = toolset("grafana")
+            .with_skill(skill("deploy"))
+            .expect("the skill is added")
+            .replace_skill(newer)
+            .expect("the skill is replaced")
+            .replace_skill(skill("rollback"))
+            .expect("a new name is added");
+        assert_eq!(built.skills().len(), 2, "one `deploy` and one `rollback`");
+        let deploy = built.skills().get("deploy").expect("deploy is there");
+        assert_eq!(deploy.body(), "the new body", "the old body is gone");
+        assert!(built.skills().contains_key("rollback"), "rollback is added");
+        let duplicate = built.with_skill(skill("deploy"));
+        assert!(
+            matches!(duplicate, Err(ToolsetsError::InvalidToolset { .. })),
+            "an ordinary addition of the same name is still refused"
         );
     }
 
