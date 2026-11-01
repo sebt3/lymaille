@@ -15,6 +15,7 @@ Exposes:
   @Timer
   @TimerSource
   @BUILTIN_SOURCES
+  @workspace_notification
 
 Accepts:
   @WatchEvent::new: le nom de la source, un nom d'événement, une donnée JSON et un @Timestamp. @WatchEvent::source, @WatchEvent::name, @WatchEvent::data et @WatchEvent::at : aucun argument ; rendent respectivement la source, le nom, la donnée et l'instant de l'événement.
@@ -39,6 +40,7 @@ Must:
 Depends on:
   ./error.sdd
   ../clock.sdd
+  ../session/event.sdd
   serde
   serde_json
 
@@ -142,3 +144,4 @@ Tasks:
   [x] #2 Posé : les sources `subagent`, `mcp` et `workspace` sont alimentées par `notify` (le registre des runs, le connecteur MCP et le module de Memory/todo l'appellent) ; ce fichier ne les branche pas lui-même aux modules de ../modules/. À confirmer.
       Validé le 2026-10-31 (accord du développeur principal).
     Décision du lot D3 (2026-10-30, développeur principal) : `subagent`, `mcp` et `workspace` sont alimentées par `notify` sans enregistrement, ce qui répond à la question ci-dessus pour ces trois sources ; `timer` n'est pas alimenté par `notify` mais par le minuteur rattaché (@EventHub::attach_timers) ; `notify("timer", ...)` est refusé. Reste à confirmer côté modules : que le registre des runs, le connecteur MCP et le module de Memory/todo appellent bien `notify`. Marqueur `[?]` laissé à l'orchestrateur.
+  [x] #3 Conversion des événements `TodoChanged` et `MemoryChanged` de session en notification de la source `workspace` (fonction pure, que l'hôte appelle dans son @EventSink avant @EventHub::notify), pour tenir `delegation#FR-10` (Décision du 2026-10-31 (accord du développeur principal), lot Q4) ; Scenario : un `TodoChanged` produit une notification `workspace`, un autre événement rien.

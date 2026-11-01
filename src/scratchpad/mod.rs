@@ -7,6 +7,7 @@ mod error;
 mod format;
 mod grant;
 mod inspect;
+mod inspect_tool;
 mod introspect;
 mod limits;
 mod persist;
@@ -24,6 +25,7 @@ pub use inspect::{
     FunctionDescriptor, InspectionPad, InspectionTarget, ModuleDescriptor, descriptors_from_catalog,
     shell_module,
 };
+pub use inspect_tool::rhai_prod_inspect_definition;
 pub use introspect::{
     Catalog, FunctionEntry, IntrospectionSource, Origin, ScriptFunction, VariableInfo, limits_notice,
 };

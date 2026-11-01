@@ -1,0 +1,56 @@
+Spec: tools
+
+Purpose:
+  Colle des tools natifs : l'ensemble exact des définitions de tool qu'une session envoie au modèle selon sa nature (`agent-sessions#FR-1`, `AC-6`, `AC-6bis`). Seul domaine qui voit à la fois `runtime`, `toolsets` et `scratchpad` ; aucune logique d'exécution.
+
+Structure:
+  ./mod.rs: déclarations et ré-exports du module
+  ./definitions.rs: ensemble des définitions par nature de session
+  ./inspect.rs: tool natif `rhai_prod_inspect` (résolution de la cible, pad d'inspection)
+
+Owns:
+  ./mod.rs
+  ./definitions.rs
+  ./inspect.rs
+
+References:
+  ../../lymaille.sdd
+  ../lib.sdd
+  ../runtime/definition.sdd
+  ../toolsets/native.sdd
+  ../scratchpad/inspect_tool.sdd
+  ./inspect.sdd
+  ../session/state.sdd
+
+Exposes:
+  @session_tool_definitions
+
+Accepts:
+  @session_tool_definitions: une nature de session (@SessionKind : `Work`, `Config` ou `Sub`).
+
+Returns:
+  @session_tool_definitions: la liste ordonnée des définitions de tool de cette nature : `Work` et `Sub` reçoivent exactement `rhai_pad` et `skill` (`AC-6`), `Config` reçoit exactement `rhai_pad`, `skill` et `rhai_prod_inspect` (`AC-6bis`), dans cet ordre. Les définitions sont celles de @rhai_pad_definition, @skill_definition et @rhai_prod_inspect_definition, sans copie du texte.
+
+Must:
+  Le contexte initial n'en contient aucune autre (`agent-sessions#FR-1`) : aucun autre tool ne s'ajoute par ce module.
+  Le résultat est constant par nature : deux appels rendent des valeurs égales. Aucune E/S, aucune panique.
+
+Depends on:
+  ../runtime/definition.sdd
+  ../toolsets/native.sdd
+  ../scratchpad/inspect_tool.sdd
+  ../session/state.sdd
+  serde_json
+
+Scenario: un agent de travail ou un sous-agent a deux tools
+  Given les natures `Work` et `Sub`
+  When session_tool_definitions est appelé
+  Then chacune rend exactement `rhai_pad` puis `skill`
+
+Scenario: un agent de configuration a trois tools
+  Given la nature `Config`
+  When session_tool_definitions est appelé
+  Then le résultat est exactement `rhai_pad`, `skill`, `rhai_prod_inspect`
+
+Tasks:
+  [x] #1 Tests puis implémentation (lot Q2), module `tools` déclaré dans ../lib.rs avec ses ré-exports ; mettre ../lib.sdd à jour (References, Must).

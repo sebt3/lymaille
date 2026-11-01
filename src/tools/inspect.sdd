@@ -1,0 +1,80 @@
+Spec: inspect
+
+Purpose:
+  Tool natif `rhai_prod_inspect` de l'agent de configuration : résout la cible d'inspection courante en pad d'inspection et exécute le script en lecture seule
+    (`agent-sessions/scratchpad#FR-13`, `AC-13`, `agent-sessions#BR-8`, `AC-6bis`). Vit dans `tools` (colle) parce qu'il lit les stockages de `toolsets`, les listeurs de `modules` et construit un pad de `scratchpad`.
+
+Owns:
+  ./inspect.rs
+
+References:
+  ./tools.sdd
+  ../scratchpad/inspect.sdd
+  ../scratchpad/inspect_tool.sdd
+  ../toolsets/config.sdd
+  ../modules/mcp_module.sdd
+  ../session/native_tool.sdd
+
+Exposes:
+  @InspectTool
+  @InspectEnv
+  @InspectionHost
+
+Accepts:
+  @InspectionHost: trait de l'hôte (`Send + Sync`, futurs `Send`, générique) : `role_descriptors(roles)` rend, pour les noms de rôles MCP liés par le contexte de la cible, les @ModuleDescriptor des modules coquilles (l'hôte les obtient par `mcp_shell_descriptor` de ../modules/mcp_module.sdd avec ses connecteurs, en listage seul : jamais d'appel d'un tool) ; un rôle injoignable est signalé par une erreur texte, jamais d'appel d'outil.
+  @InspectTool::new: les stockages (@ConfigStores), un @SessionStore, l'@InspectionSlot partagé avec le module `inspect` (../toolsets/config.sdd), un @InspectionHost, le @ScratchpadEngine de base (limites), le @Redactor et la @Clock de la session ; il implémente @NativeTool (nom `rhai_prod_inspect`, argument `script`).
+
+Returns:
+  @InspectTool::call: le texte du résultat du script, borné et masqué comme celui de `rhai_pad`. La cible `Definition { agent, contexte }` : le pad est construit avec les accords de l'agent (@Grants des toolsets et skills actifs de ses accords), les descripteurs des modules de ses toolsets (lus dans le @Catalog d'un moteur réel construit pour la cible, `inspect.sdd` #4 de scratchpad) et ceux des rôles MCP du contexte (@InspectionHost) ; la cible `Session(id)` : l'instantané de la session par le @SessionStore (variables en lecture seule, texte source des fonctions). Sans cible courante : un texte d'erreur qui dit d'ouvrir une cible par `inspect::open_context` ou `inspect::open_session`.
+
+Must:
+  Aucune connexion, aucun effet de bord : l'appel de la moindre fonction d'un module MCP ou d'un toolset projeté rend l'erreur « inspection seule » (`AC-13`). Aucun appel de tool MCP, jamais : l'hôte ne fournit que des descripteurs.
+  Une cible qui ne se résout pas (agent, contexte ou session inconnu, échec de stockage) rend un texte d'erreur sans valeur de secret, jamais une panique.
+  Le pad n'est pas gardé entre deux appels du tool pour une même cible changée : la construction suit la cible courante au moment de l'appel.
+  L'annulation du tour arrête le script (le @CancelHandle reçu). Aucun secret dans la sortie.
+
+Depends on:
+  ./tools.sdd
+  ../scratchpad/inspect.sdd
+  ../scratchpad/inspect_tool.sdd
+  ../toolsets/config.sdd
+  ../toolsets/store.sdd
+  ../modules/mcp_module.sdd
+  ../session/native_tool.sdd
+  ../session/store.sdd
+  ../session/redact.sdd
+
+Scenario: un appel MCP rend l'erreur d'inspection seule
+  Given une cible d'agent dont le contexte lie le rôle `grafana`, que l'hôte décrit avec la fonction `query`
+  When le tool exécute `grafana::query("x")`
+  Then le résultat est l'erreur « inspection seule » qui nomme `grafana::query`, et l'hôte n'a reçu qu'une demande de descripteurs
+
+Scenario: les fonctions d'un toolset projeté se listent sans s'exécuter
+  Given une cible d'agent dont un toolset `ops` expose `restart_pod` documentée
+  When le tool exécute `functions("ops")` puis `ops::restart_pod("x")`
+  Then la première rend la fonction avec sa documentation et la seconde l'erreur « inspection seule »
+
+Scenario: sans cible, un message dit comment en ouvrir une
+  Given un @InspectionSlot vide
+  When le tool exécute `1 + 1`
+  Then le texte rendu mentionne `inspect::open_context` et `inspect::open_session`
+
+Scenario: une session passée se lit sans s'écrire
+  Given une cible session passée qui porte une variable `x` dans le stockage de sessions
+  When le tool lit `x`, puis tente `x = 2`
+  Then la lecture rend la valeur et l'écriture échoue
+
+Scenario: une cible inconnue est une erreur de texte
+  Given une cible d'agent absente du stockage
+  When le tool exécute `1`
+  Then le texte rendu dit que la cible ne se résout pas, sans panique
+
+Scenario: chaque affirmation de la description est vraie
+  Given la description de ../scratchpad/inspect_tool.sdd et un pad d'inspection d'une cible
+  When chaque affirmation est exécutée
+  Then chacune se vérifie
+
+Tasks:
+  [x] #1 Tests puis implémentation (lot Q2b), déclaration dans ./mod.rs et ré-exports dans ../lib.rs. La résolution cible vers pad est la partie à concevoir : réutiliser ce que le module `inspect` de ../toolsets/config.sdd sait déjà (chargement de l'agent, du contexte, des toolsets) ; noter chaque choix posé en `[?]`.
+      [?] Choix posés à l'implémentation (lot Q2b) : @InspectTool::new reçoit cinq arguments (seuil du harnais) : les stockages, le @SessionStore, l'@InspectionSlot, l'@InspectionHost et un @InspectEnv (exposé en plus, `new(base, redactor, clock)`) qui regroupe le @ScratchpadEngine de base, le @Redactor et la @Clock. Un script en échec ou annulé rend `Err(texte)`, un script réussi `Ok(texte)` (la boucle de tour rend les deux au modèle). Une cible qui ne se résout pas rend `Err("The inspection target cannot be resolved: <raison>.")` (agent, contexte ou session inconnu nommé ; échec de stockage sans détail). Les toolsets actifs qui ne s'assemblent pas sont omis sans signalement. Pour une cible session, ni toolset ni module ne sont projetés (variables et fonctions seulement). La signature des fonctions de toolset est celle du catalogue (noms de paramètres génériques `arg1..` quand le catalogue n'en donne pas, ../scratchpad/inspect.sdd #6). @ConfigStores gagne trois accesseurs `pub(crate)` (agents, toolsets, contextes) dans ../toolsets/config.rs.
+  [ ] #2 Test d'annulation borné (Décision du 2026-11-01 (accord du développeur principal), relevé de validation) : `cancellation_stops_the_script` se bloque au lieu d'échouer quand l'annulation est ignorée ; le borner par un `tokio::time::timeout` pour qu'il échoue proprement avec un message.

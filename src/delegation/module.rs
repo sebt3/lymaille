@@ -494,7 +494,11 @@ mod tests {
             .with_replay(ReplayMode::None)
             .resolve(None)
             .expect("the profile resolves");
-        let context = SegmentContext::new("system prompt", Vec::new(), ModelSnapshot::new("model", "none"));
+        let context = SegmentContext::new(
+            "system prompt",
+            Vec::new(),
+            ModelSnapshot::new("model", ReplayMode::None),
+        );
         let engine = ScratchpadEngine::builder(ScratchpadLimits::new(), grants)
             .build()
             .expect("the engine builds");

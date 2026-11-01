@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::ReplayMode;
 use crate::clock::Timestamp;
 
 /// Why a segment starts.
@@ -20,22 +21,23 @@ pub enum BoundaryKind {
 
 /// Snapshot of the resolved model profile as it was sent.
 ///
-/// It holds the model identifier and the replay mode of its reasoning, both as free text. It is a copy of the values
-/// used, not the agents' `ModelProfile`.
+/// It holds the model identifier and the replay mode of its reasoning. The mode is persisted as its text (`none`,
+/// `intra_turn`, `all_turns`), and a text that is not a mode is refused on read. It is a copy of the values used, not the
+/// agents' `ModelProfile`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ModelSnapshot {
     model_id: String,
-    reasoning_replay: String,
+    reasoning_replay: ReplayMode,
 }
 
 impl ModelSnapshot {
     /// Builds a model snapshot from the model identifier and the reasoning replay mode.
     #[must_use]
-    pub fn new<M: Into<String>, R: Into<String>>(model_id: M, reasoning_replay: R) -> Self {
+    pub fn new<M: Into<String>>(model_id: M, reasoning_replay: ReplayMode) -> Self {
         Self {
             model_id: model_id.into(),
-            reasoning_replay: reasoning_replay.into(),
+            reasoning_replay,
         }
     }
 
@@ -47,8 +49,8 @@ impl ModelSnapshot {
 
     /// Returns the reasoning replay mode.
     #[must_use]
-    pub fn reasoning_replay(&self) -> &str {
-        &self.reasoning_replay
+    pub const fn reasoning_replay(&self) -> ReplayMode {
+        self.reasoning_replay
     }
 }
 
@@ -144,11 +146,47 @@ impl Segment {
 mod tests {
     use serde_json::json;
 
-    use super::{BoundaryKind, ModelSnapshot, Segment, SegmentContext};
+    use super::{BoundaryKind, ModelSnapshot, ReplayMode, Segment, SegmentContext};
     use crate::clock::Timestamp;
 
     fn profile() -> ModelSnapshot {
-        ModelSnapshot::new("model-x", "replay-verbatim")
+        ModelSnapshot::new("model-x", ReplayMode::AllTurns)
+    }
+
+    // The snapshot of a segment written before the replay mode became a type: its text is read back as the same mode.
+    #[test]
+    fn an_older_snapshot_reads_back_from_its_text() {
+        let text = r#"{"model_id":"model-x","reasoning_replay":"all_turns"}"#;
+        let snapshot: ModelSnapshot =
+            serde_json::from_str(text).expect("a snapshot written as text reads back");
+        assert_eq!(
+            snapshot,
+            ModelSnapshot::new("model-x", ReplayMode::AllTurns),
+            "the text all_turns must read back as the same mode"
+        );
+        assert_eq!(snapshot.reasoning_replay(), ReplayMode::AllTurns);
+    }
+
+    #[test]
+    fn a_snapshot_writes_the_mode_as_its_text() {
+        for mode in [ReplayMode::None, ReplayMode::IntraTurn, ReplayMode::AllTurns] {
+            let value =
+                serde_json::to_value(ModelSnapshot::new("model-x", mode)).expect("a snapshot serializes");
+            assert_eq!(
+                value.get("reasoning_replay"),
+                Some(&json!(mode.as_str())),
+                "the mode is written as its text, so no format change"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_replay_text_is_refused_on_read() {
+        let text = r#"{"model_id":"model-x","reasoning_replay":"replay-verbatim"}"#;
+        assert!(
+            serde_json::from_str::<ModelSnapshot>(text).is_err(),
+            "a text that is not a replay mode must be refused on read"
+        );
     }
 
     fn definitions() -> Vec<serde_json::Value> {

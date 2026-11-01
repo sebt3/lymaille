@@ -56,5 +56,4 @@ Tasks:
   [x] #4 Test manquant : @ReplayMode::IntraTurn sans aucun message utilisateur (voir #3).
   [x] #3 Posé à l'implémentation : en mode `IntraTurn` sans aucun message utilisateur, tous les messages de l'assistant sont du tour courant ; un émetteur vide vaut « pas d'émetteur ».
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
-  [!] #2 @ModelSnapshot de ../session/segment.sdd porte le mode de rejeu en texte libre : le remplacer par @ReplayMode quand `agents` consomme ce module (même valeurs textuelles, donc sans montée de format).
-      Dépend du domaine `agents` (consommation du module) et de ../session/segment.sdd #2.
+  [x] #2 @ReplayMode est défini dans `session` et ré-exporté ici (Décision du 2026-10-31 (accord du développeur principal), lot Q3), voir ../session/segment.sdd #2 ; ce fichier continue d'exposer @ReplayMode, ses sélections de raisonnement et ses tests.

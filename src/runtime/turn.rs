@@ -981,16 +981,24 @@ impl<P: InferenceProvider, C: CompactionStrategy, S: SessionStore> TurnRunner<P,
                 None => ToolOutput::error(MISSING_SCRIPT.to_owned()),
             };
         }
-        self.natives.get(name).map_or_else(
-            || ToolOutput::error(format!("unknown tool `{name}`")),
-            |tool| self.run_native(tool.as_ref(), arguments),
-        )
+        match self.natives.get(name) {
+            Some(tool) => self.run_native(tool.as_ref(), arguments, run).await,
+            None => ToolOutput::error(format!("unknown tool `{name}`")),
+        }
     }
 
-    /// Runs a native tool: its text, or its error text, is masked by the redactor, then capped by the render cap of the
-    /// budget, as the output of a script is.
-    fn run_native(&self, tool: &dyn NativeTool, arguments: &Value) -> ToolOutput {
-        let masked = self.config.redactor.redact(&tool.call(arguments));
+    /// Runs a native tool under the cancellation of the turn: its text, or its error text, is masked by the redactor, then
+    /// capped by the render cap of the budget, as the output of a script is. A turn cancelled during the call ends it.
+    async fn run_native(&self, tool: &dyn NativeTool, arguments: &Value, run: &TurnRun) -> ToolOutput {
+        let Some(result) = run.cancel.guard(tool.call(arguments, &run.cancel.merged)).await else {
+            return ToolOutput {
+                text: CANCELLED_RESULT.to_owned(),
+                original_chars: None,
+                cancelled: true,
+            };
+        };
+        let (Ok(text) | Err(text)) = result;
+        let masked = self.config.redactor.redact(&text);
         let cap = usize::try_from(self.config.budget.render_cap_chars()).unwrap_or(usize::MAX);
         let rendered = truncate_middle(&masked, cap);
         ToolOutput {
@@ -1026,6 +1034,7 @@ impl<P: InferenceProvider, C: CompactionStrategy, S: SessionStore> TurnRunner<P,
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::pin::Pin;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, OnceLock};
     use std::time::Duration;
@@ -1256,7 +1265,7 @@ mod tests {
         SegmentContext::new(
             "system prompt",
             vec![json!({"name": "rhai_pad", "parameters": {"type": "object"}})],
-            ModelSnapshot::new("model", "none"),
+            ModelSnapshot::new("model", ReplayMode::None),
         )
     }
 
@@ -2057,17 +2066,59 @@ mod tests {
     struct Native {
         name: &'static str,
         fixed: Option<String>,
+        failure: Option<String>,
+        wait_for_cancel: bool,
     }
 
     impl Native {
+        /// The result of the call: the cancellation, a failure, the fixed text or the `text` argument.
+        async fn answer(&self, arguments: &Value, cancel: &CancelHandle) -> Result<String, String> {
+            if self.wait_for_cancel {
+                cancel.cancelled().await;
+                return Err("stopped by the cancellation".to_owned());
+            }
+            if let Some(failure) = &self.failure {
+                return Err(failure.clone());
+            }
+            let text = arguments.get("text").and_then(Value::as_str).unwrap_or_default();
+            Ok(self.fixed.clone().unwrap_or_else(|| text.to_owned()))
+        }
+
         fn echo(name: &'static str) -> Arc<Self> {
-            Arc::new(Self { name, fixed: None })
+            Arc::new(Self {
+                name,
+                fixed: None,
+                failure: None,
+                wait_for_cancel: false,
+            })
+        }
+
+        /// A tool that fails with `text`.
+        fn failing(name: &'static str, text: &str) -> Arc<Self> {
+            Arc::new(Self {
+                name,
+                fixed: None,
+                failure: Some(text.to_owned()),
+                wait_for_cancel: false,
+            })
+        }
+
+        /// A tool that waits for the cancellation of the turn handed to it.
+        fn waiting(name: &'static str) -> Arc<Self> {
+            Arc::new(Self {
+                name,
+                fixed: None,
+                failure: None,
+                wait_for_cancel: true,
+            })
         }
 
         fn fixed(name: &'static str, text: &str) -> Arc<Self> {
             Arc::new(Self {
                 name,
                 fixed: Some(text.to_owned()),
+                failure: None,
+                wait_for_cancel: false,
             })
         }
     }
@@ -2081,17 +2132,12 @@ mod tests {
             json!({"name": self.name, "description": "a test tool", "parameters": {"type": "object"}})
         }
 
-        fn call(&self, arguments: &Value) -> String {
-            self.fixed.as_ref().map_or_else(
-                || {
-                    arguments
-                        .get("text")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_owned()
-                },
-                Clone::clone,
-            )
+        fn call<'call>(
+            &'call self,
+            arguments: &'call Value,
+            cancel: &'call CancelHandle,
+        ) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'call>> {
+            Box::pin(self.answer(arguments, cancel))
         }
     }
 
@@ -2132,6 +2178,61 @@ mod tests {
             "no script ran"
         );
         assert_eq!(output.response(), "done", "the model receives the final answer");
+    }
+
+    // Must (native_tool.sdd #2) : le texte d'erreur d'un tool natif est rendu au modèle comme résultat d'outil
+    #[tokio::test]
+    async fn native_tool_error_is_given_to_the_model_as_a_result() {
+        let provider = Arc::new(ScriptedProvider::new(vec![
+            call_tool("c1", "broken", json!({})),
+            say("done"),
+        ]));
+        let (mut runner, _parts) = assemble(Arc::clone(&provider), Options::named("t-native-error"));
+        assert!(
+            runner
+                .with_native_tool(Native::failing("broken", "it broke"))
+                .is_ok(),
+            "the native tool is registered"
+        );
+        let output = run(&mut runner, "go").await;
+        assert_eq!(
+            output.outcome(),
+            Outcome::Valid,
+            "the turn goes on after the error"
+        );
+        assert_eq!(
+            tool_results(&runner),
+            vec!["it broke".to_owned()],
+            "the error text is the result"
+        );
+    }
+
+    // Must (native_tool.sdd #2) : l'annulation du tour est honorée pendant l'appel d'un tool natif
+    #[tokio::test]
+    async fn cancel_during_a_native_tool_keeps_the_history_valid() {
+        let provider = Arc::new(ScriptedProvider::new(vec![
+            call_tool("c1", "slow", json!({})),
+            say("never"),
+        ]));
+        let (mut runner, _parts) = assemble(Arc::clone(&provider), Options::named("t-cancel-native"));
+        assert!(
+            runner.with_native_tool(Native::waiting("slow")).is_ok(),
+            "the native tool is registered"
+        );
+        let cancel = CancelHandle::new();
+        let trigger = cancel.clone();
+        let (output, ()) = tokio::join!(runner.run_turn("go", &cancel), async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            trigger.cancel();
+        });
+        let output = output.expect("a cancelled turn is not an error");
+        assert_eq!(output.outcome(), Outcome::Cancelled, "the turn is cancelled");
+        assert_eq!(
+            tool_results(&runner),
+            vec!["tool call cancelled".to_owned()],
+            "the call has a result that says it was cancelled"
+        );
+        assert_eq!(provider.requests().len(), 1, "no request after the cancellation");
     }
 
     // Scenario: un tool natif ne rend jamais un secret déclaré

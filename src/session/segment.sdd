@@ -45,7 +45,5 @@ Tasks:
   [x] #4 Renforcer `a_restore_creates_a_new_segment` : asserter le @BoundaryKind::Restore du second segment, et que le premier survit à une sérialisation.
   [x] #1 Tests puis implémentation.
   [x] #5 Renommer @ModelProfile en @ModelSnapshot (code et tests) : le type est un instantané du profil résolu tel qu'il a été envoyé, et le nom @ModelProfile appartient à `agents` (../agents/profile.sdd).
-  [!] #2 Le « mode de rejeu du raisonnement » est du texte libre ici : le domaine `agents` (mapping fournisseur et modèle,
-      `agent-sessions/context-window#FR-5`) en fixera l'énumération.
-      Dépend du domaine `agents` (énumération du mode de rejeu : context/replay.sdd #2).
+  [x] #2 Le « mode de rejeu du raisonnement » de @ModelSnapshot devient le type @ReplayMode (Décision du 2026-10-31 (accord du développeur principal), lot Q3) : @ReplayMode est déplacé dans le domaine `session` (mêmes valeurs textuelles `none`, `intra_turn`, `all_turns` : aucune montée de format) et ré-exporté par `context`, ce qui évite le cycle `session`/`context`. Tests : un snapshot ancien relu depuis son texte, une valeur inconnue refusée à la relecture.
   [x] #3 `agent-sessions/session#FR-11` : contenu confirmé le 2026-10-27 par le développeur principal, ASSUMPTION levée dans le DSD.

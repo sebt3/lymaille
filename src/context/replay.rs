@@ -1,42 +1,11 @@
 //! Replay mode of the reasoning, declared by a model profile, and selection of the reasoning sent back to the model
 //! (`agent-sessions/context-window#FR-9`, `AC-5`).
 
-use serde::{Deserialize, Serialize};
-
 use crate::session::{Message, Reasoning};
 
-/// How the reasoning of the assistant is sent back to the model. `AllTurns` corresponds to `preserve_thinking`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum ReplayMode {
-    /// No reasoning is sent back. It stays in the history for the audit.
-    None,
-    /// The reasoning of the assistant messages of the current turn is sent back.
-    IntraTurn,
-    /// The reasoning of every assistant message is sent back.
-    AllTurns,
-}
-
-impl ReplayMode {
-    /// Returns the text of the mode: `none`, `intra_turn` or `all_turns`.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::IntraTurn => "intra_turn",
-            Self::AllTurns => "all_turns",
-        }
-    }
-
-    /// Returns the mode named by `text`, or nothing for any other text.
-    #[must_use]
-    pub fn parse(text: &str) -> Option<Self> {
-        [Self::None, Self::IntraTurn, Self::AllTurns]
-            .into_iter()
-            .find(|mode| mode.as_str() == text)
-    }
-}
+/// The replay mode is defined in the `session` domain, which persists it; it is re-exported here so that the selection of
+/// the reasoning and the existing paths keep working.
+pub use crate::session::ReplayMode;
 
 /// Returns, for each message of `messages` and in the same order, the reasoning to send back to the model, or nothing.
 /// The history itself is never modified.

@@ -12,7 +12,7 @@ mod memory_module;
 mod todo;
 
 pub use error::{ModulesError, ModulesResult};
-pub use mcp::{McpConnector, McpError, McpLister, McpTool, ScriptedConnector};
+pub use mcp::{McpConnector, McpError, McpLister, McpNotification, McpTool, ScriptedConnector};
 #[cfg(feature = "mcp-http")]
 pub use mcp_client::{McpAuth, McpClientConfig, McpHeaders, RmcpConnector};
 pub use mcp_module::{McpEnv, McpRetryPolicy, mcp_module, mcp_shell_descriptor};

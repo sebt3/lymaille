@@ -9,7 +9,7 @@ Owns:
   ./state.rs
 
 Exposes:
-  @SessionState
+  @SessionState (dont les accesseurs `todo()`, `watchers()`, `run_handles()` et les mutateurs `set_todo`, `set_watchers`, `set_run_handles`, listes de valeurs JSON opaques que l'hôte renseigne avant `save` et relit après la restauration)
   @AgentRef
   @TokenCounters
   @SessionKind
@@ -76,8 +76,8 @@ Tasks:
   [x] #6 Aucun `Deserialize` public sur @SessionState (la lecture passe par @SessionState::from_json, qui vérifie la version d'abord) ; un JSON syntaxiquement
       invalide de format 2.0 rend @SessionError::Serialization et non IncompatibleFormat.
       Validé le 2026-10-29 par le développeur principal.
-  [!] #2 Types de la todo, des watchers et des handles de runs : définis par `modules` (todo) et `delegation` (watchers, `FR-14`).
-      Valeurs JSON opaques en attendant ; remplacer par des types nommés à ce moment, sans changer la version de format.
+  [x] #2 Types de la todo, des watchers et des handles de runs : définis par `modules` (todo, `to_values`/`from_values`) et `delegation` (watchers, `to_values`/`from_values` ; `RunRecord` pour les handles). L'état garde des valeurs JSON opaques (décision du 2026-10-30, ../modules/todo.sdd #2), sans changement de version de format.
+      Le câblage (renseigner et relire ces listes) est la tâche #8 ci-dessous.
   [x] #3 L'empreinte de la définition d'agent est une chaîne opaque fournie par l'hôte ou le domaine `agents` ; l'algorithme n'est pas fixé ici.
       Validé le 2026-10-29 par le développeur principal.
   [x] #7 Nature de la session (`Work`, `Config`, `Sub`), identifiant de la session parente d'un sous-agent et cible d'inspection d'une session `Config` dans l'état persisté (DSD du 2026-10-29, `agent-sessions/session#FR-2`) ; changement du format de persistance, non publié (tagged_value.sdd #8).
@@ -168,3 +168,4 @@ Scenario: effacer la cible d'inspection
   Given un état de nature Config avec une cible d'inspection
   When la cible est posée à None
   Then il n'a plus de cible
+  [x] #8 Mutateurs publics `set_todo`, `set_watchers` et `set_run_handles` (listes de valeurs JSON opaques) sur @SessionState (Décision du 2026-10-31 (accord du développeur principal), lot Q1) : l'hôte, qui possède la todo, les watchers et le registre des runs, les renseigne avant `save` et les relit par les accesseurs après `restore_session` (`session` FR-2, `delegation` FR-14, AC-10) ; la librairie ne relie pas ces domaines. Scenario : un état dont les trois listes sont posées survit à une sauvegarde et à une relecture identiques ; la version de format ne change pas.

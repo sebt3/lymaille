@@ -19,5 +19,7 @@ pub use run::{
     DEFAULT_BATCH_MAX_TURNS, LaunchRequest, RunHandle, RunProgress, RunRecord, RunRegistry, SubagentLauncher,
     run_batch,
 };
-pub use sources::{BUILTIN_SOURCES, EventHub, EventSource, Timer, TimerKind, TimerSource, WatchEvent};
+pub use sources::{
+    BUILTIN_SOURCES, EventHub, EventSource, Timer, TimerKind, TimerSource, WatchEvent, workspace_notification,
+};
 pub use watcher::{Notification, Triggered, Watcher, WatcherAction, WatcherSet};

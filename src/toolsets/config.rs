@@ -249,6 +249,21 @@ impl<A, T, Y, C> fmt::Debug for ConfigStores<A, T, Y, C> {
 }
 
 impl<A, T, Y, C> ConfigStores<A, T, Y, C> {
+    /// The agent store, for the inspection tool of the `tools` domain.
+    pub(crate) const fn agents(&self) -> &A {
+        &self.agents
+    }
+
+    /// The toolset store, for the inspection tool of the `tools` domain.
+    pub(crate) const fn toolsets(&self) -> &T {
+        &self.toolsets
+    }
+
+    /// The toolset context store, for the inspection tool of the `tools` domain.
+    pub(crate) const fn contexts(&self) -> &C {
+        &self.contexts
+    }
+
     /// Groups the agent store, the toolset store, the context type store and the toolset context store.
     #[must_use]
     pub const fn new(agents: A, toolsets: T, types: Y, contexts: C) -> Self {

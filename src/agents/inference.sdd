@@ -118,4 +118,4 @@ Tasks:
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
   [x] #3 Rejeu du raisonnement : la requête porte le raisonnement déjà choisi par @replayed_reasoning ; la transmission de `chat_template_kwargs` au serveur (mode explicite) est faite par l'adaptateur (voir ./agents.sdd #2).
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
-  [!] #4 Sortie structurée du sous-agent (schéma JSON, `delegation`) : la requête peut devoir porter un schéma de sortie ; non spécifié avant `delegation`.
+  [x] #4 Sortie structurée du sous-agent : résolue par `delegation` (DSD FR-4) : le sous-agent rend son résultat par la fonction Rhai `result::submit`, validée contre le schéma de sa définition avec corrections (../delegation/result.sdd) ; la requête d'inférence ne porte donc pas de schéma de sortie.

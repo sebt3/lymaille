@@ -93,8 +93,8 @@ Tasks:
       vecteurs connus du FNV-1a 64 bits sur des chaînes (`""` → `cbf29ce484222325`, `"a"` → `af63dc4c8601ec8c`, `"foobar"` → `85944171f73967e8`) pour la fonction de hachage, afin que « indépendante de la plate-forme » soit vérifié ; `validate()` Ok sur une définition valide et sur un sous-agent avec schéma ;
       identifiant, prompt et profil vides refusés ; doublon de modules refusé.
   [x] #1 Tests puis implémentation.
-  [!] #2 Rendu du prompt templaté (variables du ToolsetContext) : relève de `toolsets` (templating) ; ici le prompt est du texte brut.
-  [!] #3 La stratégie de contexte est un nom ; le choix de la stratégie par nom (fabrique) se branche avec la boucle de tour.
+  [x] #2 Rendu du prompt templaté : livré par `toolsets` (../toolsets/template.sdd, @render_prompt(gabarit, @ResolvedContext, @SessionMeta)) ; la définition garde le texte brut et l'hôte l'y passe à la création ou à la restauration de la session.
+  [x] #3 La stratégie de contexte est un nom, une étiquette que l'hôte résout (Décision du 2026-10-31 (accord du développeur principal)) : la librairie ne fournit aucune fabrique, l'hôte choisit sa stratégie d'après `context_strategy()` (le DSD ne demande que des traits remplaçables, `context-window#FR-3`).
   [x] #5 Posé à l'implémentation : `sandbox` absent = aucune limite ; les doublons de sous-agents délégables ne sont pas refusés ; un identifiant, un prompt ou un nom de profil blanc est refusé.
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
   [x] #4 Décidé le 2026-10-27 : pas de droits de Memory dans la définition ; trois modules Memory (un par niveau) et l'accès se décide par les toolsets (`agent-sessions/modules#FR-4`).
@@ -111,7 +111,7 @@ Tasks:
   [x] #13 Décidé le 2026-10-30 par le développeur principal : les noms réservés des modules de configuration sont `toolset_creator`, `inspect`, `contexts`, `sessions` ; l'hôte ne peut pas les réutiliser pour un autre module. Impact limité : seules les sessions de configuration (sans MCP) sont concernées.
   [x] #14 Refuser les doublons de sous-agents délégables (recommandation du 2026-10-29 sur #5 : peu coûteux, plus sûr), avec un Scenario.
       Validé le 2026-10-29 (validator, 58 mutants dont 55 tués) sous `scripts/check` complet.
-  [!] #15 Un agent de configuration n'appelle aucun serveur MCP (`agent-sessions#BR-8`) : une définition ne porte pas de module MCP (les modules MCP viennent des rôles liés par le ToolsetContext, `agent-sessions/modules#FR-6`), cette règle ne se valide donc pas ici. Elle relève du démarrage de session de nature `Config` (domaine `session`), qui n'ouvre aucune connexion `tools/call` et génère des coquilles seules (`../scratchpad/inspect.sdd`). À spécifier avec la boucle de tour.
+  [x] #15 Un agent de configuration n'appelle aucun serveur MCP (`agent-sessions#BR-8`) : une définition ne porte pas de module MCP (les modules MCP viennent des rôles liés par le ToolsetContext, `agent-sessions/modules#FR-6`), cette règle ne se valide donc pas ici. Elle est tenue par la session de configuration : `rhai_prod_inspect` (../scratchpad/inspect_tool.sdd) n'appelle jamais un serveur (modules MCP projetés en coquilles) et ../tools/tools.sdd fixe ses trois tools (`AC-6bis`, Décision du 2026-10-31 (accord du développeur principal)).
   [x] #16 Décidé le 2026-10-29 : l'empreinte d'une définition change avec la nature (`main` devient `work`) ; acceptable tant que la crate n'est pas publiée (aucune session de production n'existe). Le JSON ancien `main` se relit comme `work`.
   [x] #17 Prose en retard sur la nature : `Accepts` (« sous-agents délégables (principal) »), rustdoc de `with_delegable` et de `delegable()` dans definition.rs, rustdoc de `delegable_subagents` dans ../toolsets/compat.rs (« main agent »).
       Validé le 2026-10-29 (implémentation vérifiée par mutations de l'auteur), validation par le validator groupée avec T6.

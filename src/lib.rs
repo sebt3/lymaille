@@ -12,6 +12,7 @@ mod runtime;
 mod scratchpad;
 mod secret;
 mod session;
+mod tools;
 mod toolsets;
 
 pub use agents::{
@@ -34,10 +35,11 @@ pub use delegation::{
     RequestCounter, ResultCollector, RunHandle, RunProgress, RunRecord, RunRegistry, SubagentLauncher,
     SubagentOutcome, SubagentStatus, Submission, Timer, TimerKind, TimerSource, Triggered, WatchEvent,
     Watcher, WatcherAction, WatcherSet, announced_capacity, delegate_module, result_module, run_batch,
+    workspace_notification,
 };
 pub use modules::{
-    InMemoryMemoryStore, McpConnector, McpEnv, McpError, McpLister, McpRetryPolicy, McpTool, Memory,
-    MemoryLevel, MemoryScope, MemoryScopes, MemoryStore, MemorySummary, ModulesError, ModulesResult,
+    InMemoryMemoryStore, McpConnector, McpEnv, McpError, McpLister, McpNotification, McpRetryPolicy, McpTool,
+    Memory, MemoryLevel, MemoryScope, MemoryScopes, MemoryStore, MemorySummary, ModulesError, ModulesResult,
     ScriptedConnector, TodoItem, TodoList, TodoStatus, function_name, mcp_module, mcp_shell_descriptor,
     memory_module, memory_module_name, name_tools, todo_module,
 };
@@ -55,7 +57,8 @@ pub use scratchpad::{
     ScratchpadEngine, ScratchpadError, ScratchpadLimits, ScratchpadResult, ScriptErrorClass, ScriptFunction,
     ScriptPosition, UnpersistableReason, VariableInfo, descriptors_from_catalog, extract_function_sources,
     full_text, limits_notice, nearest, recompile_functions, register_format_functions, render_value,
-    restore_scope, shell_module, snapshot_scope, suggest_for, to_dynamic, to_tagged, truncate_middle,
+    restore_scope, rhai_prod_inspect_definition, shell_module, snapshot_scope, suggest_for, to_dynamic,
+    to_tagged, truncate_middle,
 };
 pub use secret::{DefaultSecretDetector, SecretDetector};
 pub use session::{
@@ -66,6 +69,7 @@ pub use session::{
     SessionKind, SessionResult, SessionState, SessionStore, SleepOutcome, TaggedValue, TokenCounters,
     ToolCall, TurnGate, TurnId, TurnPermit, restore_notices, unresolved_call_notices,
 };
+pub use tools::{InspectEnv, InspectTool, InspectionHost, session_tool_definitions};
 pub use toolsets::{
     Assembled, Bump, ConfigEnv, ConfigStores, ContextLevel, ContextStore, ContextType, ContextTypeStore,
     Contract, Delegation, DraftEntry, DraftKind, DraftStore, FlatContextType, Gap, GapKind, InMemoryToolsets,

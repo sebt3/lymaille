@@ -1,0 +1,46 @@
+Spec: inspect_tool
+
+Purpose:
+  Définition canonique du tool natif `rhai_prod_inspect` de l'agent de configuration (exécute du Rhai dans le pad d'inspection de la cible courante, en lecture seule). Le tool lui-même (`InspectTool`) vit dans `../tools/inspect.sdd` : il a besoin des stockages de `toolsets` et des listeurs de `modules`, que `scratchpad` ne peut pas voir (Décision du 2026-11-01 (conception, après le blocage du lot Q2))
+    (`agent-sessions/scratchpad#FR-13`, `agent-sessions#BR-8`, `agent-sessions#AC-6bis`, `AC-13`).
+
+Owns:
+  ./inspect_tool.rs
+
+References:
+  ./inspect.sdd
+  ../session/native_tool.sdd
+
+Exposes:
+  @rhai_prod_inspect_definition
+
+Accepts:
+  @rhai_prod_inspect_definition: aucun argument.
+
+Returns:
+  @rhai_prod_inspect_definition: la définition plate `name`, `description`, `parameters` (une propriété obligatoire `script`, chaîne).
+
+Must:
+  Le texte de `description` est, en anglais : Run one Rhai script in the read-only inspection pad of the current target, chosen with `inspect::open_context` or `inspect::open_session`. Introspection runs for real: `vars()`, `modules()`, `functions()`, `toolsets()`, `skills()`, `find("words")`, `rules()`. The functions of the target's toolset and MCP modules have their real names, signatures and documentation, but every call returns an inspection-only error: nothing is executed and no server is contacted. For a past session the variables can be read and not written. Nothing is saved. Errors come back as text.
+  Chaque affirmation de la description s'exécute dans un test, comme celles de `rhai_pad` (../toolsets/native.sdd).
+  Aucune connexion, aucun effet de bord : l'appel d'une fonction d'un module MCP ou de toolset projeté rend l'erreur « inspection seule » (`AC-13`) ; l'écriture d'une variable d'une session passée échoue.
+  L'annulation du tour arrête le script (le @CancelHandle reçu). Aucun secret dans la sortie. Aucune panique.
+
+Depends on:
+  ./inspect.sdd
+  ../session/native_tool.sdd
+  ../session/redact.sdd
+  serde_json
+
+Scenario: la définition est complète
+  Given @rhai_prod_inspect_definition
+  When elle est lue
+  Then `name` vaut `rhai_prod_inspect`, `parameters.required` vaut `["script"]`, et deux lectures sont égales
+
+Scenario: chaque affirmation de la description est vraie
+  Given la description et un pad d'inspection
+  When chaque affirmation est exécutée
+  Then chacune se vérifie
+
+Tasks:
+  [x] #1 Définition et son test (lot Q2, fait) : `rhai_prod_inspect_definition` ; les scénarios d'exécution du tool sont dans ../tools/inspect.sdd.

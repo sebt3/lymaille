@@ -1,0 +1,38 @@
+Spec: replay_mode
+
+Purpose:
+  Mode de rejeu du raisonnement déclaré par un profil de modèle. Le mode appartient au domaine `session` parce qu'un
+    instantané de segment le persiste (`agent-sessions/session#FR-11`) ; `context` le ré-exporte et
+    y sélectionne le raisonnement à renvoyer (`agent-sessions/context-window#FR-9`, `AC-5`).
+
+Owns:
+  ./replay_mode.rs
+
+Exposes:
+  @ReplayMode
+  @ReplayMode::as_str
+  @ReplayMode::parse
+
+Accepts:
+  @ReplayMode: `None`, `IntraTurn`, `AllTurns` (ce dernier correspond à `preserve_thinking`).
+  @ReplayMode::parse: un texte.
+
+Returns:
+  @ReplayMode::as_str: `none`, `intra_turn`, `all_turns`.
+  @ReplayMode::parse: le mode dont le texte est celui donné, ou rien pour tout autre texte.
+
+Must:
+  Le texte persisté d'un mode est `none`, `intra_turn` ou `all_turns` : aucune autre forme, aucune montée de format.
+  @ReplayMode se sérialise et se désérialise en ce même texte (sous forme de chaîne JSON) ; un texte inconnu est refusé à la
+    lecture, il n'est jamais ramené à un mode par défaut.
+  `parse` est l'inverse de `as_str` et refuse tout autre texte.
+
+Depends on:
+  serde
+
+Tasks:
+  [x] #1 Déplacé de ../context/replay.sdd (lot Q3, décision du 2026-10-31) : même définition, même texte, défini ici puis ré-exporté
+      par `context`. Les tests du texte restent ceux de ../context/replay.sdd (Scenario « le texte du mode fait l'aller-retour »),
+      qui les exercent par le ré-export.
+  [x] #2 Rendu par @ModelSnapshot (./segment.sdd #2) : l'instantané porte ce type et non plus un texte libre.
+  [x] #3 Pas de note de migration (Décision du 2026-11-01 (accord du développeur principal)) : un état ancien dont le mode de rejeu est un texte libre autre que `none`, `intra_turn` ou `all_turns` ne se relit plus ; aucune session de production n'existe avant la publication 0.1 (même raison que `agents/definition.sdd` #16).

@@ -488,6 +488,24 @@ impl SessionState {
         Ok(())
     }
 
+    /// Replaces the todo entries with `todo`, given as opaque JSON values. The host owns the todo list: it sets it before
+    /// a save and reads it back after a restore.
+    pub fn set_todo(&mut self, todo: Vec<serde_json::Value>) {
+        self.todo = todo;
+    }
+
+    /// Replaces the watchers with `watchers`, given as opaque JSON values. The host owns the watchers: it sets them
+    /// before a save and reads them back after a restore.
+    pub fn set_watchers(&mut self, watchers: Vec<serde_json::Value>) {
+        self.watchers = watchers;
+    }
+
+    /// Replaces the handles of the runs in progress with `run_handles`, given as opaque JSON values. The host owns the run
+    /// registry: it sets the handles before a save and reads them back after a restore.
+    pub fn set_run_handles(&mut self, run_handles: Vec<serde_json::Value>) {
+        self.run_handles = run_handles;
+    }
+
     /// Appends a message to the history. Nothing already in the history is changed.
     pub(crate) fn push_message(&mut self, message: Message) {
         self.history.push(message);
@@ -569,8 +587,8 @@ mod tests {
     use super::{AgentRef, InspectionTargetRef, SessionKind, SessionState, TokenCounters};
     use crate::clock::{ManualClock, Timestamp};
     use crate::session::{
-        BoundaryKind, FormatVersion, LabelAuthor, LabelTarget, Message, ModelSnapshot, Outcome, RunSignals,
-        Segment, SegmentContext, SessionError, SessionId, TaggedValue, ToolCall, TurnId,
+        BoundaryKind, FormatVersion, LabelAuthor, LabelTarget, Message, ModelSnapshot, Outcome, ReplayMode,
+        RunSignals, Segment, SegmentContext, SessionError, SessionId, TaggedValue, ToolCall, TurnId,
     };
 
     fn session_id(text: &str) -> SessionId {
@@ -602,7 +620,11 @@ mod tests {
         state.history.push(Message::assistant("done", None, Vec::new()));
         state.segments.push(Segment::new(
             BoundaryKind::Start,
-            SegmentContext::new("system prompt", Vec::new(), ModelSnapshot::new("model-x", "none")),
+            SegmentContext::new(
+                "system prompt",
+                Vec::new(),
+                ModelSnapshot::new("model-x", ReplayMode::None),
+            ),
             Timestamp::from_millis(1000),
         ));
         state.variables.extend([
@@ -1291,7 +1313,7 @@ mod tests {
     #[test]
     fn push_segment_makes_the_new_segment_current() {
         let mut state = minimal();
-        let context = SegmentContext::new("prompt", Vec::new(), ModelSnapshot::new("m", "none"));
+        let context = SegmentContext::new("prompt", Vec::new(), ModelSnapshot::new("m", ReplayMode::None));
         state.push_segment(Segment::new(
             BoundaryKind::Start,
             context.clone(),
@@ -1362,6 +1384,77 @@ mod tests {
             state.signals().get(&TurnId::new(1)).and_then(RunSignals::outcome),
             Some(Outcome::Valid),
             "a second record of the same turn replaces the first"
+        );
+    }
+
+    // Scenario: un état dont les trois listes sont posées survit à une sauvegarde et à une relecture identiques (tâche #8).
+    #[test]
+    fn lists_set_by_the_host_survive_a_round_trip() {
+        let mut state = minimal();
+        let todo = vec![json!({"text": "check the pods", "done": false})];
+        let watchers = vec![json!({"name": "pods-ready", "kind": "timer"})];
+        let run_handles = vec![json!({"run": "r-1", "status": "running"})];
+        state.set_todo(todo.clone());
+        state.set_watchers(watchers.clone());
+        state.set_run_handles(run_handles.clone());
+
+        let text = state.to_json().expect("a state with lists must serialize");
+        let restored = SessionState::from_json(&text).expect("the text written by to_json must load");
+
+        assert_eq!(
+            restored.todo(),
+            todo.as_slice(),
+            "the todo must survive a round trip"
+        );
+        assert_eq!(
+            restored.watchers(),
+            watchers.as_slice(),
+            "the watchers must survive a round trip"
+        );
+        assert_eq!(
+            restored.run_handles(),
+            run_handles.as_slice(),
+            "the run handles must survive a round trip"
+        );
+        assert_eq!(
+            restored, state,
+            "the whole state must be identical after a round trip"
+        );
+    }
+
+    // Scenario: un état dont les trois listes sont posées survit à une sauvegarde et à une relecture identiques ; la version
+    // de format ne change pas (tâche #8).
+    #[test]
+    fn setting_the_lists_keeps_the_format_version() {
+        let mut state = minimal();
+        state.set_todo(vec![json!({"text": "a"})]);
+        state.set_watchers(vec![json!({"name": "w"})]);
+        state.set_run_handles(vec![json!({"run": "r"})]);
+
+        assert_eq!(
+            state.format(),
+            FormatVersion::CURRENT,
+            "setting the lists must not change the format version in memory"
+        );
+        let text = state.to_json().expect("a state with lists must serialize");
+        let document: serde_json::Value = serde_json::from_str(&text).expect("the document is valid JSON");
+        let expected = serde_json::to_value(FormatVersion::CURRENT).expect("the current version serializes");
+        assert_eq!(
+            document.get("format"),
+            Some(&expected),
+            "the written format version must be the current one"
+        );
+    }
+
+    #[test]
+    fn setting_a_list_replaces_the_earlier_one() {
+        let mut state = minimal();
+        state.set_todo(vec![json!({"text": "first"})]);
+        state.set_todo(vec![json!({"text": "second"})]);
+        assert_eq!(
+            state.todo(),
+            [json!({"text": "second"})].as_slice(),
+            "the todo must be replaced, not appended to"
         );
     }
 }

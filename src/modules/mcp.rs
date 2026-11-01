@@ -2,7 +2,7 @@
 //! only, then listing and calling), and a scripted connector for tests. No real transport lives here: the host, or a later lot,
 //! connects to a server (`agent-sessions/modules#FR-6`, `agent-sessions/modules#FR-11`, `agent-sessions#CON-5`).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use serde::Serialize;
@@ -60,6 +60,48 @@ impl McpTool {
     }
 }
 
+/// A notification a server sent on its own.
+///
+/// It holds the name of the server, the JSON-RPC method and the parameters (`null` when there are none). It carries nothing of the requests of the client: no argument, no header, no URL, no secret.
+/// The parameters are the server's data: the host masks them (with its redactor) before it shows or stores them.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
+pub struct McpNotification {
+    server: String,
+    method: String,
+    params: Value,
+}
+
+impl McpNotification {
+    /// Builds a notification from the `server` that sent it, its JSON-RPC `method` and its `params`.
+    #[must_use]
+    pub fn new(server: &str, method: &str, params: Value) -> Self {
+        Self {
+            server: server.to_owned(),
+            method: method.to_owned(),
+            params,
+        }
+    }
+
+    /// Returns the name of the server that sent the notification.
+    #[must_use]
+    pub fn server(&self) -> &str {
+        &self.server
+    }
+
+    /// Returns the JSON-RPC method of the notification, for instance `notifications/tools/list_changed`.
+    #[must_use]
+    pub fn method(&self) -> &str {
+        &self.method
+    }
+
+    /// Returns the parameters of the notification, `null` when it has none.
+    #[must_use]
+    pub const fn params(&self) -> &Value {
+        &self.params
+    }
+}
+
 /// Connector that can only list the tools of a server. A function that receives only this trait cannot call a tool.
 pub trait McpLister: Send + Sync {
     /// Lists the tools of the server.
@@ -87,6 +129,26 @@ pub trait McpConnector: McpLister {
 
     /// Re-establishes the connection after a loss.
     fn reconnect(&self) -> impl Future<Output = ()> + Send;
+
+    /// Waits for the next notification the server sends on its own, and returns it. `None` means that this connector has
+    /// no notification to deliver: the default body returns it at once, so a connector that does not support notifications
+    /// compiles unchanged, and a [`ScriptedConnector`] returns it when its script is exhausted. A connector to a real
+    /// server waits until a notification arrives and does not return `None` while it lives.
+    ///
+    /// The host links a connector to the watchers' event hub of the `delegation` domain (this module does not depend on
+    /// it). A host loop, with `redact` for its redactor and `hub` for its `EventHub`:
+    ///
+    /// ```ignore
+    /// while let Some(notification) = connector.next_notification().await {
+    ///     let params = redact(notification.params());
+    ///     hub.notify("mcp", notification.method(), params, clock.now())?;
+    /// }
+    /// ```
+    ///
+    /// The source is the built-in `mcp` source; the name of the event is the method of the notification.
+    fn next_notification(&self) -> impl Future<Output = Option<McpNotification>> + Send {
+        std::future::ready(None)
+    }
 }
 
 /// Scripted connector for tests: a fake server with the tools it exposes, the results of its tools, and programmed
@@ -108,6 +170,7 @@ struct ConnectorState {
     calls: usize,
     reconnects: usize,
     received: Vec<Value>,
+    notifications: VecDeque<McpNotification>,
 }
 
 impl ScriptedConnector {
@@ -163,6 +226,17 @@ impl ScriptedConnector {
             .get_mut()
             .unwrap_or_else(PoisonError::into_inner)
             .listing_unreachable = true;
+        self
+    }
+
+    /// Programs a notification that [`McpConnector::next_notification`] delivers; they come in the order they are added.
+    #[must_use]
+    pub fn with_notification(mut self, notification: McpNotification) -> Self {
+        self.state
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner)
+            .notifications
+            .push_back(notification);
         self
     }
 
@@ -245,6 +319,11 @@ impl McpConnector for ScriptedConnector {
         }
         std::future::ready(())
     }
+
+    // The scripted notifications come in the order they were programmed; none is left once the script is exhausted.
+    fn next_notification(&self) -> impl Future<Output = Option<McpNotification>> + Send {
+        std::future::ready(self.lock().notifications.pop_front())
+    }
 }
 
 #[cfg(test)]
@@ -254,7 +333,7 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{McpConnector as _, McpError, McpLister as _, McpTool, ScriptedConnector};
+    use super::{McpConnector, McpError, McpLister, McpNotification, McpTool, ScriptedConnector};
 
     fn assert_send_sync<T: Send + Sync>() {}
 
@@ -460,6 +539,81 @@ mod tests {
             McpError::Failed("unknown tool".to_owned()).to_string(),
             "the MCP server failed: unknown tool"
         );
+    }
+
+    // Scenario (mcp.sdd #5): notifications du serveur
+    #[tokio::test]
+    async fn scripted_notifications_come_in_order_then_none() {
+        let connector = two_tools()
+            .with_notification(McpNotification::new(
+                "grafana",
+                "notifications/tools/list_changed",
+                json!(null),
+            ))
+            .with_notification(McpNotification::new(
+                "grafana",
+                "notifications/message",
+                json!({"level": "info"}),
+            ));
+        let first = connector
+            .next_notification()
+            .await
+            .expect("the first scripted notification is delivered");
+        assert_eq!(first.server(), "grafana", "the server name is kept");
+        assert_eq!(
+            first.method(),
+            "notifications/tools/list_changed",
+            "the method is kept"
+        );
+        assert_eq!(first.params(), &json!(null), "the params are kept");
+        let second = connector
+            .next_notification()
+            .await
+            .expect("the second scripted notification is delivered");
+        assert_eq!(second.params(), &json!({"level": "info"}), "params are kept");
+        assert!(
+            connector.next_notification().await.is_none(),
+            "an exhausted script delivers nothing more"
+        );
+    }
+
+    /// A connector that only implements the required methods.
+    struct Silent;
+
+    impl McpLister for Silent {
+        fn list_tools(&self) -> impl Future<Output = Result<Vec<McpTool>, McpError>> + Send {
+            std::future::ready(Ok(Vec::new()))
+        }
+    }
+
+    impl McpConnector for Silent {
+        fn call_tool(
+            &self,
+            _name: &str,
+            _arguments: &serde_json::Value,
+        ) -> impl Future<Output = Result<serde_json::Value, McpError>> + Send {
+            std::future::ready(Ok(json!(null)))
+        }
+
+        fn reconnect(&self) -> impl Future<Output = ()> + Send {
+            std::future::ready(())
+        }
+    }
+
+    #[tokio::test]
+    async fn connector_without_notifications_compiles_unchanged_and_delivers_none() {
+        assert!(
+            Silent.next_notification().await.is_none(),
+            "the default body delivers no notification"
+        );
+    }
+
+    #[test]
+    fn notification_is_send_sync_and_serializes() {
+        assert_send_sync::<McpNotification>();
+        let value = serde_json::to_value(McpNotification::new("s", "m", json!({"a": 1})))
+            .expect("a notification serializes");
+        assert_eq!(value, json!({"server": "s", "method": "m", "params": {"a": 1}}));
     }
 
     /// Calls the tool `echo` ten times through the shared connector.

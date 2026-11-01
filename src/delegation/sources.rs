@@ -13,10 +13,14 @@ use serde::{Deserialize, Serialize};
 
 use super::error::{DelegationError, DelegationResult};
 use crate::clock::Timestamp;
+use crate::session::{Event, EventKind};
 
 /// Names of the four built-in sources: `subagent`, `mcp`, `workspace` (todo and Memory) and `timer`. They are reserved:
 /// the host cannot register its own source under one of them.
 pub const BUILTIN_SOURCES: &[&str] = &["subagent", "mcp", "workspace", "timer"];
+
+/// Name of the built-in workspace source (todo and Memory changes).
+const WORKSPACE_SOURCE: &str = "workspace";
 
 /// Name of the built-in timer source.
 const TIMER_SOURCE: &str = "timer";
@@ -66,6 +70,44 @@ impl WatchEvent {
     pub const fn at(&self) -> Timestamp {
         self.at
     }
+}
+
+/// Converts a session event into a notification of the built-in `workspace` source (`agent-sessions/delegation#FR-10`).
+///
+/// [`EventKind::TodoChanged`] gives the event `todo_changed` with empty object data, [`EventKind::MemoryChanged`] gives
+/// `memory_changed` with the `level` and the `id` of the Memory (never its body); any other event gives `None`. The event
+/// keeps the instant of the session event.
+///
+/// The function is pure. The host calls it in its [`EventSink`](crate::session::EventSink) and hands the result to the hub:
+///
+/// ```ignore
+/// fn emit(&self, event: Event) {
+///     if let Some(change) = workspace_notification(&event) {
+///         let _ = self.hub.notify(change.source(), change.name(), change.data().clone(), change.at());
+///     }
+///     // ... then the host's own handling of the event
+/// }
+/// ```
+#[must_use]
+pub fn workspace_notification(event: &Event) -> Option<WatchEvent> {
+    if let EventKind::MemoryChanged { level, id } = &event.kind {
+        let data = serde_json::json!({"level": level, "id": id});
+        return Some(WatchEvent::new(
+            WORKSPACE_SOURCE,
+            "memory_changed",
+            data,
+            event.at,
+        ));
+    }
+    if matches!(event.kind, EventKind::TodoChanged) {
+        return Some(WatchEvent::new(
+            WORKSPACE_SOURCE,
+            "todo_changed",
+            serde_json::json!({}),
+            event.at,
+        ));
+    }
+    None
 }
 
 /// Source of events, implemented by the host and shareable between threads (`agent-sessions/delegation#FR-9`).
@@ -489,9 +531,13 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{BUILTIN_SOURCES, EventHub, EventSource, Timer, TimerKind, TimerSource, WatchEvent};
+    use super::{
+        BUILTIN_SOURCES, EventHub, EventSource, Timer, TimerKind, TimerSource, WatchEvent,
+        workspace_notification,
+    };
     use crate::clock::Timestamp;
     use crate::delegation::DelegationError;
+    use crate::session::{Event, EventKind, SessionId};
 
     fn at(millis: u64) -> Timestamp {
         Timestamp::from_millis(millis)
@@ -1131,6 +1177,81 @@ mod tests {
         assert!(
             hub.poll().expect("poll succeeds").is_empty(),
             "a drained source does not hand its events over twice"
+        );
+    }
+
+    fn session_event(millis: u64, kind: EventKind) -> Event {
+        Event::new(
+            SessionId::new("session-1").expect("a non-empty text makes a session identifier"),
+            at(millis),
+            kind,
+        )
+    }
+
+    // Scenario: changements de todo et de Memory vers la source workspace
+    #[test]
+    fn todo_changed_becomes_a_workspace_notification() {
+        let converted = workspace_notification(&session_event(42, EventKind::TodoChanged))
+            .expect("a todo change gives a notification");
+        assert_eq!(converted.source(), "workspace", "the source is workspace");
+        assert_eq!(converted.name(), "todo_changed", "the event name is stable");
+        assert_eq!(converted.data(), &json!({}), "a todo change carries no data");
+        assert_eq!(converted.at(), at(42), "the instant of the session event is kept");
+    }
+
+    #[test]
+    fn memory_changed_carries_level_and_id_only() {
+        let converted = workspace_notification(&session_event(
+            7,
+            EventKind::MemoryChanged {
+                level: "project".to_owned(),
+                id: "deploy-notes".to_owned(),
+            },
+        ))
+        .expect("a Memory change gives a notification");
+        assert_eq!(converted.source(), "workspace", "the source is workspace");
+        assert_eq!(converted.name(), "memory_changed", "the event name is stable");
+        assert_eq!(
+            converted.data(),
+            &json!({"level": "project", "id": "deploy-notes"}),
+            "the data names the Memory and nothing else"
+        );
+        assert_eq!(converted.at(), at(7), "the instant of the session event is kept");
+    }
+
+    #[test]
+    fn another_session_event_gives_nothing() {
+        let other = session_event(
+            1,
+            EventKind::McpReconnect {
+                role: "grafana".to_owned(),
+                attempt: 1,
+                delay_ms: 10,
+            },
+        );
+        assert_eq!(
+            workspace_notification(&other),
+            None,
+            "only todo and Memory changes convert"
+        );
+    }
+
+    #[test]
+    fn converted_notification_reaches_the_hub_through_notify() {
+        let hub = EventHub::new();
+        let converted = workspace_notification(&session_event(5, EventKind::TodoChanged))
+            .expect("a todo change gives a notification");
+        hub.notify(
+            converted.source(),
+            converted.name(),
+            converted.data().clone(),
+            converted.at(),
+        )
+        .expect("the built-in workspace source accepts the notification");
+        assert_eq!(
+            hub.poll().expect("the hub polls"),
+            vec![converted],
+            "the hub gives back the converted event once"
         );
     }
 }

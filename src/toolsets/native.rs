@@ -3,6 +3,7 @@
 //! See `src/toolsets/native.sdd`.
 
 use std::collections::BTreeMap;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use rhai::serde::to_dynamic;
@@ -12,7 +13,7 @@ use serde_json::{Value, json};
 
 use super::{ResolvedContext, SessionMeta, Skill, ToolsetsError, ToolsetsResult, render_skill};
 use crate::scratchpad::{ScratchpadLimits, ScratchpadResult, limits_notice, truncate_middle};
-use crate::session::{NativeTool, Redactor};
+use crate::session::{CancelHandle, NativeTool, Redactor};
 
 /// Name of the built-in skill that teaches the `rhai_pad` tool.
 const BUILTIN_NAME: &str = "rhai-pad";
@@ -328,10 +329,16 @@ impl NativeTool for SkillTool {
         skill_definition()
     }
 
-    fn call(&self, arguments: &Value) -> String {
+    fn call<'call>(
+        &'call self,
+        arguments: &'call Value,
+        _cancel: &'call CancelHandle,
+    ) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'call>> {
         let text = |key: &str| arguments.get(key).and_then(Value::as_str);
-        self.call(text("name"), text("document"))
-            .unwrap_or_else(|error| error.to_string())
+        let outcome = self
+            .call(text("name"), text("document"))
+            .map_err(|error| error.to_string());
+        Box::pin(std::future::ready(outcome))
     }
 }
 
@@ -935,34 +942,44 @@ mod tests {
     }
 
     // Scenario: skill appelé comme tool natif
-    #[test]
-    fn skill_is_called_as_a_native_tool() {
+    #[tokio::test]
+    async fn skill_is_called_as_a_native_tool() {
         let tool = tool();
         let native: &dyn NativeTool = &tool;
+        let cancel = CancelHandle::new();
         assert_eq!(native.name(), "skill", "the tool is called `skill`");
         assert_eq!(
             native.definition(),
             skill_definition(),
             "its definition is the canonical one"
         );
-        let body = native.call(&json!({"name": "rhai-pad"}));
+        let body = native.call(&json!({"name": "rhai-pad"}), &cancel).await;
         assert_eq!(
-            Some(body.as_str()),
+            body.as_deref().ok(),
             tool.call(Some("rhai-pad"), None).ok().as_deref(),
             "a name gives the rendered body"
         );
-        let list = native.call(&json!({}));
+        let list = native.call(&json!({}), &cancel).await.unwrap_or_default();
         assert!(
             list.contains("- deploy: Deploy to prod") && list.contains("- rhai-pad:"),
             "no argument gives the list: {list}"
         );
-        let unknown = native.call(&json!({"name": "nope"}));
+        let unknown = native.call(&json!({"name": "nope"}), &cancel).await;
+        let Err(unknown) = unknown else {
+            panic!("an unknown name is an error: {unknown:?}");
+        };
         assert!(
             unknown.contains("nope") && unknown.contains("deploy") && unknown.contains("rhai-pad"),
             "an unknown name gives an error text that lists the existing skills: {unknown}"
         );
-        let annex = native.call(&json!({"name": "deploy", "document": "queries"}));
-        assert_eq!(annex, "PromQL text", "a name and a document give the annex");
+        let annex = native
+            .call(&json!({"name": "deploy", "document": "queries"}), &cancel)
+            .await;
+        assert_eq!(
+            annex.as_deref(),
+            Ok("PromQL text"),
+            "a name and a document give the annex"
+        );
     }
 
     #[test]

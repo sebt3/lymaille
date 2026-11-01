@@ -10,18 +10,28 @@ use std::time::Duration;
 
 use http::{HeaderName, HeaderValue};
 use rmcp::ServiceExt as _;
-use rmcp::model::{CallToolRequestParams, CallToolResult, Tool};
+use rmcp::handler::client::ClientHandler;
+#[expect(
+    deprecated,
+    reason = "logging messages are still a server notification that watchers can observe"
+)]
+use rmcp::model::LoggingMessageNotificationParam;
+use rmcp::model::{
+    CallToolRequestParams, CallToolResult, CustomNotification, ResourceUpdatedNotificationParam,
+    TaskStatusNotificationParams, Tool,
+};
 use rmcp::service::ClientInitializeError;
+use rmcp::service::NotificationContext;
 use rmcp::service::{Peer, RoleClient, RunningService, ServiceError};
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::streamable_http_client::{
     AuthRequiredError, InsufficientScopeError, StreamableHttpClientTransportConfig,
 };
 use serde_json::Value;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, mpsc};
 use tokio::time::timeout;
 
-use super::mcp::{McpConnector, McpError, McpLister, McpTool};
+use super::mcp::{McpConnector, McpError, McpLister, McpNotification, McpTool};
 
 /// Authentication headers of a server, as the host resolves them. The values are opaque and never shown.
 #[derive(Clone, Default)]
@@ -137,7 +147,100 @@ impl fmt::Debug for McpClientConfig {
 pub struct RmcpConnector<A> {
     config: McpClientConfig,
     auth: Arc<A>,
-    session: Mutex<Option<RunningService<RoleClient, ()>>>,
+    session: Mutex<Option<RunningService<RoleClient, NotificationRelay>>>,
+    relay: mpsc::Sender<McpNotification>,
+    notifications: Mutex<mpsc::Receiver<McpNotification>>,
+}
+
+/// Number of server notifications kept while the host does not read them; beyond it the newest ones are dropped.
+const NOTIFICATION_CAPACITY: usize = 256;
+
+/// Receives the notifications of the server inside `rmcp` and queues them for [`McpConnector::next_notification`].
+/// Protocol bookkeeping of the client's own requests (cancellation, progress, subscription acknowledgement) is not an event
+/// for the watchers and is not forwarded. Only what the server sent is queued: no request, no header, no URL.
+struct NotificationRelay {
+    sender: mpsc::Sender<McpNotification>,
+}
+
+impl NotificationRelay {
+    /// Queues a notification of `method` with `params` (`null` when it has none or when they cannot be read). A full queue
+    /// drops it: the handler of `rmcp` must not wait for the host.
+    fn forward(&self, context: &NotificationContext<RoleClient>, method: &str, params: Value) {
+        let server = context
+            .peer
+            .peer_info()
+            .and_then(|info| info.server_info.as_ref().map(|server| server.name.clone()))
+            .unwrap_or_else(|| "unknown".to_owned());
+        let _queued = self
+            .sender
+            .try_send(McpNotification::new(&server, method, params));
+    }
+}
+
+impl ClientHandler for NotificationRelay {
+    #[expect(
+        deprecated,
+        reason = "logging messages are a server notification that watchers can still observe"
+    )]
+    async fn on_logging_message(
+        &self,
+        params: LoggingMessageNotificationParam,
+        context: NotificationContext<RoleClient>,
+    ) {
+        self.forward(
+            &context,
+            "notifications/message",
+            serde_json::to_value(&params).unwrap_or(Value::Null),
+        );
+    }
+
+    async fn on_resource_updated(
+        &self,
+        params: ResourceUpdatedNotificationParam,
+        context: NotificationContext<RoleClient>,
+    ) {
+        self.forward(
+            &context,
+            "notifications/resources/updated",
+            serde_json::to_value(&params).unwrap_or(Value::Null),
+        );
+    }
+
+    async fn on_resource_list_changed(&self, context: NotificationContext<RoleClient>) {
+        self.forward(&context, "notifications/resources/list_changed", Value::Null);
+    }
+
+    async fn on_tool_list_changed(&self, context: NotificationContext<RoleClient>) {
+        self.forward(&context, "notifications/tools/list_changed", Value::Null);
+    }
+
+    async fn on_prompt_list_changed(&self, context: NotificationContext<RoleClient>) {
+        self.forward(&context, "notifications/prompts/list_changed", Value::Null);
+    }
+
+    async fn on_task_status(
+        &self,
+        params: TaskStatusNotificationParams,
+        context: NotificationContext<RoleClient>,
+    ) {
+        self.forward(
+            &context,
+            "notifications/tasks",
+            serde_json::to_value(&params).unwrap_or(Value::Null),
+        );
+    }
+
+    async fn on_custom_notification(
+        &self,
+        notification: CustomNotification,
+        context: NotificationContext<RoleClient>,
+    ) {
+        self.forward(
+            &context,
+            &notification.method,
+            notification.params.unwrap_or(Value::Null),
+        );
+    }
 }
 
 impl<A: McpAuth> RmcpConnector<A> {
@@ -148,10 +251,13 @@ impl<A: McpAuth> RmcpConnector<A> {
     /// choose one, and `rmcp` panics when it builds its HTTP client without one.
     #[must_use]
     pub fn new(config: McpClientConfig, auth: Arc<A>) -> Self {
+        let (relay, receiver) = mpsc::channel(NOTIFICATION_CAPACITY);
         Self {
             config,
             auth,
             session: Mutex::new(None),
+            relay,
+            notifications: Mutex::new(receiver),
         }
     }
 
@@ -170,10 +276,16 @@ impl<A: McpAuth> RmcpConnector<A> {
             transport_config = transport_config.auth_header(token.as_str());
         }
         let transport = StreamableHttpClientTransport::from_config(transport_config);
-        let opened = timeout(self.config.connect_timeout, ().serve(transport))
-            .await
-            .map_err(|_elapsed| McpError::Unreachable("the connection timed out".to_owned()))?
-            .map_err(|error| initialize_error(&error))?;
+        let opened = timeout(
+            self.config.connect_timeout,
+            NotificationRelay {
+                sender: self.relay.clone(),
+            }
+            .serve(transport),
+        )
+        .await
+        .map_err(|_elapsed| McpError::Unreachable("the connection timed out".to_owned()))?
+        .map_err(|error| initialize_error(&error))?;
         let peer = opened.peer().clone();
         *session = Some(opened);
         drop(session);
@@ -328,6 +440,12 @@ impl<A: McpAuth> McpConnector for RmcpConnector<A> {
     async fn reconnect(&self) {
         drop(self.session.lock().await.take());
     }
+
+    // Waits for the next notification of the server, whichever session delivered it: the queue outlives a reconnection. It
+    // does not open the session (the first listing or call does), and it waits for ever when the server sends none.
+    async fn next_notification(&self) -> Option<McpNotification> {
+        self.notifications.lock().await.recv().await
+    }
 }
 
 #[cfg(test)]
@@ -341,6 +459,7 @@ mod tests {
     use serde_json::{Value, json};
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
     use tokio::net::{TcpListener, TcpStream};
+    use tokio::time::timeout;
 
     use super::{
         McpAuth, McpClientConfig, McpConnector as _, McpError, McpHeaders, McpLister as _, RmcpConnector,
@@ -366,6 +485,8 @@ mod tests {
         EmptyAnswer,
         /// Answers `initialize` with HTTP 200 and a body that is not JSON.
         NotJson,
+        /// Answers the first page of `tools/list` with an event stream: two notifications, then the result.
+        Notify,
     }
 
     /// A request the fake server received: its JSON-RPC method (empty when it has none) and its headers, in lower case.
@@ -496,6 +617,20 @@ mod tests {
         let _closed = stream.shutdown().await;
     }
 
+    /// Writes an event stream answer holding two server notifications, then the JSON-RPC answer, and closes.
+    async fn respond_with_notifications(stream: &mut TcpStream, answer: &Value) {
+        let message = json!({"jsonrpc": "2.0", "method": "notifications/message",
+            "params": {"level": "info", "data": "disk almost full"}});
+        let list_changed = json!({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"});
+        let body = format!("data: {message}\n\ndata: {list_changed}\n\ndata: {answer}\n\n");
+        let head = format!(
+            "HTTP/1.1 200 X\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+            body.len()
+        );
+        let _written = stream.write_all(format!("{head}{body}").as_bytes()).await;
+        let _closed = stream.shutdown().await;
+    }
+
     async fn serve_connection(mut stream: TcpStream, mode: Mode, seen: Arc<Mutex<Vec<Seen>>>) {
         let Some((http_method, headers, body)) = read_request(&mut stream).await else {
             return;
@@ -539,7 +674,7 @@ mod tests {
                 respond(&mut stream, 200, &[], &answer.to_string()).await;
                 return;
             }
-            Mode::Normal | Mode::Hang(_) | Mode::BadInitialize => {}
+            Mode::Normal | Mode::Hang(_) | Mode::BadInitialize | Mode::Notify => {}
         }
         let Some(id) = message.get("id").cloned() else {
             respond(&mut stream, 202, &[], "").await;
@@ -549,6 +684,13 @@ mod tests {
         match rpc_answer(&method, &message) {
             Ok(result) => answer["result"] = result,
             Err(error) => answer["error"] = error,
+        }
+        if matches!(mode, Mode::Notify)
+            && method == "tools/list"
+            && message.pointer("/params/cursor").is_none()
+        {
+            respond_with_notifications(&mut stream, &answer).await;
+            return;
         }
         respond(&mut stream, 200, &[], &answer.to_string()).await;
     }
@@ -782,7 +924,7 @@ mod tests {
         let server = FakeServer::start(Mode::Hang("tools/call")).await;
         let config = McpClientConfig::new(&server.url()).with_request_timeout(Duration::from_millis(300));
         let connector = RmcpConnector::new(config, anonymous());
-        let outcome = tokio::time::timeout(
+        let outcome = timeout(
             Duration::from_secs(10),
             connector.call_tool("echo", &json!({"msg": "x"})),
         )
@@ -799,7 +941,7 @@ mod tests {
         let server = FakeServer::start(Mode::Hang("initialize")).await;
         let config = McpClientConfig::new(&server.url()).with_connect_timeout(Duration::from_millis(300));
         let connector = RmcpConnector::new(config, anonymous());
-        let outcome = tokio::time::timeout(Duration::from_secs(10), connector.list_tools())
+        let outcome = timeout(Duration::from_secs(10), connector.list_tools())
             .await
             .expect("the connector must give up before the test deadline");
         assert!(
@@ -1159,5 +1301,73 @@ mod tests {
         assert_send_sync::<RmcpConnector<StaticAuth>>();
         assert_send_sync::<McpHeaders>();
         assert_send_sync::<McpClientConfig>();
+    }
+
+    // Scenario (mcp_client.sdd #5): notifications du serveur
+    #[tokio::test]
+    async fn server_notifications_are_delivered_in_order() {
+        let server = FakeServer::start(Mode::Notify).await;
+        let connector = connector_for(&server);
+        let _tools = connector.list_tools().await.expect("the server lists its tools");
+        let first = timeout(Duration::from_secs(5), connector.next_notification())
+            .await
+            .expect("a notification arrives in time")
+            .expect("the connector delivers the notification");
+        assert_eq!(
+            first.server(),
+            "fake",
+            "the server name is the one of the handshake"
+        );
+        assert_eq!(first.method(), "notifications/message", "the method is kept");
+        assert_eq!(
+            first.params(),
+            &json!({"level": "info", "data": "disk almost full"}),
+            "the params are the server's"
+        );
+        let second = timeout(Duration::from_secs(5), connector.next_notification())
+            .await
+            .expect("the second notification arrives in time")
+            .expect("the connector delivers the second notification");
+        assert_eq!(
+            second.method(),
+            "notifications/tools/list_changed",
+            "the method is kept"
+        );
+        assert_eq!(
+            second.params(),
+            &Value::Null,
+            "a notification without params gives null"
+        );
+    }
+
+    #[tokio::test]
+    async fn notification_holds_no_request_data_nor_secret() {
+        let server = FakeServer::start(Mode::Notify).await;
+        let auth = Arc::new(StaticAuth(McpHeaders::new().with_bearer("tok-secret")));
+        let connector = RmcpConnector::new(McpClientConfig::new(&server.url_with_secret()), auth);
+        let _tools = connector.list_tools().await.expect("the server lists its tools");
+        let notification = timeout(Duration::from_secs(5), connector.next_notification())
+            .await
+            .expect("a notification arrives in time")
+            .expect("the connector delivers the notification");
+        let shown = format!("{notification:?}");
+        for secret in ["tok-secret", "s3cr3t", "127.0.0.1", "Authorization"] {
+            assert!(
+                !shown.contains(secret),
+                "the notification must not show `{secret}`: {shown}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn notifications_wait_when_the_server_sent_none() {
+        let server = FakeServer::start(Mode::Normal).await;
+        let connector = connector_for(&server);
+        let _tools = connector.list_tools().await.expect("the server lists its tools");
+        let waited = timeout(Duration::from_millis(300), connector.next_notification()).await;
+        assert!(
+            waited.is_err(),
+            "a live connector waits instead of returning, got {waited:?}"
+        );
     }
 }

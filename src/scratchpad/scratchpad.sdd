@@ -18,6 +18,7 @@ Structure:
   ./suggest.rs: candidats les plus proches parmi les éléments accordés
   ./run.rs: le pad et l'exécution d'un appel de `rhai_pad`
   ./inspect.rs: pad d'inspection de l'agent de configuration (`rhai_prod_inspect`), modules coquilles
+  ./inspect_tool.rs: tool natif `rhai_prod_inspect` et sa définition
 
 Owns:
   ./mod.rs
@@ -38,6 +39,7 @@ References:
   ./suggest.sdd
   ./run.sdd
   ./inspect.sdd
+  ./inspect_tool.sdd
 
 Must:
   Ne réaliser aucune E/S : ni fichier, ni processus, ni environnement, ni sortie standard ; le moteur n'a pas de résolveur de modules par fichier et capte `print` et `debug` (`agent-sessions#CON-1`, `agent-sessions#CON-3`).
@@ -56,6 +58,6 @@ Tasks:
       Fait : voir lymaille.sdd #2, #7, #9.
   [x] #3 Déclarations à faire hors de ce répertoire : `/src/lib.sdd` (module `scratchpad` et ré-exports) et `/lymaille.sdd` (`References`). Non faites ici.
       Fait (lymaille.sdd References, lib.sdd).
-  [!] #4 Dépendances d'autres domaines, posées par ce domaine et non encore spécifiées : `toolsets` (enregistre `session_context()` par @EngineBuilder::with_registration, construit ses modules avec @base_engine, fournit @GrantedModule, @GrantedToolset, @GrantedSkill, embarque @limits_notice dans le skill intégré) ; `modules` (modules MCP en @GrantedModule) ; `session` (la boucle de tour appelle @Scratchpad::run et range @PadSnapshot dans l'état) ; `agents` (plafonds de mémoire dans @SandboxLimits, voir ./limits.sdd #3).
+  [x] #4 Dépendances d'autres domaines livrées : `toolsets` (session_context_registration, assemble sur base_engine, GrantedModule/Toolset/Skill, limits_notice dans le skill intégré), `modules` (mcp_module, todo et Memory rendent des modules à accorder), `session` (la boucle de tour appelle Scratchpad::run et range le PadSnapshot par set_pad, src/runtime/turn.rs), `agents` (champs mémoire de @SandboxLimits, src/agents/definition.rs).
   [x] #5 Mesures préalables (spikes courts, avant l'implémentation de ./persist.sdd et ./introspect.sdd) : délimitation du texte d'une fonction par `Engine::lex`, parcours des appels qualifiés par `AST::walk`, champs du JSON de métadonnées de Rhai, attrapage de l'arrêt de `on_progress` par `try/catch`. Les résultats alimentent `Observed in:` des specs concernées.
       Fait : spikes A et B (persist.sdd) et mesures de l'introspection.
