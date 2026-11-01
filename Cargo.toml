@@ -1,6 +1,6 @@
 [package]
 name = "lymaille"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.95.0"
 description = "Library to run an LLM as a durable work agent: persistent sessions, a Rhai scratchpad, lazily discovered toolsets."
@@ -9,7 +9,18 @@ repository = "https://github.com/sebt3/lymaille"
 readme = "README.md"
 keywords = ["llm", "agent", "rhai", "mcp"]
 categories = ["development-tools"]
-publish = false
+exclude = [
+  "/dsd",
+  "/spikes",
+  "/scripts",
+  "/.specdd",
+  "/.claude",
+  "/.opencode",
+  "/.github",
+  "/AGENTS.md",
+  "/CLAUDE.md",
+  "/*.sdd",
+]
 
 [lints]
 workspace = true
