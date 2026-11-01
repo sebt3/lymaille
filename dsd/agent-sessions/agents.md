@@ -64,7 +64,7 @@ et ce que l'agent consomme.
 
 ## Questions ouvertes
 
-- **TBD:** détection des modèles (à vérifier : report de `max_model_len` par `rig`). `list_models` existe dans `rig` 0.43 sur les clients OpenAI, Anthropic, Ollama, Copilot et
+- **Résolu (2026-11-01):** détection des modèles : `rig` ne reporte pas `max_model_len` dans `context_length` (mesuré, `spikes/rig-probe`) ; `detect_models` de l'adaptateur (`rig.sdd`) lit `GET <base>/models` lui-même (vLLM : `max_model_len` 262144 pour `qwen3.8-flash-next`, `spikes/rig-e2e`). La passerelle annonce 8192 à tort (`kydah/kydah-ai-proxy#113`) : la surcharge du profil est nécessaire. Texte d'origine : détection des modèles (à vérifier : report de `max_model_len` par `rig`). `list_models` existe dans `rig` 0.43 sur les clients OpenAI, Anthropic, Ollama, Copilot et
   Gemini (Observed in: rig-core 0.43.0, `src/client`), et `ModelInfo` porte `context_length` et `max_output_tokens`
   optionnels. vLLM annonce `max_model_len` dans `/v1/models` (262 144 pour `qwen3.8-flash-next`, Observed in:
   spikes/inference-probe) ; que `rig` le reporte dans `context_length` reste à vérifier, sinon le profil de modèle le

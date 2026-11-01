@@ -87,7 +87,9 @@ async fn main() {
     rustls::crypto::ring::default_provider().install_default().expect("rustls");
     let base = std::env::var("LYMAILLE_E2E_BASE").expect("LYMAILLE_E2E_BASE");
     let model = std::env::var("LYMAILLE_E2E_MODEL").expect("LYMAILLE_E2E_MODEL");
-    let cfg = RigConfig::new(base.clone(), None);
+    // The key, when the server needs one, only comes from the environment and is never printed.
+    let key = std::env::var("LYMAILLE_E2E_KEY").ok().filter(|k| !k.is_empty());
+    let cfg = RigConfig::new(base.clone(), key);
     println!("Debug RigConfig: {cfg:?}");
     let prov = RigProvider::new(&cfg);
     let ctx = 262_144;

@@ -67,3 +67,15 @@ d'API relevés plus bas (finish reason absent, etc.).
 - Tâche #3 de `rig.sdd` : cocher une fois ces points tranchés ; le TBD de `context-window.md` reste ouvert pour la passerelle.
 
 Nettoyage : `cargo clean` du répertoire `~/.cache/cargo-target/rig-e2e` fait en fin d'essai ; aucun processus en fond.
+
+## Passerelle `smart` (Qwen3.6-35B-A3B), mesuré le 2026-11-01
+
+Même programme, `LYMAILLE_E2E_BASE=http://<adresse-de-la-passerelle>:11434/v1`, `LYMAILLE_E2E_MODEL=Qwen3.6-35B-A3B`, clé dans `LYMAILLE_E2E_KEY` (lue de la configuration d'opencode, jamais écrite ni affichée : 0 occurrence dans les journaux). Deux exécutions, aucun blocage du proxy, code de sortie 0.
+
+Exécuté :
+- **Détection** : la passerelle annonce `context_length: 8192` pour presque tous ses modèles, `Qwen3.6-35B-A3B` compris (réel : 250 000) ; confirme `kydah/kydah-ai-proxy#113`. La surcharge du profil est donc nécessaire, pas seulement prévue.
+- **`complete`, `stream`, appel d'outil** : conformes (texte, usage, raisonnement décodé et absent du texte, 9 fragments dont la concaténation égale le texte final, `rhai_pad` décodé avec `{"script":"6*7"}`). `max_tokens` 24 respecté (usage 24).
+- **Rejeu** : le tour 2 AVEC rejeu (`AllTurns` + `chat_template_kwargs {"preserve_thinking": true}`) est accepté par le backend et le prompt grossit (601 jetons contre 124 sans rejeu), ce qui montre que le raisonnement du tour 1 arrive dans le prompt côté serveur. Les deux variantes répondent `47` : le scénario « nombre » ne discrimine pas (réponse par défaut du modèle). Le scénario « mot de 8 lettres » est inexploitable ici : avec `max_tokens` 2048 le modèle consomme tout le budget en raisonnement (texte vide aux deux tours, usage 2048), donc aucun message d'assistant avec texte à rejouer.
+- **Modèle inexistant** : la passerelle répond **503**, classé `Transient` par l'adaptateur (le serveur ne distingue pas « modèle inconnu » d'une panne) ; la boucle de tour réessaierait avec backoff sur une erreur permanente. Le message ne contient pas l'adresse.
+
+Conclusion honnête : le backend accepte `reasoning_content` et `chat_template_kwargs` et le raisonnement rejoué arrive dans le prompt. Que le rejeu améliore la réponse sur Qwen3.6 n'est pas démontré (le DGX l'a démontré). Pour le démontrer : un second tour dont la réponse dépend du raisonnement du premier avec un `max_tokens` assez grand (au moins 8000) ou sans mode de réflexion au tour 1.

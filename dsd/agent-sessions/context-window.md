@@ -83,7 +83,8 @@ raison d'être de `agent-sessions#BO-4`.
   citer textuellement les demandes de l'utilisateur, seule donnée non régénérable ; le résumeur reçoit du texte et non des
   messages structurés. Le contenu exact du prompt reste à rédiger avec le code.
     - **Source:** user instruction, 2026-10-27
-- **TBD:** essai de bout en bout du rejeu du raisonnement, à écrire avec le code comme test d'intégration (AC-5). Mesuré côté
+- **Mesuré (2026-11-01, `spikes/rig-e2e/README.md`):** sur le vLLM du DGX (`qwen3.8-flash-next`, champ `reasoning`), le rejeu avec `preserve_thinking` passé par la table libre du profil est accepté et améliore la réponse sur une question qui dépend de la pensée précédente (sans rejeu, le modèle consomme le budget en raisonnement et rend un texte vide). Sur la passerelle `smart` (Qwen3.6, `reasoning_content`) le rejeu est accepté et arrive dans le prompt côté serveur (601 jetons contre 124), mais son bénéfice n'est pas démontré (scénario non discriminant). Reste ouvert : le démontrer sur Qwen3.6 avec un budget de sortie assez grand.
+- **Texte d'origine du TBD :** essai de bout en bout du rejeu du raisonnement, à écrire avec le code comme test d'intégration (AC-5). Mesuré côté
   serveur (`spikes/inference-probe`) : sur vLLM le champ renvoyé est `reasoning`, les deux orthographes sont acceptées en
   entrée, et `preserve_thinking` s'obtient par `chat_template_kwargs` ; sur la passerelle `smart`, Qwen3.6 renvoie
   `reasoning_content`. Lu dans `rig` 0.43, non exécuté : il décode les deux champs, il fusionne `additional_params` à plat
