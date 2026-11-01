@@ -1,0 +1,14 @@
+[package]
+name = "rig-e2e"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Hors workspace de lymaille.
+[workspace]
+
+[dependencies]
+lymaille = { path = "../.." }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+serde_json = "1"
