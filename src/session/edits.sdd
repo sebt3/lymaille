@@ -40,4 +40,4 @@ Scenario: la cellule est vidée une fois
 
 Tasks:
   [x] #1 Tests puis implémentation (lot S2), déclaration dans ./mod.rs et ré-export dans ../lib.rs.
-  [?] Posé à l'implémentation : @PendingEdits expose `title()`, `reviews()` et `is_empty()` ; son `Debug` et celui de @SessionEdits ne montrent aucun texte.
+  [x] Posé à l'implémentation : @PendingEdits expose `title()`, `reviews()` et `is_empty()` ; son `Debug` et celui de @SessionEdits ne montrent aucun texte.

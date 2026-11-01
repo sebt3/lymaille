@@ -116,7 +116,8 @@ Tasks:
   [x] #17 Prose en retard sur la nature : `Accepts` (« sous-agents délégables (principal) »), rustdoc de `with_delegable` et de `delegable()` dans definition.rs, rustdoc de `delegable_subagents` dans ../toolsets/compat.rs (« main agent »).
       Validé le 2026-10-29 (implémentation vérifiée par mutations de l'auteur), validation par le validator groupée avec T6.
       Prose corrigée (Accepts, rustdocs) le 2026-10-29 ; validé.
-  [ ] #18 Sérialisation texte (frontmatter YAML + prompt en corps) : `to_text` et `from_text`, avec les Scenarios de fin de ce fichier ; tests rouges puis implémentation, à valider.
+  [x] #18 Sérialisation texte (frontmatter YAML + prompt en corps) : `to_text` et `from_text`, avec les Scenarios de fin de ce fichier ; tests rouges puis implémentation, à valider.
+      Validé le 2026-11-01 (validateur, lot pré-publication, scripts/check complet).
 
 Scenario: modèle désigné par le seul nom du profil
   Given une définition construite avec le profil `strix-qwen`

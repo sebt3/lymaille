@@ -109,6 +109,5 @@ Tasks:
       (d) zéros de tête : refusés par Semver, donc comparés comme texte : différents → message « changed version » ; test
       `leading_zero_is_compared_as_text`.
       Les quatre tests ont été écrits VERTS sur le comportement décidé (a, b, d) ou ROUGE pour (c) (ordre inverse de métadonnées) ;
-      chacun est prouvé par mutation. Le marqueur `[?] #6` reste à basculer en `[x]` par l'orchestrateur après validation ;
-      la case #3 reste à cocher par la même voie (remplacement fait).
+      chacun est prouvé par mutation. Le marqueur `[?] #6` a été basculé en `[x]` et la case #3 cochée par l'orchestrateur (2026-11-01, validateur, lot pré-publication).
   [x] #P6 @unresolved_call_notices (Décision du 2026-10-31 (AC-2 de `session`, accord du développeur principal)) : tests puis implémentation, ré-export dans ../lib.rs ; `restore_notices` est inchangée.
