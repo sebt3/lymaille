@@ -17,7 +17,8 @@ use super::{
 const CREATION_NATURE_RULE: &str = "the toolset-creation module is reserved to a configuration agent (nature Config): \
      a work agent or a sub-agent cannot hold it";
 
-/// Rule of the `session` module: a work or configuration agent may hold it, a sub-agent never does.
+/// Rule of the `session` module: a work or configuration agent may hold it, a sub-agent never does. The copy in `agents`
+/// is pinned by tests on both sides, so the two texts stay in step.
 const SESSION_MODULE_RULE: &str = "the session module (title and flag for analysis) is reserved to a work or \
      configuration agent: a sub-agent cannot hold it";
 
@@ -792,8 +793,10 @@ mod tests {
     fn session_module_refused_for_a_sub_agent() {
         let sub = sub_agent("worker", Vec::new()).with_modules(vec!["session".to_owned()]);
         match check_session_module_rule(&sub, &[], "session") {
-            Err(ToolsetsError::Forbidden { rule }) => assert!(
-                rule.contains("session module") && rule.contains("sub-agent"),
+            Err(ToolsetsError::Forbidden { rule }) => assert_eq!(
+                rule,
+                "the session module (title and flag for analysis) is reserved to a work or \
+     configuration agent: a sub-agent cannot hold it",
                 "the message names the rule: {rule}"
             ),
             other => panic!("expected Forbidden, got {other:?}"),

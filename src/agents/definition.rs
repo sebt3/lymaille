@@ -276,7 +276,8 @@ impl AgentDefinition {
     ///
     /// Returns [`AgentsError::InvalidDefinition`] when the identifier, the prompt or the profile name is empty, when a
     /// sub-agent or a configuration agent declares delegable sub-agents, when a work or configuration agent declares an
-    /// output schema, when a configuration module is granted to a work agent or a sub-agent, when a delegable sub-agent
+    /// output schema, when a configuration module is granted to a work agent or a sub-agent, when a sub-agent is
+    /// granted the `session` module, when a delegable sub-agent
     /// is the agent itself or is listed twice, when the toolsets or the modules contain a duplicate, or when a memory
     /// limit of the sandbox is zero.
     pub fn validate(&self) -> AgentsResult<()> {
@@ -314,6 +315,14 @@ impl AgentDefinition {
                 .any(|module| CONFIGURATION_MODULES.contains(&module.as_str()))
         {
             return self.refuse("a configuration module is granted to a work agent or a sub-agent");
+        }
+        if self.kind == AgentKind::Sub
+            && self
+                .modules
+                .iter()
+                .any(|module| module.as_str() == SESSION_MODULE_NAME)
+        {
+            return self.refuse(SESSION_MODULE_RULE);
         }
         if self
             .sandbox
@@ -412,6 +421,15 @@ impl AgentDefinition {
 
 /// Modules reserved to a configuration agent: a work agent and a sub-agent never receive them (`agent-sessions#BR-8`).
 const CONFIGURATION_MODULES: [&str; 4] = ["toolset_creator", "inspect", "contexts", "sessions"];
+
+/// The name the host registers the `session` scratchpad module under: the module carries no name of its own
+/// (`../modules/session_module.sdd`, decision of the 2026-11-01).
+const SESSION_MODULE_NAME: &str = "session";
+
+/// Rule of the `session` module: a work agent or a configuration agent may hold it, a sub-agent never does. The message
+/// names the rule; its copy in `toolsets` is pinned by tests on both sides, so they stay in step.
+const SESSION_MODULE_RULE: &str = "the session module (title and flag for analysis) is reserved to a work or \
+     configuration agent: a sub-agent cannot hold it";
 
 /// Tells whether two entries of `items` are equal.
 fn has_duplicate(items: &[String]) -> bool {
@@ -1290,6 +1308,44 @@ mod tests {
     fn sub_agent_cannot_receive_an_inspection_module() {
         let sub = with_modules_of(AgentKind::Sub, &["inspect"]);
         assert_invalid(&sub, "a sub-agent granted the inspection module");
+    }
+
+    // Scenario: module session refusé pour un sous-agent, au chargement, par la raison qui nomme la règle
+    #[test]
+    fn sub_agent_cannot_hold_the_session_module() {
+        let sub = with_modules_of(AgentKind::Sub, &["session"]);
+        let error = sub
+            .validate()
+            .expect_err("a sub-agent granted the session module must be refused");
+        match error {
+            AgentsError::InvalidDefinition { id, reason } => {
+                assert_eq!(id, "agent", "the refusal names the definition");
+                assert_eq!(
+                    reason,
+                    "the session module (title and flag for analysis) is reserved to a work or \
+     configuration agent: a sub-agent cannot hold it",
+                    "the refusal names the rule"
+                );
+            }
+            error @ (AgentsError::UnknownProfile { .. }
+            | AgentsError::UnknownProvider { .. }
+            | AgentsError::ContextSizeUnknown { .. }
+            | AgentsError::Store(_)) => {
+                panic!("a sub-agent is refused with InvalidDefinition, got {error:?}")
+            }
+        }
+    }
+
+    // Scenario: le module session est gardé pour Work et Config
+    #[test]
+    fn work_and_config_agents_may_hold_the_session_module() {
+        for kind in [AgentKind::Work, AgentKind::Config] {
+            let definition = with_modules_of(kind, &["session"]);
+            assert!(
+                matches!(definition.validate(), Ok(())),
+                "a {kind:?} agent granted the session module must be valid, got {definition:?}"
+            );
+        }
     }
 
     /// Every reserved module refused for a work agent and for a sub-agent: the list is that of the definition.

@@ -45,7 +45,7 @@ Must:
   Les rôles propres d'un toolset (@RoleDecl) obligatoires comptent comme les rôles du type.
   Le module de création de toolsets (`toolset_creator`) n'est accordable qu'à un agent de nature `Config` (`agent-sessions#BR-8`) : une définition qui l'accorde à un agent de travail ou à un sous-agent est refusée avec un message qui nomme la règle (`agent-sessions/toolsets#AC-8`).
   Le module `session` (titre et signalement pour analyse, ../modules/session_module.sdd) est accordable aux natures `Work` et `Config`, pas à `Sub` : une définition de sous-agent qui l'accorde est refusée avec un message qui nomme la règle (@check_session_module_rule).
-  Le contrôle se fait au chargement ou à l'enregistrement d'une définition, puis à la création de la session.
+  Le contrôle se fait au chargement ou à l'enregistrement d'une définition, puis à la création de la session ; au chargement, le refus est porté par @AgentDefinition::validate (../agents/definition.sdd, même message de règle, texte épinglé par tests des deux côtés).
 
 Depends on:
   ./context_type.sdd

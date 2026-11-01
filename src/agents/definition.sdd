@@ -38,7 +38,7 @@ Returns:
   @SandboxLimits::max_string_bytes, @SandboxLimits::max_array_len, @SandboxLimits::max_map_len: `None` quand le plafond est absent (le défaut de `scratchpad/limits` s'applique alors), sinon la valeur posée.
 
 Raises:
-  @AgentsError::InvalidDefinition: un sous-agent ou un agent de configuration qui déclare des sous-agents délégables ; un agent de travail ou de configuration qui déclare un schéma de sortie ; un module réservé à la configuration (`toolset_creator`, `inspect`, `contexts`, `sessions`) accordé à un agent de travail ou à un sous-agent ; un identifiant, un prompt ou un nom de profil vide ; un sous-agent délégable égal à l'agent lui-même ou en double ; une liste de toolsets ou de modules qui contient un doublon ; un plafond de mémoire du sandbox posé à zéro.
+  @AgentsError::InvalidDefinition: un sous-agent ou un agent de configuration qui déclare des sous-agents délégables ; un agent de travail ou de configuration qui déclare un schéma de sortie ; un module réservé à la configuration (`toolset_creator`, `inspect`, `contexts`, `sessions`) accordé à un agent de travail ou à un sous-agent ; le module `session` accordé à un sous-agent (la raison porte le texte de la règle, ../toolsets/compat.sdd) ; un identifiant, un prompt ou un nom de profil vide ; un sous-agent délégable égal à l'agent lui-même ou en double ; une liste de toolsets ou de modules qui contient un doublon ; un plafond de mémoire du sandbox posé à zéro.
   @AgentsError::InvalidDefinition, identifiant `<AGENT.md>` et raison fixe : frontmatter absent ou non fermé, YAML illisible, champ de mauvais type, champ `prompt` dans le frontmatter, texte de plus de 256 Kio (refusé avant toute analyse), nombre non fini (`.nan`, `.inf`, `-.inf`), clé qui n'est pas un texte, clé déclarée deux fois au premier niveau (le prompt est le corps, choix posé le 2026-10-31 à valider : un doublon refusé plutôt qu'écrasé en silence). Le message ne porte jamais le prompt ni une valeur du texte.
 
 Must:
@@ -118,6 +118,7 @@ Tasks:
       Prose corrigée (Accepts, rustdocs) le 2026-10-29 ; validé.
   [x] #18 Sérialisation texte (frontmatter YAML + prompt en corps) : `to_text` et `from_text`, avec les Scenarios de fin de ce fichier ; tests rouges puis implémentation, à valider.
       Validé le 2026-11-01 (validateur, lot pré-publication, scripts/check complet).
+  [ ] #20 Refus au chargement du module `session` accordé à un sous-agent (décision du 2026-11-01, ../toolsets/compat.sdd #9) : la raison cite la règle, copie privée du texte de ../toolsets/compat.rs épinglée par tests des deux côtés ; les Scenarios « module session … » ci-dessus ; tests vus rouges puis verts.
 
 Scenario: modèle désigné par le seul nom du profil
   Given une définition construite avec le profil `strix-qwen`
@@ -206,6 +207,16 @@ Scenario: un sous-agent ne peut pas recevoir un module d'inspection
 
 Scenario: un agent de configuration avec ses modules est valide
   Given une définition de nature Config qui accorde `toolset_creator`, `inspect`, `contexts` et `sessions`
+  When elle est validée
+  Then elle réussit
+
+Scenario: le module session est refusé pour un sous-agent, au chargement
+  Given une définition de nature Sub qui accorde le module `session`
+  When elle est validée
+  Then elle échoue avec InvalidDefinition et la raison porte le texte de la règle (`the session module (title and flag for analysis) is reserved to a work or configuration agent: a sub-agent cannot hold it`)
+
+Scenario: le module session est gardé pour Work et Config
+  Given une définition de nature Work ou Config qui accorde le module `session`
   When elle est validée
   Then elle réussit
 
