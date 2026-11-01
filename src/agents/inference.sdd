@@ -11,6 +11,7 @@ Exposes:
   @InferenceProvider
   @InferenceRequest
   @InferenceResponse
+  @FinishReason (`Stop`, `Length`, `ToolCalls`, `Other`)
   @ReportedUsage
   @InferenceError
   @ErrorClass
@@ -43,6 +44,7 @@ Must:
   @ScriptedProvider enregistre chaque requête reçue avant de répondre, rend `Permanent` avec le message « script exhausted » quand la liste est épuisée, et est partageable entre tâches (verrou interne, `Send + Sync`).
   @InferenceRequest et @InferenceResponse se clonent et se comparent (tests).
   Aucune attente, aucun réessai ici : le backoff est celui de ../session/backoff.sdd, piloté par la boucle de tour.
+  Raison de fin (Décision du 2026-11-01 (accord du développeur principal, relevé du spike R2)) : @InferenceResponse porte `finish_reason()` (@FinishReason optionnelle : `None` quand le serveur ne la donne pas, p. ex. @ScriptedProvider par défaut ; un constructeur chaîné la pose). @ReportedUsage porte en plus les jetons de raisonnement (`reasoning()`, optionnels, lus de `completion_tokens_details.reasoning_tokens` par l'adaptateur) et un constructeur chaîné les pose. @FinishReason est `non_exhaustive`, sérialisable.
 
 Depends on:
   ./profile.sdd
@@ -104,6 +106,11 @@ Scenario: réponse vide en flux par défaut : aucun fragment
   When stream est appelé avec un récepteur qui collecte les fragments
   Then la réponse est celle que rend complete et le récepteur n'a rien reçu
 
+Scenario: la raison de fin et les jetons de raisonnement se portent
+  Given une réponse construite avec la raison `Length` et un usage de 10 jetons de prompt, 20 de complétion dont 15 de raisonnement
+  When on les relit
+  Then finish_reason vaut Length, reasoning vaut 15, et une réponse sans les poser rend None pour les deux
+
 Tasks:
   [x] #11 Tests manquants relevés à la validation de H2 : l'implémentation par défaut de `stream` quand `complete` échoue (aucun fragment) et sur une réponse vide (aucun fragment).
   [x] #12 Ajouter deux Scenario (défaut de `stream` quand `complete` échoue ; réponse vide) et renommer les deux tests d'après eux.
@@ -119,3 +126,4 @@ Tasks:
   [x] #3 Rejeu du raisonnement : la requête porte le raisonnement déjà choisi par @replayed_reasoning ; la transmission de `chat_template_kwargs` au serveur (mode explicite) est faite par l'adaptateur (voir ./agents.sdd #2).
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
   [x] #4 Sortie structurée du sous-agent : résolue par `delegation` (DSD FR-4) : le sous-agent rend son résultat par la fonction Rhai `result::submit`, validée contre le schéma de sa définition avec corrections (../delegation/result.sdd) ; la requête d'inférence ne porte donc pas de schéma de sortie.
+  [x] #13 @FinishReason, `InferenceResponse::finish_reason` et `ReportedUsage::reasoning` (Décision du 2026-11-01 (accord du développeur principal, relevé du spike R2), lot R3) : tests puis implémentation, ré-exports dans ../lib.rs.

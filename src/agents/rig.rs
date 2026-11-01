@@ -18,8 +18,8 @@ use rig_core::streaming::{Item, Relayed, StreamEvent};
 use serde_json::{Map, Value};
 
 use super::{
-    DetectedModel, ErrorClass, InferenceError, InferenceProvider, InferenceRequest, InferenceResponse,
-    ReportedUsage, ResolvedProfile, classify_status,
+    DetectedModel, ErrorClass, FinishReason, InferenceError, InferenceProvider, InferenceRequest,
+    InferenceResponse, ReportedUsage, ResolvedProfile, classify_status,
 };
 use crate::session::{Message, Reasoning, ToolCall};
 
@@ -131,6 +131,7 @@ impl RigProvider {
                 Ok(Relayed::Item(Item::Event(event))) => answer.absorb(event, fragments),
                 Ok(Relayed::Done(response)) => {
                     answer.usage = reported_usage(&response.usage);
+                    answer.finish = response.finish_reason().as_ref().map(finish_reason);
                     ended = true;
                 }
                 Ok(Relayed::Item(_)) => {}
@@ -184,6 +185,7 @@ struct Answer {
     reasoning: String,
     calls: Vec<ToolCall>,
     usage: Option<ReportedUsage>,
+    finish: Option<FinishReason>,
 }
 
 impl Answer {
@@ -192,9 +194,16 @@ impl Answer {
     fn absorb<F: FnMut(&str)>(&mut self, event: StreamEvent, fragments: &mut F) {
         match event {
             StreamEvent::Text { text, .. } => {
-                if !text.is_empty() {
-                    fragments(&text);
-                    self.text.push_str(&text);
+                // The Qwen template of vLLM starts the content with newlines: they are dropped until the first
+                // real character, then the text goes through untouched.
+                let kept = if self.text.is_empty() {
+                    text.trim_start_matches(['\n', '\r'])
+                } else {
+                    text.as_str()
+                };
+                if !kept.is_empty() {
+                    fragments(kept);
+                    self.text.push_str(kept);
                 }
             }
             StreamEvent::Reasoning { text, .. } => self.reasoning.push_str(&text),
@@ -223,17 +232,37 @@ impl Answer {
     /// Builds the response; the reasoning carries `model` as emitter.
     fn into_response(self, model: &str) -> InferenceResponse {
         let reasoning = (!self.reasoning.is_empty()).then(|| Reasoning::new(model, self.reasoning));
-        InferenceResponse::new(Message::assistant(self.text, reasoning, self.calls), self.usage)
+        let response =
+            InferenceResponse::new(Message::assistant(self.text, reasoning, self.calls), self.usage);
+        match self.finish {
+            Some(reason) => response.with_finish_reason(reason),
+            None => response,
+        }
+    }
+}
+
+/// The finish reason of the library for a reason `rig` normalized.
+const fn finish_reason(reason: &rig_core::completion::FinishReason) -> FinishReason {
+    match reason {
+        rig_core::completion::FinishReason::Stop => FinishReason::Stop,
+        rig_core::completion::FinishReason::Length => FinishReason::Length,
+        rig_core::completion::FinishReason::ToolCalls => FinishReason::ToolCalls,
+        rig_core::completion::FinishReason::ContentFilter | rig_core::completion::FinishReason::Other(_) => {
+            FinishReason::Other
+        }
     }
 }
 
 /// The usage the server reported, if it reported any counter.
 fn reported_usage(usage: &rig_core::completion::Usage) -> Option<ReportedUsage> {
     usage.is_reported().then(|| {
-        ReportedUsage::new(
+        let reported = ReportedUsage::new(
             usage.input_tokens.unwrap_or_default(),
             usage.output_tokens.unwrap_or_default(),
-        )
+        );
+        usage
+            .reasoning_tokens
+            .map_or(reported, |reasoning| reported.with_reasoning(reasoning))
     })
 }
 
@@ -514,8 +543,8 @@ mod tests {
 
     use super::{RigConfig, RigProvider, detect_models};
     use crate::agents::{
-        DetectedModel, ErrorClass, InferenceError, InferenceProvider as _, InferenceRequest, ModelProfile,
-        ResolvedProfile, SamplingParams,
+        DetectedModel, ErrorClass, FinishReason, InferenceError, InferenceProvider as _, InferenceRequest,
+        ModelProfile, ResolvedProfile, SamplingParams,
     };
     use crate::session::{Message, Reasoning};
 
@@ -1031,6 +1060,139 @@ mod tests {
             response.usage().map(|usage| (usage.prompt(), usage.completion())),
             Some((11, 7)),
             "the final usage"
+        );
+    }
+
+    // Scenario: les sauts de ligne de tête sont retirés
+    #[tokio::test]
+    async fn leading_newlines_are_removed() {
+        let chunks = [
+            delta(&json!({"role": "assistant", "content": "\n\n"})),
+            delta(&json!({"content": "Bon"})),
+            delta(&json!({"content": "jour\n"})),
+            usage_chunk(),
+        ];
+        let server = fake(stream_reply(&chunks)).await;
+        let response = complete(&server, simple_request())
+            .await
+            .expect("the answer is decoded");
+        assert_eq!(
+            assistant(&response).0,
+            "Bonjour\n",
+            "only the leading newlines go"
+        );
+        let mut received = Vec::new();
+        let streamed = RigProvider::new(&server.config(None))
+            .stream(simple_request(), |fragment| received.push(fragment.to_owned()))
+            .await
+            .expect("the stream succeeds");
+        assert_eq!(
+            received,
+            ["Bon", "jour\n"],
+            "the newline-only fragment is not emitted"
+        );
+        assert_eq!(
+            assistant(&streamed).0,
+            "Bonjour\n",
+            "the final text is trimmed at the head"
+        );
+    }
+
+    #[tokio::test]
+    async fn leading_newlines_inside_the_first_fragment_are_removed() {
+        let server = fake(stream_reply(&[
+            delta(&json!({"content": "\n\nun"})),
+            delta(&json!({"content": "\n\ndeux"})),
+            usage_chunk(),
+        ]))
+        .await;
+        let mut received = Vec::new();
+        let response = RigProvider::new(&server.config(None))
+            .stream(simple_request(), |fragment| received.push(fragment.to_owned()))
+            .await
+            .expect("the stream succeeds");
+        assert_eq!(received, ["un", "\n\ndeux"], "the middle is left alone");
+        assert_eq!(assistant(&response).0, "un\n\ndeux", "the final text");
+    }
+
+    #[tokio::test]
+    async fn only_the_head_is_trimmed_in_a_single_fragment() {
+        let server = fake(stream_reply(&[
+            delta(&json!({"content": "\n\nBonjour\n"})),
+            usage_chunk(),
+        ]))
+        .await;
+        let mut received = Vec::new();
+        let response = RigProvider::new(&server.config(None))
+            .stream(simple_request(), |fragment| received.push(fragment.to_owned()))
+            .await
+            .expect("the stream succeeds");
+        assert_eq!(received, ["Bonjour\n"], "the end of the fragment is kept");
+        assert_eq!(assistant(&response).0, "Bonjour\n", "the end of the text is kept");
+    }
+
+    #[tokio::test]
+    async fn leading_carriage_returns_are_removed() {
+        let server = fake(stream_reply(&[
+            delta(&json!({"content": "\r\n\r\nBonjour"})),
+            usage_chunk(),
+        ]))
+        .await;
+        let response = complete(&server, simple_request())
+            .await
+            .expect("the answer is decoded");
+        assert_eq!(
+            assistant(&response).0,
+            "Bonjour",
+            "carriage returns go with the newlines"
+        );
+    }
+
+    // Scenario: la raison de fin et les jetons de raisonnement sont lus
+    #[tokio::test]
+    async fn finish_reason_and_reasoning_tokens_are_read() {
+        let usage = json!({"id": "c1", "choices": [], "usage": {"prompt_tokens": 11, "completion_tokens": 20, "total_tokens": 31, "completion_tokens_details": {"reasoning_tokens": 15}}});
+        for (wire, expected) in [
+            ("length", FinishReason::Length),
+            ("stop", FinishReason::Stop),
+            ("tool_calls", FinishReason::ToolCalls),
+            ("content_filter", FinishReason::Other),
+        ] {
+            let server = fake(stream_reply(&[
+                delta(&json!({"content": "Bon"})),
+                json!({"id": "c1", "choices": [{"index": 0, "delta": {}, "finish_reason": wire}]}),
+                usage.clone(),
+            ]))
+            .await;
+            let response = complete(&server, simple_request())
+                .await
+                .expect("the answer is decoded");
+            assert_eq!(response.finish_reason(), Some(expected), "wire reason {wire}");
+            let reported = response.usage().expect("the usage is reported");
+            assert_eq!(
+                reported.reasoning(),
+                Some(15),
+                "reasoning tokens, wire reason {wire}"
+            );
+            assert_eq!(
+                (reported.prompt(), reported.completion()),
+                (11, 20),
+                "core counters"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn no_finish_reason_and_no_reasoning_tokens_when_absent() {
+        let server = fake(stream_reply(&[delta(&json!({"content": "Bon"})), usage_chunk()])).await;
+        let response = complete(&server, simple_request())
+            .await
+            .expect("the answer is decoded");
+        assert_eq!(response.finish_reason(), None, "no reason given");
+        assert_eq!(
+            response.usage().and_then(|usage| usage.reasoning()),
+            None,
+            "no reasoning count"
         );
     }
 

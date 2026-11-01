@@ -278,7 +278,7 @@ mod tests {
         let record = McpRecord::new(&redactor, input);
         assert_eq!(
             record.arguments,
-            json!({"auth": "***"}),
+            json!({"auth": "*redacted secret*"}),
             "the secret must be masked in the arguments of an MCP call"
         );
     }
@@ -289,15 +289,15 @@ mod tests {
         redactor
             .add_secret("tok-123")
             .expect("a seven-character secret is accepted");
-        let record = script_record(&redactor, 4, "print(1)", "ab tok-123", None);
+        let record = script_record(&redactor, 8, "print(1)", "ab tok-123", None);
         assert_eq!(
-            record.result, "ab *",
+            record.result, "ab *reda",
             "the secret must be masked before the cap cuts the text, so no fragment of it survives"
         );
-        assert_eq!(record.original_len, 6, "original_len counts the masked result");
+        assert_eq!(record.original_len, 20, "original_len counts the masked result");
         assert!(
             record.truncated,
-            "the masked result of six characters is cut to four"
+            "the masked result of twenty characters is cut to eight"
         );
     }
 

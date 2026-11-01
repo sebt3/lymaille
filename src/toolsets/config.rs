@@ -1,7 +1,8 @@
 //! Modules of the configuration agent: `contexts` (compatibility and resolved values of a toolset context), `inspect` (the
 //! inspection target, shared with the `rhai_prod_inspect` tool), `sessions` (reading past sessions), and the index of
 //! sessions that the host implements (`agent-sessions/toolsets#FR-19`, `agent-sessions#BR-8`). The functions are synchronous
-//! Rhai functions that call the asynchronous stores through `vynil_core::rt::block_on`. None of them writes to a store.
+//! Rhai functions that call the asynchronous stores through `vynil_core::rt::block_on`. Only `sessions::mark_analyzed` writes
+//! to a store, and it only adds one label.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Display};
@@ -21,8 +22,8 @@ use crate::agents::{AgentDefinition, AgentStore};
 use crate::clock::Clock;
 use crate::scratchpad::{ScratchpadResult, ScriptErrorClass};
 use crate::session::{
-    Event, EventKind, EventSink, InspectionTargetRef, Redactor, SessionId, SessionKind, SessionResult,
-    SessionState, SessionStore, TurnId,
+    Event, EventKind, EventSink, InspectionTargetRef, Redactor, ReviewState, SessionId, SessionKind,
+    SessionResult, SessionState, SessionStore, TurnId, review_state,
 };
 
 /// Filter of a listing of past sessions. An absent field does not filter.
@@ -32,6 +33,7 @@ pub struct SessionFilter {
     agent: Option<String>,
     kind: Option<SessionKind>,
     limit: Option<usize>,
+    review_requested: bool,
 }
 
 impl SessionFilter {
@@ -60,6 +62,19 @@ impl SessionFilter {
     pub const fn with_limit(mut self, limit: usize) -> Self {
         self.limit = Some(limit);
         self
+    }
+
+    /// Keeps only the sessions flagged for analysis and not marked analyzed since (their review state is `Requested`).
+    #[must_use]
+    pub const fn with_review_requested(mut self) -> Self {
+        self.review_requested = true;
+        self
+    }
+
+    /// Tells whether the filter keeps only the sessions flagged for analysis.
+    #[must_use]
+    pub const fn review_requested(&self) -> bool {
+        self.review_requested
     }
 
     /// The agent the sessions must have, when the filter names one.
@@ -152,14 +167,17 @@ pub trait SessionIndex: Send + Sync {
     fn script_errors(&self, id: &SessionId) -> impl Future<Output = SessionResult<Vec<ScriptError>>> + Send;
 }
 
-/// Summary of a past session: identifier, agent, nature, the turns that carry signals, the total of their Rhai errors and
-/// the names of the functions the LLM defined.
+/// Summary of a past session: identifier, title, review state, agent, nature, the turns that carry signals, the total of
+/// their Rhai errors and the names of the functions the LLM defined.
 ///
-/// It never carries the text of a message nor the value of a variable.
+/// The title is the one set or the default one, masked: untrusted text that a model wrote. The summary never carries the
+/// value of a variable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct SessionSummary {
     id: SessionId,
+    title: String,
+    review: Option<ReviewState>,
     agent: String,
     kind: SessionKind,
     turns: u64,
@@ -168,9 +186,10 @@ pub struct SessionSummary {
 }
 
 impl SessionSummary {
-    /// Summarizes a session state. The function names are the keys of the state without their arity, once each.
+    /// Summarizes a session state. The function names are the keys of the state without their arity, once each. The title
+    /// is masked by `redactor`.
     #[must_use]
-    pub fn from_state(state: &SessionState) -> Self {
+    pub fn from_state(state: &SessionState, redactor: &Redactor) -> Self {
         let names: BTreeSet<String> = state
             .functions()
             .keys()
@@ -186,6 +205,8 @@ impl SessionSummary {
         });
         Self {
             id: state.id().clone(),
+            title: state.display_title(redactor),
+            review: review_state(state.labels()),
             agent: state.agent().name().to_owned(),
             kind: state.kind(),
             turns,
@@ -198,6 +219,18 @@ impl SessionSummary {
     #[must_use]
     pub const fn id(&self) -> &SessionId {
         &self.id
+    }
+
+    /// The title of the session: the one set, or the default one, bounded and masked.
+    #[must_use]
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    /// The review state of the session: flagged with its reason, analyzed, or `None`.
+    #[must_use]
+    pub const fn review(&self) -> Option<&ReviewState> {
+        self.review.as_ref()
     }
 
     /// The name of the agent that ran the session.
@@ -409,14 +442,26 @@ fn filter_of(map: &Map) -> Result<SessionFilter, Box<EvalAltResult>> {
             "agent" => filter.with_agent(text_of(key.as_str(), value)?),
             "nature" => filter.with_kind(kind_of(&text_of(key.as_str(), value)?)?),
             "limit" => filter.with_limit(limit_of(value)?),
+            "review" => review_filter(filter, &text_of(key.as_str(), value)?)?,
             other => {
                 return Err(Box::new(runtime_error(format!(
-                    "sessions::list: unknown filter key `{other}`; expected agent, nature or limit"
+                    "sessions::list: unknown filter key `{other}`; expected agent, nature, limit or review"
                 ))));
             }
         };
     }
     Ok(filter)
+}
+
+/// Applies the value of the `review` key: only `requested` is known, and keeps the sessions flagged for analysis.
+fn review_filter(filter: SessionFilter, value: &str) -> Result<SessionFilter, Box<EvalAltResult>> {
+    if value == "requested" {
+        Ok(filter.with_review_requested())
+    } else {
+        Err(Box::new(runtime_error(format!(
+            "sessions::list: unknown review filter `{value}`; expected `requested`"
+        ))))
+    }
 }
 
 /// The text of a filter value, or a Rhai error that names its key.
@@ -442,15 +487,30 @@ fn limit_of(value: &Dynamic) -> Result<usize, Box<EvalAltResult>> {
     })
 }
 
-/// The value of a summary, masked by the redactor of the session: identifier, agent, nature and function names.
+/// A text written by a model, as an escaped string between double quotes: the text is data, and a quote or a line break in
+/// it cannot close the quotes nor start a line of its own.
+fn quoted(text: &str) -> String {
+    serde_json::to_string(text).unwrap_or_else(|_error| "\"\"".to_owned())
+}
+
+/// The value of a summary, masked by the redactor of the session: identifier, title in quotes, review state, agent, nature
+/// and function names.
 fn summary_value(summary: &SessionSummary, redactor: &Redactor) -> Dynamic {
     let functions: Array = summary
         .functions()
         .iter()
         .map(|name| Dynamic::from(redactor.redact(name)))
         .collect();
+    let (review, reason) = match summary.review() {
+        None => ("none", String::new()),
+        Some(ReviewState::Done) => ("done", String::new()),
+        Some(ReviewState::Requested(reason)) => ("requested", quoted(&redactor.redact(reason))),
+    };
     let fields = [
         ("id", Dynamic::from(redactor.redact(summary.id().as_str()))),
+        ("title", Dynamic::from(quoted(&redactor.redact(summary.title())))),
+        ("review", Dynamic::from(review.to_owned())),
+        ("review_reason", Dynamic::from(reason)),
         ("agent", Dynamic::from(redactor.redact(summary.agent()))),
         ("nature", Dynamic::from(nature_name(summary.kind()).to_owned())),
         ("turns", count_value(summary.turns())),
@@ -474,22 +534,50 @@ fn load_session<X: SessionStore>(sessions: &X, id: &str) -> Result<SessionState,
     loaded.ok_or_else(|| Box::new(runtime_error(format!("unknown session `{id}`"))))
 }
 
-/// Lists the summaries of the sessions that match `filter`, in the order of the index.
+/// Lists the summaries of the sessions that match `filter`, in the order of the index. The review filter is applied here on
+/// the state of each session, so that a host index that ignores it still gives the right answer; the limit then applies
+/// after it, so the index is asked without it.
 fn list_sessions<I: SessionIndex, X: SessionStore>(
     index: &I,
     sessions: &X,
     redactor: &Redactor,
     filter: &SessionFilter,
 ) -> Result<Array, Box<EvalAltResult>> {
-    let ids = await_store(index.list(filter))?;
+    let asked = if filter.review_requested {
+        SessionFilter {
+            limit: None,
+            ..filter.clone()
+        }
+    } else {
+        filter.clone()
+    };
+    let ids = await_store(index.list(&asked))?;
     let mut summaries = Array::new();
     for id in ids {
+        if filter.review_requested && filter.limit.is_some_and(|limit| summaries.len() >= limit) {
+            break;
+        }
         if let Some(state) = await_store(sessions.load(&id))? {
-            let summary = SessionSummary::from_state(&state);
+            let summary = SessionSummary::from_state(&state, redactor);
+            if filter.review_requested && !matches!(summary.review(), Some(ReviewState::Requested(_))) {
+                continue;
+            }
             summaries.push(summary_value(&summary, redactor));
         }
     }
     Ok(summaries)
+}
+
+/// Marks a session as analyzed: adds the label `review-done` and saves the session. The only write of the `sessions`
+/// module; it adds one label and changes nothing else.
+fn mark_analyzed<X: SessionStore>(
+    sessions: &X,
+    clock: &dyn Clock,
+    id: &str,
+) -> Result<(), Box<EvalAltResult>> {
+    let mut state = load_session(sessions, id)?;
+    state.add_review_done(clock);
+    await_store(sessions.save(&state))
 }
 
 /// The source texts of the functions of a session, keyed by `name/arity`, masked by the redactor of the session.
@@ -787,11 +875,12 @@ where
 }
 
 /// The `sessions` module over the index and the store, with the redactor of the session: `list()`, `list(filter)`,
-/// `functions(id)` and `errors(id)`.
+/// `functions(id)`, `errors(id)` and `mark_analyzed(id)`, the only function that writes.
 fn sessions_module<I: SessionIndex + 'static, X: SessionStore + 'static>(
     index: Arc<I>,
     sessions: Arc<X>,
     redactor: Arc<Redactor>,
+    clock: Arc<dyn Clock>,
 ) -> Module {
     let mut module = Module::new();
     let all_index = Arc::clone(&index);
@@ -824,6 +913,10 @@ fn sessions_module<I: SessionIndex + 'static, X: SessionStore + 'static>(
             errors_redactor.as_ref(),
             id.as_str(),
         )
+    });
+    let mark_sessions = Arc::clone(&sessions);
+    let _mark_analyzed = module.set_native_fn("mark_analyzed", move |id: ImmutableString| {
+        mark_analyzed(mark_sessions.as_ref(), clock.as_ref(), id.as_str())
     });
     let _list_filtered = module.set_native_fn("list", move |filter: Map| {
         let filter = filter_of(&filter)?;
@@ -871,7 +964,11 @@ where
         session,
     } = env;
     let redactor = Arc::new(redactor);
-    let events = Arc::new(TargetEvents { sink, clock, session });
+    let events = Arc::new(TargetEvents {
+        sink,
+        clock: Arc::clone(&clock),
+        session,
+    });
     move |engine: &mut RhaiEngine| {
         let _contexts = engine.register_static_module(
             "contexts",
@@ -894,7 +991,7 @@ where
         );
         let _sessions = engine.register_static_module(
             "sessions",
-            Shared::new(sessions_module(index, sessions, redactor)),
+            Shared::new(sessions_module(index, sessions, redactor, clock)),
         );
         Ok(())
     }
@@ -1763,7 +1860,7 @@ mod tests {
             outcome.text()
         );
         assert!(
-            outcome.text().contains("***"),
+            outcome.text().contains("*redacted secret*"),
             "the secret is masked: {}",
             outcome.text()
         );
@@ -1796,6 +1893,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn summary_carries_no_message_text() {
         let state = edited(&past_session("past-2", "work-agent"), |value| {
+            // A session without a title shows a default title that quotes the start of its first message (title.sdd): the
+            // session of this test has a title, so that the summary has no other way to show a message.
+            value["title"] = json!("Posed title");
             let mut history = History::new();
             history.push(Message::user("MESSAGE-TEXT-ALPHA"));
             value["history"] = serde_json::to_value(&history).expect("the history serializes");
@@ -1851,7 +1951,7 @@ mod tests {
                 "2": serde_json::to_value(&clean).expect("the signals serialize"),
             });
         });
-        let summary = SessionSummary::from_state(&state);
+        let summary = SessionSummary::from_state(&state, &Redactor::new());
         assert_eq!(summary.turns(), 2, "two turns carry signals");
         assert_eq!(summary.rhai_errors(), 2, "the Rhai errors of the turns add up");
     }
@@ -1866,7 +1966,7 @@ mod tests {
                 "other/0": "fn other() { 2 }",
             });
         });
-        let summary = SessionSummary::from_state(&state);
+        let summary = SessionSummary::from_state(&state, &Redactor::new());
         assert_eq!(
             summary.functions(),
             ["fetch".to_owned(), "other".to_owned()],
@@ -1904,6 +2004,7 @@ mod tests {
             Arc::new(Index::listing(Vec::new())),
             Arc::new(InMemoryStore::new()),
             Arc::new(Redactor::new()),
+            Arc::new(ManualClock::new(Timestamp::from_millis(0))),
         );
         let mut names = Vec::new();
         for (module, functions) in [
@@ -1930,8 +2031,9 @@ mod tests {
                 "sessions::functions",
                 "sessions::list",
                 "sessions::list",
+                "sessions::mark_analyzed",
             ],
-            "the modules hold exactly their read-only functions"
+            "the modules hold exactly their functions: all read-only but `sessions::mark_analyzed`, which only adds a label"
         );
     }
 
@@ -2014,7 +2116,7 @@ mod tests {
             outcome.text()
         );
         assert!(
-            outcome.text().contains("***"),
+            outcome.text().contains("*redacted secret*"),
             "the source is masked: {}",
             outcome.text()
         );
@@ -2453,7 +2555,7 @@ mod tests {
             outcome.text()
         );
         assert!(
-            outcome.text().contains("***"),
+            outcome.text().contains("*redacted secret*"),
             "the secret is masked: {}",
             outcome.text()
         );
@@ -2484,7 +2586,7 @@ mod tests {
             outcome.text()
         );
         assert!(
-            outcome.text().contains("***"),
+            outcome.text().contains("*redacted secret*"),
             "the key is masked: {}",
             outcome.text()
         );
@@ -2751,6 +2853,278 @@ mod tests {
         assert!(
             !outcome.text().contains("requires"),
             "no gap is invented: {}",
+            outcome.text()
+        );
+    }
+
+    // --- title and review state (lot S2) ------------------------------------------------------------------------
+
+    /// A session store that the test keeps a handle on, to read the sessions back after a run.
+    #[derive(Clone)]
+    struct SharedStore(Arc<InMemoryStore>);
+
+    impl SessionStore for SharedStore {
+        fn load(&self, id: &SessionId) -> impl Future<Output = SessionResult<Option<SessionState>>> + Send {
+            self.0.load(id)
+        }
+
+        fn save(&self, state: &SessionState) -> impl Future<Output = SessionResult<()>> + Send {
+            self.0.save(state)
+        }
+    }
+
+    fn session_id(text: &str) -> SessionId {
+        SessionId::new(text).expect("a session id")
+    }
+
+    /// A past session flagged for analysis with `reason`.
+    fn flagged(id: &str, reason: &str) -> SessionState {
+        let mut state = past_session(id, "work-agent");
+        let _reason = state.add_review_requested(
+            reason,
+            &Redactor::new(),
+            &ManualClock::new(Timestamp::from_millis(7)),
+        );
+        state
+    }
+
+    /// A past session whose title was set to `title`.
+    fn titled(id: &str, title: &str) -> SessionState {
+        let mut state = past_session(id, "work-agent");
+        assert!(state.set_title(title).is_some(), "the title is accepted");
+        state
+    }
+
+    // Scenario: la liste montre le titre entre guillemets et le signalement
+    #[tokio::test(flavor = "multi_thread")]
+    async fn list_shows_the_title_in_quotes_and_the_review_state() {
+        let mut flagged_titled = titled("past-t", "Migration loki");
+        let _reason = flagged_titled.add_review_requested(
+            "slow answer",
+            &Redactor::new(),
+            &ManualClock::new(Timestamp::from_millis(7)),
+        );
+        let sessions = store_with(vec![flagged_titled, past_session("past-d", "work-agent")]).await;
+        let host = Host::new(
+            Index::listing(vec![session_id("past-t"), session_id("past-d")]),
+            sessions,
+        );
+        let outcome = run(
+            &host.pad(),
+            r#"let a = sessions::list()[0]; let b = sessions::list()[1];
+               [a.title == "\"Migration loki\"", a.review == "requested", a.review_reason == "\"slow answer\"",
+                b.review == "none", b.review_reason == "", b.title.starts_with("\"work-agent")]"#,
+        )
+        .await;
+        assert_eq!(
+            outcome.status(),
+            RunStatus::Ok,
+            "the run succeeds: {}",
+            outcome.text()
+        );
+        assert_eq!(
+            outcome.text().matches("true").count(),
+            6,
+            "the title is quoted, the review state and its reason are listed, and an untitled session shows its default title: {}",
+            outcome.text()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_quote_in_a_title_cannot_close_the_quotes() {
+        let sessions = store_with(vec![titled("past-q", "say \"hi\" now")]).await;
+        let host = Host::new(Index::listing(vec![session_id("past-q")]), sessions);
+        let outcome = run(
+            &host.pad(),
+            r#"sessions::list()[0].title == "\"say \\\"hi\\\" now\"""#,
+        )
+        .await;
+        assert!(
+            outcome.text().contains("true"),
+            "the title is rendered as an escaped, quoted string: {}",
+            outcome.text()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn list_filters_the_flagged_sessions() {
+        let analyzed = {
+            let mut state = flagged("past-done", "old");
+            state.add_review_done(&ManualClock::new(Timestamp::from_millis(9)));
+            state
+        };
+        let sessions = store_with(vec![
+            flagged("past-a", "one"),
+            past_session("past-plain", "work-agent"),
+            analyzed,
+            flagged("past-b", "two"),
+        ])
+        .await;
+        let ids = ["past-a", "past-plain", "past-done", "past-b"]
+            .map(session_id)
+            .to_vec();
+        let index = Recording::listing(ids);
+        let seen = index.seen();
+        let host = Host::new(index, sessions);
+        let pad = host.pad();
+        let outcome = run(
+            &pad,
+            r#"let ids = []; for s in sessions::list(#{review: "requested"}) { ids.push(s.id); } ids"#,
+        )
+        .await;
+        assert_eq!(
+            outcome.status(),
+            RunStatus::Ok,
+            "the run succeeds: {}",
+            outcome.text()
+        );
+        assert!(
+            outcome.text().contains("past-a") && outcome.text().contains("past-b"),
+            "the flagged sessions are listed: {}",
+            outcome.text()
+        );
+        assert!(
+            !outcome.text().contains("past-plain") && !outcome.text().contains("past-done"),
+            "a plain session and an analyzed one are not: {}",
+            outcome.text()
+        );
+        let limited = run(&pad, r#"sessions::list(#{review: "requested", limit: 1}).len()"#).await;
+        assert!(
+            limited.text().contains('1'),
+            "the limit applies after the review filter: {}",
+            limited.text()
+        );
+        let filters = recorded(&seen);
+        assert!(
+            filters.iter().all(SessionFilter::review_requested),
+            "the index is told about the review filter: {filters:?}"
+        );
+        assert!(
+            filters.iter().all(|filter| filter.limit().is_none()),
+            "the limit is kept for after the review filter: {filters:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn another_review_filter_value_is_refused() {
+        let host = Host::new(Index::listing(Vec::new()), InMemoryStore::new());
+        let outcome = run(&host.pad(), r#"sessions::list(#{review: "done"})"#).await;
+        assert_eq!(
+            outcome.status(),
+            RunStatus::Failed(ScriptErrorClass::Runtime),
+            "the run fails: {}",
+            outcome.text()
+        );
+        assert!(
+            outcome.text().contains("review") && outcome.text().contains("requested"),
+            "the error names the key and the accepted value: {}",
+            outcome.text()
+        );
+    }
+
+    // Scenario: mark_analyzed passe l'état de Requested à Done sans toucher au reste de l'état
+    #[tokio::test(flavor = "multi_thread")]
+    async fn mark_analyzed_moves_requested_to_done_and_leaves_the_rest() {
+        let before = flagged("past-m", "slow");
+        let store = Arc::new(InMemoryStore::new());
+        store.save(&before).await.expect("the state is saved");
+        let host = Host::new(Index::listing(Vec::new()), SharedStore(Arc::clone(&store)));
+        let outcome = run(&host.pad(), r#"sessions::mark_analyzed("past-m")"#).await;
+        assert_eq!(
+            outcome.status(),
+            RunStatus::Ok,
+            "the run succeeds: {}",
+            outcome.text()
+        );
+        let after = store
+            .load(&session_id("past-m"))
+            .await
+            .expect("the store loads")
+            .expect("the session is still there");
+        assert_eq!(
+            review_state(after.labels()),
+            Some(ReviewState::Done),
+            "the session is analyzed"
+        );
+        let mut expected = before.clone();
+        expected.add_review_done(&ManualClock::new(Timestamp::from_millis(42)));
+        assert_eq!(
+            after, expected,
+            "only a `review-done` label, automatic and dated by the injected clock, was added"
+        );
+        assert_eq!(after.labels().iter().count(), 2, "the flag label is kept");
+    }
+
+    // Scenario: une session inconnue est une erreur de script
+    #[tokio::test(flavor = "multi_thread")]
+    async fn mark_analyzed_of_an_unknown_session_is_a_script_error() {
+        let host = Host::new(Index::listing(Vec::new()), InMemoryStore::new());
+        let outcome = run(&host.pad(), r#"sessions::mark_analyzed("ghost-session")"#).await;
+        assert_eq!(
+            outcome.status(),
+            RunStatus::Failed(ScriptErrorClass::Runtime),
+            "the run fails: {}",
+            outcome.text()
+        );
+        assert!(
+            outcome.text().contains("ghost-session"),
+            "the error names the identifier: {}",
+            outcome.text()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn mark_analyzed_reports_a_failing_store() {
+        let host = Host::new(Index::listing(Vec::new()), BrokenStore);
+        let outcome = run(&host.pad(), r#"sessions::mark_analyzed("past-m")"#).await;
+        assert_eq!(
+            outcome.status(),
+            RunStatus::Failed(ScriptErrorClass::Runtime),
+            "the run fails: {}",
+            outcome.text()
+        );
+        assert!(
+            outcome.text().contains("disk gone"),
+            "the store error is the text of the script error: {}",
+            outcome.text()
+        );
+    }
+
+    // Scenario: le titre avec un secret déclaré est masqué
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_declared_secret_is_masked_in_a_title_and_a_reason() {
+        let mut state = titled("past-s", "deploy with s3cr3t-token");
+        // The state is written with a redactor that knows no secret: the module must still mask what it lists.
+        let _reason = state.add_review_requested(
+            "leak of s3cr3t-token",
+            &Redactor::new(),
+            &ManualClock::new(Timestamp::from_millis(7)),
+        );
+        let mut untitled = past_session("past-u", "work-agent");
+        untitled.push_message(Message::user("why does s3cr3t-token fail"));
+        let sessions = store_with(vec![state, untitled]).await;
+        let mut host = Host::new(
+            Index::listing(vec![session_id("past-s"), session_id("past-u")]),
+            sessions,
+        );
+        host.redactor
+            .add_secret("s3cr3t-token")
+            .expect("a long enough secret");
+        let outcome = run(&host.pad(), "sessions::list()").await;
+        assert_eq!(
+            outcome.status(),
+            RunStatus::Ok,
+            "the run succeeds: {}",
+            outcome.text()
+        );
+        assert!(
+            !outcome.text().contains("s3cr3t-token"),
+            "no declared secret reaches the script: {}",
+            outcome.text()
+        );
+        assert!(
+            outcome.text().contains("deploy with *redacted secret*"),
+            "the title is masked, not dropped: {}",
             outcome.text()
         );
     }

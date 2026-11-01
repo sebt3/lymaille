@@ -32,6 +32,10 @@ pub enum SessionError {
     /// A secret shorter than six characters was offered to the redactor. It is not retained, and the text carries no part of it.
     #[error("a secret must be at least 6 characters long")]
     SecretTooShort,
+    /// A secret contained in the text that replaces a masked secret was offered to the redactor: it would be masked again inside
+    /// the replacement. It is not retained, and the text carries no part of it.
+    #[error("a value to mask must not be contained in the text that replaces a masked value")]
+    SecretInPlaceholder,
     /// An inspection target was set on a session that is not of the configuration nature. Carries the session identifier.
     #[error("an inspection target can only be set on a configuration session, not on session {0}")]
     NotConfigSession(SessionId),
@@ -91,6 +95,10 @@ mod tests {
             (
                 SessionError::SecretTooShort,
                 "a secret must be at least 6 characters long",
+            ),
+            (
+                SessionError::SecretInPlaceholder,
+                "a value to mask must not be contained in the text that replaces a masked value",
             ),
             (
                 SessionError::UnknownSession { id: session.clone() },

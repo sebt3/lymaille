@@ -101,6 +101,24 @@ pub enum EventKind {
         /// Identifier of the session of the sub-agent, saved with the main session.
         session: SessionId,
     },
+    /// The title of the session was set, by the model or by the host. Carries the normalized and masked title, never a
+    /// secret.
+    TitleChanged {
+        /// The new title: one line, bounded, masked.
+        title: String,
+    },
+    /// The session was flagged for analysis by the configuration agent. Carries the reason, bounded and masked.
+    ReviewRequested {
+        /// Short reason given by the flagging party: bounded to 200 characters, masked.
+        reason: String,
+    },
+    /// A response was cut by the output limit of the model. Carries what the cut response still held, no session value.
+    ResponseTruncated {
+        /// Whether the cut response holds text.
+        has_text: bool,
+        /// Whether the cut response holds tool calls.
+        has_tool_calls: bool,
+    },
 }
 
 /// Event observed by the host: the session it belongs to, the instant it happened and what it reports.
@@ -187,8 +205,8 @@ mod tests {
     use crate::clock::Timestamp;
     use crate::session::{EventSink as _, Outcome, RunId, SessionId, TurnId};
 
-    /// Names of the fourteen variants of [`EventKind`], in the order of [`one_of_each_kind`].
-    const ALL_VARIANTS: [&str; 14] = [
+    /// Names of the seventeen variants of [`EventKind`], in the order of [`one_of_each_kind`].
+    const ALL_VARIANTS: [&str; 17] = [
         "TokenUsage",
         "TodoChanged",
         "MemoryChanged",
@@ -203,6 +221,9 @@ mod tests {
         "TurnEnded",
         "RunEnded",
         "RunInterrupted",
+        "TitleChanged",
+        "ReviewRequested",
+        "ResponseTruncated",
     ];
 
     fn session() -> SessionId {
@@ -297,15 +318,42 @@ mod tests {
                     response: "done".to_owned(),
                 },
             ),
-            (
-                "RunEnded",
-                EventKind::RunEnded {
-                    run: RunId::new("run-7").expect("a non-empty text makes a run identifier"),
-                    outcome: Outcome::Cancelled,
-                },
-            ),
+            ("RunEnded", run_ended_sample()),
             ("RunInterrupted", run_interrupted_sample()),
+            ("TitleChanged", title_changed_sample()),
+            ("ReviewRequested", review_requested_sample()),
+            ("ResponseTruncated", response_truncated_sample()),
         ]
+    }
+
+    /// The model set the title of the session.
+    fn title_changed_sample() -> EventKind {
+        EventKind::TitleChanged {
+            title: "Loki migration".to_owned(),
+        }
+    }
+
+    /// A run of a sub-agent cancelled.
+    fn run_ended_sample() -> EventKind {
+        EventKind::RunEnded {
+            run: RunId::new("run-7").expect("a non-empty text makes a run identifier"),
+            outcome: Outcome::Cancelled,
+        }
+    }
+
+    /// A response cut by the output limit, with text but no tool call.
+    fn response_truncated_sample() -> EventKind {
+        EventKind::ResponseTruncated {
+            has_text: true,
+            has_tool_calls: false,
+        }
+    }
+
+    /// The session was flagged for analysis.
+    fn review_requested_sample() -> EventKind {
+        EventKind::ReviewRequested {
+            reason: "wrong answer on the loki pod".to_owned(),
+        }
     }
 
     /// A run of a sub-agent interrupted by the restore of the main session, with the session of the sub-agent.
@@ -333,6 +381,9 @@ mod tests {
             EventKind::TurnEnded { .. } => "TurnEnded",
             EventKind::RunEnded { .. } => "RunEnded",
             EventKind::RunInterrupted { .. } => "RunInterrupted",
+            EventKind::TitleChanged { .. } => "TitleChanged",
+            EventKind::ReviewRequested { .. } => "ReviewRequested",
+            EventKind::ResponseTruncated { .. } => "ResponseTruncated",
         }
     }
 
@@ -388,7 +439,7 @@ mod tests {
         let kinds = one_of_each_kind();
         assert!(
             kinds.iter().map(|(name, _)| *name).eq(ALL_VARIANTS),
-            "the samples must cover each of the fourteen variants of EventKind, in order"
+            "the samples must cover each of the sixteen variants of EventKind, in order"
         );
         for (name, kind) in &kinds {
             assert_eq!(

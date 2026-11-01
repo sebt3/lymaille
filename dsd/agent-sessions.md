@@ -439,6 +439,9 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
 
 ## Open Issues
 
+- **Décidé:** un secret déclaré peut exister et s'utiliser dans le pad (un `http::post` authentifié, par exemple) : le masquage porte sur toute sortie, jamais sur l'exécution. Une variable ou une source de fonction qui contient un secret déclaré n'est pas persistée (avertissement qui la nomme, absente à la restauration) au lieu d'une valeur masquée trompeuse (`CON-3` : ni dans l'état persisté).
+    - **Source:** user instruction, 2026-11-01
+
 - **Décidé:** le titre d'une session est posé par le LLM lui-même par `session::set_title` (module `session`, agents `Work` et `Config`) : il a tout le contexte et suit les règles de nommage de l'auteur de l'agent, sans second modèle ni requête dédiée. Le dernier qui écrit gagne (renommage humain à posteriori compris). Sans titre posé, la librairie calcule un titre par défaut (agent, contexte, date, début du premier message). Le titre est un texte non fiable : normalisé, borné à 120 caractères, masqué, rendu entre guillemets à l'agent de configuration.
     - **Source:** user instruction, 2026-11-01
 

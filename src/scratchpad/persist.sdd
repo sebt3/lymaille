@@ -48,7 +48,7 @@ Accepts:
 
 Returns:
   @snapshot_scope: un @ScopeSnapshot : les variables persistables (table ordonnée nom vers @TaggedValue) et les avertissements des variables exclues.
-  @to_tagged: le @TaggedValue de la valeur, ou la @UnpersistableReason (`Closure`, `FunctionPointer`, `UnsupportedType` avec le nom du type, `NonFiniteFloat`).
+  @to_tagged: le @TaggedValue de la valeur, ou la @UnpersistableReason (`Closure`, `FunctionPointer`, `UnsupportedType` avec le nom du type, `NonFiniteFloat`, `Secret` : valeur ou source qui contient un secret déclaré, décision du 2026-11-01).
   @to_dynamic: la valeur Rhai de même type réel que l'étiquette (`char` en `char`, `blob` en `blob`, entier en entier, flottant en flottant).
   @extract_function_sources: la liste de @FunctionSource (clé `nom/arité` et texte source), dans l'ordre de définition du script.
   @recompile_functions: un @Recompiled : l'AST des fonctions seules, la liste des clés cassées (triée par clé) et la liste des @RestoreWarning (appels de nom inconnu, triés par clé puis par ligne).

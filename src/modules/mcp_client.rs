@@ -461,9 +461,17 @@ mod tests {
     use tokio::net::{TcpListener, TcpStream};
     use tokio::time::timeout;
 
+    use rmcp::model::ServerJsonRpcMessage;
+    use rmcp::service::{RoleClient, serve_directly};
+    use rmcp::transport::Transport;
+
     use super::{
-        McpAuth, McpClientConfig, McpConnector as _, McpError, McpHeaders, McpLister as _, RmcpConnector,
+        McpAuth, McpClientConfig, McpConnector as _, McpError, McpHeaders, McpLister as _, NotificationRelay,
+        RmcpConnector,
     };
+
+    /// Number of notifications the flooding fake server sends: more than the capacity of the queue (256).
+    const FLOOD: u32 = 300;
 
     /// Body of the error answers: it must never show in an error.
     const BODY_SECRET: &str = "{\"error\":\"s3cr3t-body\"}";
@@ -487,6 +495,8 @@ mod tests {
         NotJson,
         /// Answers the first page of `tools/list` with an event stream: two notifications, then the result.
         Notify,
+        /// Like `Notify`, but sends 300 numbered notifications before the result.
+        Flood,
     }
 
     /// A request the fake server received: its JSON-RPC method (empty when it has none) and its headers, in lower case.
@@ -617,12 +627,23 @@ mod tests {
         let _closed = stream.shutdown().await;
     }
 
-    /// Writes an event stream answer holding two server notifications, then the JSON-RPC answer, and closes.
-    async fn respond_with_notifications(stream: &mut TcpStream, answer: &Value) {
-        let message = json!({"jsonrpc": "2.0", "method": "notifications/message",
-            "params": {"level": "info", "data": "disk almost full"}});
-        let list_changed = json!({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"});
-        let body = format!("data: {message}\n\ndata: {list_changed}\n\ndata: {answer}\n\n");
+    /// Writes an event stream answer holding server notifications (two, or `FLOOD` numbered ones), then the JSON-RPC
+    /// answer, and closes.
+    async fn respond_with_notifications(stream: &mut TcpStream, answer: &Value, flood: bool) {
+        let mut events: Vec<Value> = Vec::new();
+        if flood {
+            for number in 0..FLOOD {
+                events.push(json!({"jsonrpc": "2.0", "method": "notifications/message",
+                    "params": {"level": "info", "data": number}}));
+            }
+        } else {
+            events.push(json!({"jsonrpc": "2.0", "method": "notifications/message",
+                "params": {"level": "info", "data": "disk almost full"}}));
+            events.push(json!({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}));
+        }
+        events.push(answer.clone());
+        let lines: Vec<String> = events.iter().map(|event| format!("data: {event}")).collect();
+        let body = format!("{}\n\n", lines.join("\n\n"));
         let head = format!(
             "HTTP/1.1 200 X\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
             body.len()
@@ -674,7 +695,7 @@ mod tests {
                 respond(&mut stream, 200, &[], &answer.to_string()).await;
                 return;
             }
-            Mode::Normal | Mode::Hang(_) | Mode::BadInitialize | Mode::Notify => {}
+            Mode::Normal | Mode::Hang(_) | Mode::BadInitialize | Mode::Notify | Mode::Flood => {}
         }
         let Some(id) = message.get("id").cloned() else {
             respond(&mut stream, 202, &[], "").await;
@@ -685,11 +706,11 @@ mod tests {
             Ok(result) => answer["result"] = result,
             Err(error) => answer["error"] = error,
         }
-        if matches!(mode, Mode::Notify)
+        if matches!(mode, Mode::Notify | Mode::Flood)
             && method == "tools/list"
             && message.pointer("/params/cursor").is_none()
         {
-            respond_with_notifications(&mut stream, &answer).await;
+            respond_with_notifications(&mut stream, &answer, matches!(mode, Mode::Flood)).await;
             return;
         }
         respond(&mut stream, 200, &[], &answer.to_string()).await;
@@ -1368,6 +1389,98 @@ mod tests {
         assert!(
             waited.is_err(),
             "a live connector waits instead of returning, got {waited:?}"
+        );
+    }
+
+    // Scenario (mcp_client.sdd #6): saturation du canal de notifications
+    #[tokio::test]
+    async fn a_saturated_notification_queue_drops_the_newest_without_blocking() {
+        let server = FakeServer::start(Mode::Flood).await;
+        let connector = connector_for(&server);
+        let listed = timeout(Duration::from_secs(5), connector.list_tools())
+            .await
+            .expect("a flooded host does not block the connector");
+        let _tools = listed.expect("the server lists its tools");
+        let mut received = Vec::new();
+        while let Ok(Some(notification)) =
+            timeout(Duration::from_millis(500), connector.next_notification()).await
+        {
+            received.push(notification.params().get("data").and_then(Value::as_u64));
+        }
+        let kept: Vec<Option<u64>> = (0..256).map(Some).collect();
+        assert_eq!(
+            received.len(),
+            256,
+            "300 were sent, the queue keeps its capacity and drops the rest"
+        );
+        assert_eq!(
+            received, kept,
+            "the oldest 256 are kept, in order; the newest are lost"
+        );
+        let next = timeout(Duration::from_secs(5), connector.list_tools()).await;
+        assert!(
+            matches!(next, Ok(Ok(_))),
+            "the connector still works after a flood, got {next:?}"
+        );
+    }
+
+    /// A transport that has no network: it hands the client the messages the test queued, then waits.
+    struct ScriptedTransport {
+        incoming: tokio::sync::mpsc::UnboundedReceiver<ServerJsonRpcMessage>,
+    }
+
+    impl Transport<RoleClient> for ScriptedTransport {
+        type Error = std::io::Error;
+
+        fn send(
+            &mut self,
+            _item: rmcp::service::TxJsonRpcMessage<RoleClient>,
+        ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'static {
+            std::future::ready(Ok(()))
+        }
+
+        async fn receive(&mut self) -> Option<ServerJsonRpcMessage> {
+            self.incoming.recv().await
+        }
+
+        fn close(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send {
+            std::future::ready(Ok(()))
+        }
+    }
+
+    // Scenario (mcp_client.sdd #6): le serveur n'annonce pas de serverInfo. `rmcp` refuse un handshake sans `serverInfo` et
+    // son transport HTTP exige le handshake : le repli ne s'atteint que par le vrai relais, servi sans handshake
+    // (`serve_directly`) sur un transport sans réseau, donc avec un pair qui n'a aucune information.
+    #[tokio::test]
+    async fn a_peer_without_server_info_is_named_unknown() {
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(8);
+        let (feed, incoming) = tokio::sync::mpsc::unbounded_channel();
+        let service = serve_directly::<RoleClient, _, _, _, _>(
+            NotificationRelay { sender },
+            ScriptedTransport { incoming },
+            None,
+        );
+        assert!(
+            service.peer().peer_info().is_none(),
+            "the peer has no information, as before a handshake"
+        );
+        let notification: ServerJsonRpcMessage =
+            serde_json::from_value(json!({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}))
+                .expect("a notification is a valid server message");
+        feed.send(notification).expect("the transport is listening");
+        let queued = timeout(Duration::from_secs(5), receiver.recv())
+            .await
+            .expect("the relay queues the notification in time")
+            .expect("the relay queues the notification");
+        assert_eq!(
+            queued.server(),
+            "unknown",
+            "without serverInfo the name falls back to `unknown`"
+        );
+        assert_eq!(
+            queued.method(),
+            "notifications/tools/list_changed",
+            "the method is kept"
         );
     }
 }

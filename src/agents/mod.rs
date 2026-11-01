@@ -18,8 +18,8 @@ pub use catalog::{AgentStore, InMemoryCatalog, Layered, ProfileStore, ProviderSt
 pub use definition::{AgentDefinition, AgentKind, SandboxLimits};
 pub use error::{AgentsError, AgentsResult};
 pub use inference::{
-    ErrorClass, InferenceError, InferenceProvider, InferenceRequest, InferenceResponse, ReportedUsage,
-    ScriptedProvider, classify_status,
+    ErrorClass, FinishReason, InferenceError, InferenceProvider, InferenceRequest, InferenceResponse,
+    ReportedUsage, ScriptedProvider, classify_status,
 };
 pub use manifest::{ManifestGap, ManifestView, ProjectManifest};
 pub use profile::{DetectedModel, ModelProfile, ResolvedProfile, SamplingParams};

@@ -12,16 +12,16 @@ use serde_json::Value;
 use tokio::task::JoinHandle;
 
 use crate::agents::{
-    ErrorClass, InferenceError, InferenceProvider, InferenceRequest, InferenceResponse, ReportedUsage,
-    ResolvedProfile,
+    ErrorClass, FinishReason, InferenceError, InferenceProvider, InferenceRequest, InferenceResponse,
+    ReportedUsage, ResolvedProfile,
 };
 use crate::clock::{Clock, Timestamp};
 use crate::context::{Budget, CompactionStrategy, UsageTracker, estimate_tokens, replayed_reasoning};
 use crate::scratchpad::{RunEnv, RunStatus, Scratchpad, truncate_middle};
 use crate::session::{
     Backoff, BoundaryKind, CancelHandle, Event, EventKind, EventSink, History, Message, NativeTool, Outcome,
-    Reasoning, Redactor, RunSignals, Segment, SegmentContext, SessionError, SessionResult, SessionState,
-    SessionStore, SleepOutcome, TokenCounters, ToolCall, TurnGate, TurnId,
+    Reasoning, Redactor, RunSignals, Segment, SegmentContext, SessionEdits, SessionError, SessionResult,
+    SessionState, SessionStore, SleepOutcome, TokenCounters, ToolCall, TurnGate, TurnId,
 };
 
 /// Name of the native tool that runs a script in the scratchpad of the session.
@@ -35,6 +35,9 @@ const ESTIMATE_MARGIN_PERCENT: u64 = 10;
 
 /// Response of a turn that reached its maximum number of model iterations.
 const MAX_STEPS_MESSAGE: &str = "The turn was stopped: the maximum number of model calls was reached.";
+
+/// Final message of a turn whose response the output limit cut before any text or tool call.
+const CUT_MESSAGE: &str = "the response was cut by the output limit before any text or tool call";
 
 /// Result given to the model for a tool call that did not run because the turn was cancelled.
 const CANCELLED_RESULT: &str = "tool call cancelled";
@@ -510,6 +513,7 @@ pub struct TurnRunner<P, C, S> {
     tokens: Tokens,
     agent: String,
     natives: BTreeMap<String, Arc<dyn NativeTool>>,
+    edits: Option<Arc<SessionEdits>>,
 }
 
 impl<P, C, S> std::fmt::Debug for TurnRunner<P, C, S> {
@@ -570,6 +574,7 @@ impl<P: InferenceProvider, C: CompactionStrategy, S: SessionStore> TurnRunner<P,
             tokens,
             agent,
             natives: BTreeMap::new(),
+            edits: None,
         }
     }
 
@@ -587,6 +592,13 @@ impl<P: InferenceProvider, C: CompactionStrategy, S: SessionStore> TurnRunner<P,
         }
         let _previous = self.natives.insert(name, tool);
         Ok(self)
+    }
+
+    /// Connects the cell of session edits that the `session` module fills: after each tool call the loop empties it and
+    /// applies the title and the review flags it holds. Chainable.
+    pub fn with_session_edits(&mut self, edits: Arc<SessionEdits>) -> &mut Self {
+        self.edits = Some(edits);
+        self
     }
 
     /// Returns the inbox of the session.
@@ -895,11 +907,12 @@ impl<P: InferenceProvider, C: CompactionStrategy, S: SessionStore> TurnRunner<P,
             |reported| (reported.prompt(), reported.completion()),
         );
         self.emitter.emit(EventKind::TokenUsage { prompt, completion });
-        self.state.add_tokens(TokenCounters::new(
-            prompt,
-            completion,
-            self.tokens.estimate(reasoning),
-        ));
+        let reasoning_tokens = response
+            .usage()
+            .and_then(|reported| reported.reasoning())
+            .unwrap_or_else(|| self.tokens.estimate(reasoning));
+        self.state
+            .add_tokens(TokenCounters::new(prompt, completion, reasoning_tokens));
     }
 
     /// Masks a response of the model before it enters the history.
@@ -936,6 +949,19 @@ impl<P: InferenceProvider, C: CompactionStrategy, S: SessionStore> TurnRunner<P,
         else {
             return Ok(Some(Finish::failed()));
         };
+        if response.finish_reason() == Some(FinishReason::Length) {
+            let (has_text, has_tool_calls) = (!content.is_empty(), !tool_calls.is_empty());
+            self.emitter.emit(EventKind::ResponseTruncated {
+                has_text,
+                has_tool_calls,
+            });
+            if !has_text && !has_tool_calls {
+                return Ok(Some(Finish {
+                    outcome: Outcome::Failed,
+                    response: CUT_MESSAGE.to_owned(),
+                }));
+            }
+        }
         let message = self.mask_message(content, reasoning.as_ref(), tool_calls);
         self.tokens.added(self.tokens.estimate(message_chars(&message)));
         let masked_content = self.config.redactor.redact(content);
@@ -966,11 +992,35 @@ impl<P: InferenceProvider, C: CompactionStrategy, S: SessionStore> TurnRunner<P,
                 self.execute(run, masked.name(), call.arguments()).await
             };
             cancelled = cancelled || output.cancelled;
+            self.apply_session_edits();
             let result = Message::tool_result(masked.id(), masked.name(), output.text, output.original_chars);
             self.tokens.added(self.tokens.estimate(message_chars(&result)));
             self.state.push_message(result);
         }
         cancelled
+    }
+
+    /// Empties the cell of session edits and applies what it held: the title, then the review flags in order. The texts
+    /// are masked and bounded here; each change emits its event, dated by the shared clock.
+    fn apply_session_edits(&mut self) {
+        let Some(edits) = &self.edits else {
+            return;
+        };
+        let pending = edits.take();
+        let redactor = &self.config.redactor;
+        if let Some(raw) = pending.title()
+            && let Some(stored) = self.state.set_title_masked(raw, redactor)
+        {
+            self.emitter.emit(EventKind::TitleChanged {
+                title: stored.to_owned(),
+            });
+        }
+        for raw in pending.reviews() {
+            let reason = self
+                .state
+                .add_review_requested(raw, redactor, &*self.config.clock);
+            self.emitter.emit(EventKind::ReviewRequested { reason });
+        }
     }
 
     /// Runs one tool call: `rhai_pad` in the scratchpad, a registered native tool without it, any other name is an error.
@@ -1044,8 +1094,8 @@ mod tests {
 
     use super::{Masker, RHAI_PAD_TOOL, TurnConfig, TurnOutput, TurnRunner, UserInbox};
     use crate::agents::{
-        ErrorClass, InferenceError, InferenceProvider, InferenceRequest, InferenceResponse, ModelProfile,
-        ReportedUsage, ScriptedProvider,
+        ErrorClass, FinishReason, InferenceError, InferenceProvider, InferenceRequest, InferenceResponse,
+        ModelProfile, ReportedUsage, ScriptedProvider,
     };
     use crate::clock::{ManualClock, Timestamp};
     use crate::context::{
@@ -1053,9 +1103,10 @@ mod tests {
     };
     use crate::scratchpad::{Grants, Scratchpad, ScratchpadEngine, ScratchpadLimits};
     use crate::session::{
-        AgentRef, BoundaryKind, CancelHandle, EventKind, InMemoryStore, Message, ModelSnapshot, NativeTool,
-        Outcome, Reasoning, RecordingSink, Redactor, Segment, SegmentContext, SessionError, SessionId,
-        SessionResult, SessionState, SessionStore, TaggedValue, ToolCall, TurnId,
+        AgentRef, BoundaryKind, CancelHandle, EventKind, InMemoryStore, LabelAuthor, Message, ModelSnapshot,
+        NativeTool, Outcome, Reasoning, RecordingSink, Redactor, ReviewState, Segment, SegmentContext,
+        SessionEdits, SessionError, SessionId, SessionResult, SessionState, SessionStore, TaggedValue,
+        ToolCall, TurnId, review_state,
     };
 
     // --- doubles -------------------------------------------------------------------------------------------------
@@ -2013,9 +2064,16 @@ mod tests {
         };
         let (mut runner, parts) = assemble(Arc::clone(&provider), options);
         let output = run(&mut runner, "tell me").await;
-        assert_eq!(output.response(), "The key is ***, ok", "the response is masked");
+        assert_eq!(
+            output.response(),
+            "The key is *redacted secret*, ok",
+            "the response is masked"
+        );
         let streamed = deltas(&parts).concat();
-        assert_eq!(streamed, "The key is ***, ok", "the deltas, joined, are masked");
+        assert_eq!(
+            streamed, "The key is *redacted secret*, ok",
+            "the deltas, joined, are masked"
+        );
         assert!(
             deltas(&parts).iter().all(|delta| !delta.contains("s3cr")),
             "no delta holds a piece of the secret, got {:?}",
@@ -2027,7 +2085,7 @@ mod tests {
             "the history holds no secret"
         );
         assert!(
-            kinds(&parts).iter().any(|kind| matches!(kind, EventKind::TurnEnded { response, .. } if response == "The key is ***, ok")),
+            kinds(&parts).iter().any(|kind| matches!(kind, EventKind::TurnEnded { response, .. } if response == "The key is *redacted secret*, ok")),
             "TurnEnded is masked"
         );
     }
@@ -2655,6 +2713,186 @@ mod tests {
         );
     }
 
+    const CUT_MESSAGE: &str = "the response was cut by the output limit before any text or tool call";
+
+    // Scenario: une réponse vide tronquée par la limite de sortie échoue explicitement
+    #[tokio::test]
+    async fn an_empty_response_cut_by_the_output_limit_fails_explicitly() {
+        let cut = InferenceResponse::new(
+            Message::assistant("", Some(Reasoning::new("model", "thinking")), Vec::new()),
+            Some(ReportedUsage::new(10, 20).with_reasoning(12)),
+        )
+        .with_finish_reason(FinishReason::Length);
+        let provider = Arc::new(ScriptedProvider::new(vec![Ok(cut)]));
+        let (mut runner, parts) = assemble(Arc::clone(&provider), Options::named("t-cut-empty"));
+        let output = run(&mut runner, "go").await;
+        assert_eq!(
+            output.outcome(),
+            Outcome::Failed,
+            "an empty cut response fails the turn"
+        );
+        assert_eq!(
+            output.response(),
+            CUT_MESSAGE,
+            "the fixed message is the response"
+        );
+        assert_eq!(output.calls(), 1, "no further call to the model");
+        assert_eq!(
+            roles(&runner),
+            [Message::user("go")],
+            "no empty assistant message and no error text in the history"
+        );
+        let events = kinds(&parts);
+        assert!(
+            events.contains(&EventKind::ResponseTruncated {
+                has_text: false,
+                has_tool_calls: false
+            }),
+            "ResponseTruncated is emitted, got {events:?}"
+        );
+        assert!(
+            matches!(
+                events.last(),
+                Some(EventKind::TurnEnded {
+                    outcome: Outcome::Failed,
+                    ..
+                })
+            ),
+            "the turn ends with TurnEnded"
+        );
+        assert_eq!(
+            runner.state().tokens().reasoning(),
+            12,
+            "the reported reasoning tokens are counted"
+        );
+    }
+
+    // Scenario: une réponse tronquée qui porte du texte suit son cours
+    #[tokio::test]
+    async fn a_truncated_response_that_holds_text_goes_on() {
+        let cut = InferenceResponse::new(Message::assistant("Bonjour", None, Vec::new()), None)
+            .with_finish_reason(FinishReason::Length);
+        let provider = Arc::new(ScriptedProvider::new(vec![Ok(cut)]));
+        let (mut runner, parts) = assemble(Arc::clone(&provider), Options::named("t-cut-text"));
+        let output = run(&mut runner, "go").await;
+        assert_eq!(
+            output.outcome(),
+            Outcome::Valid,
+            "a cut response with text is valid"
+        );
+        assert_eq!(output.response(), "Bonjour", "the text is the response");
+        assert!(
+            kinds(&parts).contains(&EventKind::ResponseTruncated {
+                has_text: true,
+                has_tool_calls: false
+            }),
+            "ResponseTruncated carries has_text"
+        );
+        assert_eq!(
+            roles(&runner),
+            [
+                Message::user("go"),
+                Message::assistant("Bonjour", None, Vec::new())
+            ],
+            "the cut answer is kept"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_truncated_response_that_holds_tool_calls_goes_on() {
+        let cut = InferenceResponse::new(
+            Message::assistant(
+                "",
+                None,
+                vec![ToolCall::new("c1", RHAI_PAD_TOOL, json!({"script": "1 + 1"}))],
+            ),
+            None,
+        )
+        .with_finish_reason(FinishReason::Length);
+        let provider = Arc::new(ScriptedProvider::new(vec![Ok(cut), say("done")]));
+        let (mut runner, parts) = assemble(Arc::clone(&provider), Options::named("t-cut-calls"));
+        let output = run(&mut runner, "go").await;
+        assert_eq!(
+            output.outcome(),
+            Outcome::Valid,
+            "a cut response with a call follows its course"
+        );
+        assert_eq!(
+            output.calls(),
+            2,
+            "the loop asks the model again after the tool result"
+        );
+        assert!(
+            kinds(&parts).contains(&EventKind::ResponseTruncated {
+                has_text: false,
+                has_tool_calls: true
+            }),
+            "ResponseTruncated carries has_tool_calls"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_response_that_is_not_cut_emits_no_truncation() {
+        let done = InferenceResponse::new(Message::assistant("ok", None, Vec::new()), None)
+            .with_finish_reason(FinishReason::Stop);
+        let provider = Arc::new(ScriptedProvider::new(vec![Ok(done)]));
+        let (mut runner, parts) = assemble(Arc::clone(&provider), Options::named("t-stop"));
+        drop(run(&mut runner, "go").await);
+        assert!(
+            !kinds(&parts)
+                .iter()
+                .any(|kind| matches!(kind, EventKind::ResponseTruncated { .. })),
+            "a stopped response is not truncated"
+        );
+    }
+
+    #[tokio::test]
+    async fn reported_reasoning_tokens_replace_the_estimate() {
+        let reply = InferenceResponse::new(
+            Message::assistant(
+                "ok",
+                Some(Reasoning::new("model", "a long thought indeed")),
+                Vec::new(),
+            ),
+            Some(ReportedUsage::new(10, 20).with_reasoning(7)),
+        );
+        let provider = Arc::new(ScriptedProvider::new(vec![Ok(reply)]));
+        let (mut runner, _parts) = assemble(Arc::clone(&provider), Options::named("t-reasoning"));
+        drop(run(&mut runner, "go").await);
+        assert_eq!(runner.state().tokens().reasoning(), 7, "the reported count wins");
+    }
+
+    // Scenario: les jetons de raisonnement rapportés s'ajoutent au compteur (repli sur l'estimation)
+    #[tokio::test]
+    async fn missing_reported_reasoning_falls_back_on_the_estimate() {
+        let thought = "a long thought indeed ".repeat(40);
+        let reply = |usage: Option<ReportedUsage>| {
+            InferenceResponse::new(
+                Message::assistant("ok", Some(Reasoning::new("model", thought.clone())), Vec::new()),
+                usage,
+            )
+        };
+        let mut counted = Vec::new();
+        for (session, usage) in [
+            ("t-fallback-none", None),
+            ("t-fallback-usage", Some(ReportedUsage::new(10, 20))),
+        ] {
+            let provider = Arc::new(ScriptedProvider::new(vec![Ok(reply(usage))]));
+            let (mut runner, _parts) = assemble(Arc::clone(&provider), Options::named(session));
+            drop(run(&mut runner, "go").await);
+            counted.push(runner.state().tokens().reasoning());
+        }
+        assert!(
+            counted.first().is_some_and(|tokens| *tokens > 0),
+            "the estimate of a long reasoning is not zero, got {counted:?}"
+        );
+        assert_eq!(
+            counted.first(),
+            counted.get(1),
+            "a usage without reasoning tokens falls back on the estimate"
+        );
+    }
+
     #[tokio::test]
     async fn run_turn_future_is_send() {
         fn assert_send<T: Send>(_value: &T) {}
@@ -2701,10 +2939,14 @@ mod tests {
                     text.get(3 + cut..).unwrap_or_default(),
                 ],
             );
-            assert_eq!(out.concat(), "xx *** yy", "the secret cut at {cut} is masked");
+            assert_eq!(
+                out.concat(),
+                "xx *redacted secret* yy",
+                "the secret cut at {cut} is masked"
+            );
             assert!(
                 out.iter()
-                    .all(|piece| !piece.contains('a') || piece.contains("***")),
+                    .all(|piece| !piece.contains('a') || piece.contains("*redacted secret*")),
                 "no piece shows a part of the secret cut at {cut}, got {out:?}"
             );
         }
@@ -2734,7 +2976,7 @@ mod tests {
         let out = stream(&redactor, &["a \u{e9}\u{e9}", "\u{e9}\u{e9}\u{e9}\u{e9} b"]);
         assert_eq!(
             out.concat(),
-            "a *** b",
+            "a *redacted secret* b",
             "a multi-byte secret cut between fragments is masked"
         );
     }
@@ -2745,12 +2987,12 @@ mod tests {
         redactor.add_secret("abcdef").expect("secret");
         assert_eq!(
             stream(&redactor, &["see abcdef"]).concat(),
-            "see ***",
+            "see *redacted secret*",
             "a complete secret at the end"
         );
         assert_eq!(
             stream(&redactor, &["abcdefabcdef!"]).concat(),
-            "******!",
+            "*redacted secret**redacted secret*!",
             "two secrets in a row"
         );
     }
@@ -2786,5 +3028,400 @@ mod tests {
         .with_overrun(Duration::from_secs(2));
         let text = format!("{config:?}");
         assert!(text.contains("max_steps: 5"), "the limits are shown, got {text}");
+    }
+
+    // --- session edits (title and flag for analysis) -------------------------------------------------------------
+
+    /// Options whose engine has the functions `ask_title(text)` and `ask_flag(reason)` over `edits`, standing for the
+    /// `session` module that the domain `modules` provides.
+    fn options_with_edits(session: &'static str, edits: &Arc<SessionEdits>) -> Options {
+        let (for_title, for_flag) = (Arc::clone(edits), Arc::clone(edits));
+        let mut options = Options::named(session);
+        options.engine = engine_with(move |engine| {
+            let _title = engine.register_fn("ask_title", move |text: &str| for_title.set_title(text));
+            let _flag = engine.register_fn("ask_flag", move |reason: &str| for_flag.flag_for_review(reason));
+        });
+        options
+    }
+
+    fn title_events(parts: &Parts) -> Vec<String> {
+        kinds(parts)
+            .into_iter()
+            .filter_map(|kind| {
+                if let EventKind::TitleChanged { title } = kind {
+                    Some(title)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn review_events(parts: &Parts) -> Vec<String> {
+        kinds(parts)
+            .into_iter()
+            .filter_map(|kind| {
+                if let EventKind::ReviewRequested { reason } = kind {
+                    Some(reason)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    async fn saved_state(parts: &Parts, id: &str) -> SessionState {
+        parts
+            .store
+            .load(&SessionId::new(id).expect("a session identifier"))
+            .await
+            .expect("the store loads")
+            .expect("the turn saved the state")
+    }
+
+    // Scenario: un titre posé par un script apparaît dans l'état et l'événement
+    #[tokio::test]
+    async fn a_title_set_by_a_script_reaches_the_state_and_the_event() {
+        let edits = Arc::new(SessionEdits::new());
+        let provider = Arc::new(ScriptedProvider::new(vec![
+            run_script("c1", "ask_title(\"  Migration\\nloki \")"),
+            run_script("c2", "1 + 1"),
+            say("done"),
+        ]));
+        let (mut runner, parts) = assemble(Arc::clone(&provider), options_with_edits("t-title", &edits));
+        let _wired = runner.with_session_edits(Arc::clone(&edits));
+        let output = run(&mut runner, "go").await;
+        assert_eq!(output.outcome(), Outcome::Valid, "the turn is valid");
+        assert_eq!(
+            runner.state().title(),
+            Some("Migration loki"),
+            "the title is normalized and set in the state"
+        );
+        assert_eq!(
+            title_events(&parts),
+            vec!["Migration loki".to_owned()],
+            "one TitleChanged event carries the normalized title"
+        );
+        assert!(edits.take().is_empty(), "the cell was emptied by the loop");
+        assert_eq!(
+            saved_state(&parts, "t-title").await.title(),
+            Some("Migration loki"),
+            "the end-of-turn save holds the title"
+        );
+    }
+
+    // Scenario: un signalement ajoute l'étiquette
+    #[tokio::test]
+    async fn a_flag_adds_a_review_label() {
+        let edits = Arc::new(SessionEdits::new());
+        let provider = Arc::new(ScriptedProvider::new(vec![
+            run_script("c1", "ask_flag(\"wrong answer on loki\"); ask_flag(\"\")"),
+            say("done"),
+        ]));
+        let mut options = options_with_edits("t-flag", &edits);
+        options.clock = Arc::new(ManualClock::new(Timestamp::from_millis(1234)));
+        let (mut runner, parts) = assemble(Arc::clone(&provider), options);
+        let _wired = runner.with_session_edits(Arc::clone(&edits));
+        let _output = run(&mut runner, "go").await;
+        let labels: Vec<_> = runner
+            .state()
+            .labels()
+            .iter()
+            .map(|label| (label.text().to_owned(), label.author(), label.date()))
+            .collect();
+        assert_eq!(
+            labels,
+            vec![
+                (
+                    "review-requested: wrong answer on loki".to_owned(),
+                    LabelAuthor::Automatic,
+                    Timestamp::from_millis(1234)
+                ),
+                (
+                    "review-requested".to_owned(),
+                    LabelAuthor::Automatic,
+                    Timestamp::from_millis(1234)
+                ),
+            ],
+            "each flag adds an automatic, dated label on the session"
+        );
+        assert_eq!(
+            review_state(runner.state().labels()),
+            Some(ReviewState::Requested(String::new())),
+            "the last flag wins in the review state"
+        );
+        assert_eq!(
+            review_events(&parts),
+            vec!["wrong answer on loki".to_owned(), String::new()],
+            "one ReviewRequested event per flag"
+        );
+        assert_eq!(
+            saved_state(&parts, "t-flag").await.labels().iter().count(),
+            2,
+            "the end-of-turn save holds the labels"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_long_reason_is_bounded_to_200_characters() {
+        let edits = Arc::new(SessionEdits::new());
+        let script = format!("ask_flag(\"{}\")", "x".repeat(300));
+        let provider = Arc::new(ScriptedProvider::new(vec![
+            run_script("c1", &script),
+            say("done"),
+        ]));
+        let (mut runner, parts) = assemble(Arc::clone(&provider), options_with_edits("t-long", &edits));
+        let _wired = runner.with_session_edits(Arc::clone(&edits));
+        let _output = run(&mut runner, "go").await;
+        let reasons = review_events(&parts);
+        assert_eq!(reasons.len(), 1, "one flag, one event");
+        assert!(
+            reasons
+                .iter()
+                .all(|reason| reason.chars().count() == 200 && reason.ends_with('\u{2026}')),
+            "the reason is bounded to 200 characters, ellipsis included: {reasons:?}"
+        );
+        let texts: Vec<_> = runner
+            .state()
+            .labels()
+            .iter()
+            .map(|label| label.text().chars().count())
+            .collect();
+        assert_eq!(
+            texts,
+            vec!["review-requested: ".chars().count() + 200],
+            "the label carries the bounded reason"
+        );
+    }
+
+    // Scenario: un secret n'apparaît nulle part
+    #[tokio::test]
+    async fn a_secret_never_reaches_a_title_a_reason_or_an_event() {
+        let edits = Arc::new(SessionEdits::new());
+        let provider = Arc::new(ScriptedProvider::new(vec![
+            run_script(
+                "c1",
+                "ask_title(\"deploy with s3cr3t-token\"); ask_flag(\"leak of s3cr3t-token\")",
+            ),
+            say("done"),
+        ]));
+        let mut options = options_with_edits("t-secret", &edits);
+        options.redactor = {
+            let mut redactor = Redactor::new();
+            redactor.add_secret("s3cr3t-token").expect("a long enough secret");
+            redactor
+        };
+        let (mut runner, parts) = assemble(Arc::clone(&provider), options);
+        let _wired = runner.with_session_edits(Arc::clone(&edits));
+        let _output = run(&mut runner, "go").await;
+        assert_eq!(
+            runner.state().title(),
+            Some("deploy with *redacted secret*"),
+            "the secret is masked in the title"
+        );
+        let everything = format!(
+            "{:?}{}{}",
+            parts.sink.events(),
+            runner.state().to_json().expect("the state serializes"),
+            saved_state(&parts, "t-secret")
+                .await
+                .to_json()
+                .expect("the saved state serializes")
+        );
+        assert!(
+            !everything.contains("s3cr3t-token"),
+            "the secret appears in no event, state or label: {everything}"
+        );
+        assert!(
+            everything.contains("review-requested: leak of *redacted secret*"),
+            "the label keeps the masked reason: {everything}"
+        );
+    }
+
+    // Regression guard for the absence of a cell only: it cannot detect a regression of the application of the edits, the
+    // other tests of this section do.
+    #[tokio::test]
+    async fn a_runner_without_a_cell_ignores_the_edits() {
+        let edits = Arc::new(SessionEdits::new());
+        let provider = Arc::new(ScriptedProvider::new(vec![
+            run_script("c1", "ask_title(\"unwired\"); ask_flag(\"unwired\")"),
+            say("done"),
+        ]));
+        let (mut runner, parts) = assemble(Arc::clone(&provider), options_with_edits("t-unwired", &edits));
+        let _output = run(&mut runner, "go").await;
+        assert_eq!(
+            runner.state().title(),
+            None,
+            "a runner without a cell sets no title"
+        );
+        assert!(
+            runner.state().labels().iter().next().is_none(),
+            "and adds no label"
+        );
+        assert!(
+            title_events(&parts).is_empty() && review_events(&parts).is_empty(),
+            "and emits nothing"
+        );
+    }
+
+    /// A native tool that fills the cell of session edits, then answers or waits for the cancellation of the turn.
+    struct Editing {
+        name: &'static str,
+        edits: Arc<SessionEdits>,
+        wait_for_cancel: bool,
+    }
+
+    impl Editing {
+        /// The answer, after the cancellation of the turn when the tool was built to wait for it.
+        async fn answer(&self, cancel: &CancelHandle) -> Result<String, String> {
+            if self.wait_for_cancel {
+                cancel.cancelled().await;
+            }
+            Ok("ok".to_owned())
+        }
+    }
+
+    impl NativeTool for Editing {
+        fn name(&self) -> &str {
+            self.name
+        }
+
+        fn definition(&self) -> Value {
+            json!({"name": "editing", "description": "a test tool", "parameters": {"type": "object"}})
+        }
+
+        fn call<'call>(
+            &'call self,
+            _arguments: &'call Value,
+            cancel: &'call CancelHandle,
+        ) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'call>> {
+            self.edits.set_title("Title from a native tool");
+            self.edits.flag_for_review("flag from a native tool");
+            Box::pin(self.answer(cancel))
+        }
+    }
+
+    // Mutant: the edits applied only after a `rhai_pad` call.
+    #[tokio::test]
+    async fn a_native_tool_can_fill_the_cell() {
+        let edits = Arc::new(SessionEdits::new());
+        let provider = Arc::new(ScriptedProvider::new(vec![
+            call_tool("c1", "editing", json!({})),
+            say("done"),
+        ]));
+        let (mut runner, parts) = assemble(Arc::clone(&provider), Options::named("t-native-edits"));
+        assert!(
+            runner
+                .with_native_tool(Arc::new(Editing {
+                    name: "editing",
+                    edits: Arc::clone(&edits),
+                    wait_for_cancel: false,
+                }))
+                .is_ok(),
+            "the native tool is registered"
+        );
+        let _wired = runner.with_session_edits(Arc::clone(&edits));
+        let _output = run(&mut runner, "go").await;
+        assert_eq!(
+            runner.state().title(),
+            Some("Title from a native tool"),
+            "the title is applied"
+        );
+        assert_eq!(
+            title_events(&parts),
+            vec!["Title from a native tool".to_owned()],
+            "and announced"
+        );
+        assert_eq!(
+            review_events(&parts),
+            vec!["flag from a native tool".to_owned()],
+            "the flag is applied too"
+        );
+    }
+
+    // Mutant: `if !output.cancelled { apply }`. A call cancelled during the tool leaves the cell empty for the next turn.
+    #[tokio::test]
+    async fn a_cancelled_call_leaves_the_cell_empty() {
+        let edits = Arc::new(SessionEdits::new());
+        let provider = Arc::new(ScriptedProvider::new(vec![
+            call_tool("c1", "editing", json!({})),
+            say("never"),
+        ]));
+        let (mut runner, _parts) = assemble(Arc::clone(&provider), Options::named("t-cancel-edits"));
+        assert!(
+            runner
+                .with_native_tool(Arc::new(Editing {
+                    name: "editing",
+                    edits: Arc::clone(&edits),
+                    wait_for_cancel: true,
+                }))
+                .is_ok(),
+            "the native tool is registered"
+        );
+        let _wired = runner.with_session_edits(Arc::clone(&edits));
+        let cancel = CancelHandle::new();
+        let trigger = cancel.clone();
+        let (output, ()) = tokio::join!(runner.run_turn("go", &cancel), async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            trigger.cancel();
+        });
+        assert_eq!(
+            output.expect("a cancelled turn is not an error").outcome(),
+            Outcome::Cancelled,
+            "the turn is cancelled"
+        );
+        assert!(
+            edits.take().is_empty(),
+            "nothing is left in the cell for the next turn"
+        );
+    }
+
+    // Mutants: the first or the second masking removed in the loop. Title and reason straddle their bounds, through the
+    // events, the state and the saved state.
+    #[tokio::test]
+    async fn a_secret_straddling_a_bound_reaches_no_event_nor_state() {
+        let secret = "s3cr3t-token";
+        let edits = Arc::new(SessionEdits::new());
+        let script = format!(
+            "ask_title(\"{}{secret} tail\"); ask_flag(\"{}{secret} tail\"); ask_flag(\"ab\\ncd ef\")",
+            "t".repeat(110),
+            "r".repeat(192)
+        );
+        let provider = Arc::new(ScriptedProvider::new(vec![
+            run_script("c1", &script),
+            say("done"),
+        ]));
+        let mut options = options_with_edits("t-bound-secret", &edits);
+        options.redactor = {
+            let mut redactor = Redactor::new();
+            redactor.add_secret(secret).expect("a long enough secret");
+            redactor.add_secret("ab cd ef").expect("a long enough secret");
+            redactor
+        };
+        let (mut runner, parts) = assemble(Arc::clone(&provider), options);
+        let _wired = runner.with_session_edits(Arc::clone(&edits));
+        let _output = run(&mut runner, "go").await;
+        let everything = format!(
+            "{:?}{}{}",
+            parts.sink.events(),
+            runner.state().to_json().expect("the state serializes"),
+            saved_state(&parts, "t-bound-secret")
+                .await
+                .to_json()
+                .expect("the saved state serializes")
+        );
+        let chars: Vec<char> = secret.chars().collect();
+        for window in chars.windows(6) {
+            let piece: String = window.iter().collect();
+            assert!(
+                !everything.contains(&piece),
+                "the piece `{piece}` leaks: {everything}"
+            );
+        }
+        assert!(
+            !everything.contains("ab cd ef"),
+            "the rebuilt secret leaks: {everything}"
+        );
+        assert!(runner.state().title().is_some(), "the title was set");
     }
 }

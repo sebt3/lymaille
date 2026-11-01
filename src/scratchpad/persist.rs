@@ -51,6 +51,13 @@ pub enum UnpersistableReason {
     NonFiniteFloat,
     /// An array or a table nested deeper than the persisted depth.
     TooDeep,
+    /// A value, a table key, a name or a function source that contains a secret declared to the redactor.
+    ///
+    /// The variable or function is left out of the persisted state, so no secret reaches it, not even masked. The pad
+    /// keeps the real value during the session and the script keeps using it; every output (rendered text, history,
+    /// events, audit) shows it masked. After a restore the variable or function is absent, as a closure would be. The
+    /// warning names the variable or function and never shows its value.
+    Secret,
 }
 
 /// A variable that was not persisted, and why. The text is rendered to the LLM in the order of the variable names.
@@ -62,6 +69,14 @@ pub struct PersistWarning {
 }
 
 impl PersistWarning {
+    /// The warning for a variable that holds a secret. The caller passes the name already masked.
+    pub(super) const fn secret(variable: String) -> Self {
+        Self {
+            variable,
+            reason: UnpersistableReason::Secret,
+        }
+    }
+
     /// Name of the variable that was not persisted.
     #[must_use]
     pub fn variable(&self) -> &str {
@@ -96,6 +111,10 @@ impl PersistWarning {
             ),
             UnpersistableReason::TooDeep => format!(
                 "warning: variable `{}` nests deeper than {MAX_DATA_DEPTH} levels and was not persisted.",
+                self.variable
+            ),
+            UnpersistableReason::Secret => format!(
+                "warning: variable `{}` holds a secret and was not persisted; it stays usable in this session only.",
                 self.variable
             ),
         }

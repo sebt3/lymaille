@@ -86,7 +86,7 @@ Must:
   L'instantané d'un pad restauré puis non modifié est égal à celui qui a servi à le restaurer, aux variables non persistables près.
   Restauration : les variables sont reposées dans le scope par @restore_scope ; les fonctions sont recompilées par @recompile_functions ; le pad ne rejoue aucun script (`agent-sessions/scratchpad#DEC-1`) ; les clés cassées sont rendues dans @Restored. Après restauration, `f(x)` s'évalue comme avant la sauvegarde (`agent-sessions/scratchpad#AC-1`).
   Si l'extraction des sources de fonctions échoue après une évaluation réussie (méthode typée, position saturée : ./persist.sdd #9), le run garde sa valeur et son statut `Ok` ; un avertissement dit que les fonctions du script ne sont pas persistées, et elles restent connues du pad (décidé le 2026-10-29 par le développeur principal).
-  Les avertissements des fonctions exclues de la persistance (forme masquée irrecevable) sont rendus dans le texte seulement : ils ne figurent pas dans les @PersistWarning de @RunOutcome.
+  Les avertissements des fonctions exclues de la persistance (elles contiennent un secret, #16) sont rendus dans le texte seulement : ils ne figurent pas dans les @PersistWarning de @RunOutcome.
   Un moteur (@ScratchpadEngine) sert une seule session : l'état d'introspection qu'il porte (@IntrospectionSource) est mis à jour avant chaque run et n'est pas partagé entre pads concurrents.
   Le fil d'évaluation entre dans le runtime de l'hôte (`Handle::enter`) : les appels natifs asynchrones s'exécutent sur ce runtime, et sur un runtime `current_thread` ils rendent l'erreur explicite de `vynil-core` (Scenario « runtime current_thread »).
   Quand l'extraction des sources de fonctions échoue, l'avertissement « the functions of this script were not persisted; they stay callable in this session only. » est rendu dans le texte seulement (comme celui des fonctions exclues), et les sources de l'état portant les clés `nom/arité` des fonctions du script sont retirées : l'état ne garde jamais une ancienne version d'une fonction que le pad a redéfinie.
@@ -195,7 +195,7 @@ Scenario: une panique est contenue
 Scenario: les secrets sont masqués dans le texte et l'audit
   Given un masqueur qui porte `tok-123456` et un script qui rend `Bearer tok-123456`
   When il est exécuté
-  Then le texte contient `***` et non le secret, et l'enregistrement d'audit ne porte le secret ni dans le script, ni dans le résultat, ni dans l'erreur
+  Then le texte contient `*redacted secret*` et non le secret, et l'enregistrement d'audit ne porte le secret ni dans le script, ni dans le résultat, ni dans l'erreur
 
 Scenario: les erreurs sont masquées et suggérées
   Given un masqueur qui porte `tok-123456` et le script `grafana::loki_queryy("tok-123456")` avec un module accordé `grafana::loki_query`
@@ -238,10 +238,15 @@ Scenario: les exécutions sur un même pad sont sérialisées
   When les deux se terminent
   Then leurs effets sont appliqués l'un après l'autre et le scope porte les deux résultats
 
-Scenario: les secrets sont masqués avant que l'état ne conserve les variables et les sources des fonctions
-  Given une session dont l'agent déclare le secret `API_TOKEN` de valeur `s3cr3t-value`, et un script qui stocke `let k = "s3cr3t-value";` et définit `fn key() { "s3cr3t-value" }`
+Scenario: une variable ou une fonction qui contient un secret n'est pas persistée
+  Given une session dont l'agent déclare le secret `API_TOKEN` de valeur `s3cr3t-value`, et un script qui stocke `let k = "s3cr3t-value"; let n = 3;` et définit `fn key() { "s3cr3t-value" }`
   When l'exécution se termine et l'état est sauvegardé
-  Then l'état sauvegardé ne porte la valeur `s3cr3t-value` ni dans ses variables ni dans les sources de ses fonctions, et le résultat rendu montre la forme masquée à la place
+  Then l'état sauvegardé ne porte la valeur `s3cr3t-value` nulle part, `n` est persistée, `k` et `key` sont absentes de l'état avec un avertissement qui les nomme (jamais leur valeur), et pendant la session le script continue de lire `k` et d'appeler `key()` avec la vraie valeur
+
+Scenario: le secret reste utilisable dans le pad, masqué dans toute sortie
+  Given le même secret et un script qui l'utilise dans un appel de module puis fait `print(k)` et rend `k`
+  When l'exécution se termine
+  Then l'appel du module a reçu la vraie valeur, et le texte rendu au LLM montre `*redacted secret*` à la place
 
 Tasks:
   [x] #1 Tests puis implémentation, dans l'ordre : pad et persistance entre appels, erreurs et rendu, avertissements, annulation (jeton miroir), audit et masquage, restauration.
@@ -263,7 +268,7 @@ Tasks:
   [x] #9 Posé : `run` ne borne pas le nombre de scripts simultanés au-delà d'un fil dédié par run (`agent-sessions/scratchpad#DEC-3`, amendé) ; la pression sur les fils relève de l'hôte.
       Validé le 2026-10-29 par le développeur principal.
   [x] #10 Masquage des secrets avant la remise de l'état : masquer les secrets déclarés dans les valeurs de variables et les sources de fonctions avant de les remettre à l'état de session (Redactor, CON-3 ; persist.sdd #14 ne masque rien). Scenario « les secrets sont masqués avant que l'état ne conserve les variables et les sources des fonctions ».
-      Implémenté et testé (constaté par le validator le 2026-10-29, Scenario « les secrets sont masqués avant que l'état ne conserve… »).
+      Implémenté et testé (constaté par le validator le 2026-10-29, Scenario « les secrets sont masqués avant que l'état ne conserve… »). Remplacé le 2026-11-01 par #16 : plus de masquage dans l'état, exclusion.
   [x] #11 Faire passer `scripts/check` : corriger les 27 erreurs clippy du validateur du 2026-10-29 (`run.rs`, code et tests) sans `allow` ni changement du harnais ; regrouper les 7 arguments de `settle` dans une structure d'entrée nommée.
       Validé le 2026-10-29 (validator) sous `SKIP=deny scripts/check` : l'étape `cargo deny` échoue faute de `deny.toml` (lymaille.sdd #1, #5).
   [x] #12 Renforcer les tests faibles : texte de l'erreur de limite (« string beyond the memory limit »), absence du secret dans l'erreur de l'enregistrement d'audit, absence de suggestion d'un module non accordé, module `writer` non atteint (sans dépendre du libellé « Closest candidates »), sérialisation réelle des runs.
@@ -304,3 +309,6 @@ Scenario: runtime current_thread
   [x] #14 Validation du 2026-10-29 : (a) test du retrait des sources périmées (définir `fn f(){1}`, puis lancer `fn f(){2}` avec une fonction à méthode typée dans le même script, vérifier que l'instantané ne contient plus l'ancienne `f/0`) ; (b) remplacer la copie privée de `key_of` par un `pub(super)` de ./persist.rs ; (c) justifier par un commentaire ou repasser en `current_thread` le test `call_depth_is_an_error_rendered_to_the_llm` ; (d) étendre le Scenario « une fonction exclue par le masquage est signalée » aux deux avertissements rendus en texte seulement (Scenario étendu le 2026-10-29) ; (e) deux tests relevés par le validateur : retrait d'une fonction d'arité 1 ou plus, et conservation de la source d'une autre fonction `g/0` après l'échec d'extraction.
       Validé le 2026-10-29 (validator, 12 mutants tués) sous `SKIP=deny scripts/check`.
   [x] #15 Décision du 2026-10-31 (AC-2 de `session`, accord du développeur principal) : @Restored::warnings rend les @RestoreWarning de la recompilation (appel à un nom inconnu, voir ./persist.sdd), jusqu'ici jetés par @Scratchpad::restore ; l'ordre est celui de @recompile_functions. Test : une fonction qui appelle `ops::disparue` produit un avertissement qui la nomme et nomme l'appel.
+  [x] #16 Variable ou fonction qui contient un secret (Décision du 2026-11-01 (accord du développeur principal), lot P10) : remplace le masquage de #10. Un secret déclaré reste utilisable dans le pad (aucune restriction à l'exécution) et masqué dans toute sortie (texte rendu, historique, événements, audit) ; mais une variable dont la valeur, ou une source de fonction dont le texte, contient un secret déclaré n'est PAS persistée : elle est exclue de l'état, avec l'avertissement existant (`PersistWarning`, nouvelle raison `UnpersistableReason::Secret`) qui la nomme, jamais sa valeur. À la restauration elle est absente, comme une closure, au lieu d'une valeur `*redacted secret*` trompeuse. Tests : les deux Scenarios ci-dessus ; une variable sans secret reste persistée ; un secret de moins de 6 caractères n'est pas déclarable (@Redactor) donc hors sujet.
+      [?] Choix posés (lot P10) : (a) l'avertissement d'une fonction qui contient un secret reste rendu dans le texte seulement (aucun @PersistWarning pour une fonction : `PersistWarning` nomme une variable), `warnings()` ne porte que les variables ; (b) une variable est aussi exclue quand son nom contient un secret, l'avertissement porte alors le nom masqué ; (c) la clé d'une table compte comme valeur. Le fait qu'une exclusion pour secret soit rendue une seule fois par état suit la règle générale des avertissements.
+  [x] #17 Lot P10b (relevé de la validation du 2026-11-01, décision du développeur principal) : (a) une variable dont le NOM contient un secret déclaré est exclue de l'état et son avertissement porte le nom masqué (jamais le secret) ; idem pour une fonction dont la clé `nom/arité` le contient ; (b) un blob dont les octets épellent le secret est exclu de la persistance comme toute valeur contenant un secret (`holds_secret` regarde aussi `TaggedValue::Blob`), avertissement `Secret` ; (c) les avertissements préexistants gardent leur ordre d'émission (le tri de #16 ne les réordonne pas, ou le changement est justifié et testé). Mutants à tuer : retirer le test du nom de variable, retirer le test de la clé de fonction, émettre l'avertissement avec le nom non masqué, ignorer les blobs. Clôt #16.

@@ -9,7 +9,7 @@ use serde_json::Value;
 use super::{SessionError, SessionResult};
 
 /// Text that replaces every occurrence of a secret.
-const MASK: &str = "***";
+const MASK: &str = "*redacted secret*";
 
 /// Shortest secret, in characters, that may be declared: a shorter one would mask too much of the text.
 const MIN_SECRET_CHARS: usize = 6;
@@ -33,8 +33,9 @@ impl Redactor {
     ///
     /// # Errors
     ///
-    /// [`SessionError::SecretTooShort`] when the secret is non-empty and has fewer than six characters. The secret is then
-    /// not retained.
+    /// [`SessionError::SecretTooShort`] when the secret is non-empty and has fewer than six characters, checked first.
+    /// [`SessionError::SecretInPlaceholder`] when the secret is contained in the text that replaces a masked secret: it would
+    /// be masked again inside the replacement. The secret is not retained in either case.
     pub fn add_secret<S: Into<String>>(&mut self, secret: S) -> SessionResult<()> {
         let secret = secret.into();
         if secret.is_empty() {
@@ -43,12 +44,15 @@ impl Redactor {
         if secret.chars().count() < MIN_SECRET_CHARS {
             return Err(SessionError::SecretTooShort);
         }
+        if MASK.contains(secret.as_str()) {
+            return Err(SessionError::SecretInPlaceholder);
+        }
         self.secrets.push(secret);
         self.secrets.sort_by_key(|known| Reverse(known.len()));
         Ok(())
     }
 
-    /// Returns `text` where every occurrence of a declared secret is replaced by `***`.
+    /// Returns `text` where every occurrence of a declared secret is replaced by `*redacted secret*`.
     ///
     /// At each position the longest secret that starts there is masked, so a secret that contains a shorter one
     /// leaves no remainder of it.
@@ -123,7 +127,7 @@ mod tests {
             .expect("a seven-character secret is accepted");
         assert_eq!(
             redactor.redact("Bearer tok-123 and tok-123"),
-            "Bearer *** and ***",
+            "Bearer *redacted secret* and *redacted secret*",
             "every occurrence of the secret must be masked"
         );
     }
@@ -139,7 +143,7 @@ mod tests {
             .expect("an eight-character secret is accepted");
         assert_eq!(
             redactor.redact("xabcdefghx"),
-            "x***x",
+            "x*redacted secret*x",
             "the longer secret must be masked whole, leaving no remainder of it"
         );
     }
@@ -167,7 +171,7 @@ mod tests {
             .expect("a secret of six characters is accepted");
         assert_eq!(
             redactor.redact("s3cr3t"),
-            "***",
+            "*redacted secret*",
             "an accepted six-character secret must be masked"
         );
     }
@@ -194,7 +198,7 @@ mod tests {
         let value = json!({"s3cr3t": ["a s3cr3t b", 1]});
         assert_eq!(
             redactor.redact_json(&value),
-            json!({"***": ["a *** b", 1]}),
+            json!({"*redacted secret*": ["a *redacted secret* b", 1]}),
             "the secret must be masked in object keys and in string values, and numbers stay as they are"
         );
     }
@@ -237,6 +241,85 @@ mod tests {
             once,
             "masking a masked text must change nothing"
         );
+    }
+
+    #[test]
+    fn substitution_is_readable_and_masking_idempotent() {
+        // Scenario: la substitution est lisible et le masquage idempotent
+        let mut redactor = Redactor::new();
+        redactor
+            .add_secret("s3cr3t-value")
+            .expect("a twelve-character secret is accepted");
+        let once = redactor.redact("key=s3cr3t-value;");
+        assert_eq!(
+            once, "key=*redacted secret*;",
+            "the secret is replaced by the readable substitution"
+        );
+        assert_eq!(
+            redactor.redact(&once),
+            once,
+            "the substitution is never masked again"
+        );
+        assert_eq!(
+            redactor.redact(&redactor.redact(&once)),
+            once,
+            "masking any number of times gives the same result"
+        );
+        let value = json!({"s3cr3t-value": ["a s3cr3t-value b", 1]});
+        let once_json = redactor.redact_json(&value);
+        assert_eq!(
+            once_json,
+            json!({"*redacted secret*": ["a *redacted secret* b", 1]}),
+            "the JSON is masked with the substitution"
+        );
+        assert_eq!(
+            redactor.redact_json(&once_json),
+            once_json,
+            "masking a masked JSON value changes nothing"
+        );
+    }
+
+    #[test]
+    fn secret_contained_in_the_substitution_is_refused() {
+        // Scenario: un secret contenu dans la substitution est refusé
+        let mut redactor = Redactor::new();
+        for candidate in ["secret", "redacted", "d secret", "*redacted secret*"] {
+            let refused = redactor.add_secret(candidate);
+            assert!(
+                matches!(refused, Err(SessionError::SecretInPlaceholder)),
+                "`{candidate}` is contained in the substitution, so it must be refused with SecretInPlaceholder, got {refused:?}"
+            );
+            let message = refused.map_or_else(|error| error.to_string(), |()| String::new());
+            assert!(
+                !message.contains(candidate),
+                "the message must not contain the refused string, got {message}"
+            );
+        }
+        assert_eq!(redactor.longest_secret_len(), 0, "nothing was retained");
+        assert_eq!(
+            redactor.redact("a secret redacted"),
+            "a secret redacted",
+            "a refused string masks nothing"
+        );
+    }
+
+    #[test]
+    fn checks_run_in_order_empty_then_too_short_then_placeholder() {
+        let mut redactor = Redactor::new();
+        redactor.add_secret("").expect("an empty secret is ignored");
+        let short = redactor.add_secret("d sec");
+        assert!(
+            matches!(short, Err(SessionError::SecretTooShort)),
+            "`d sec` is both short and in the substitution: the length check comes first, got {short:?}"
+        );
+        let inside = redactor.add_secret("d secret");
+        assert!(
+            matches!(inside, Err(SessionError::SecretInPlaceholder)),
+            "`d secret` has eight characters and is in the substitution, got {inside:?}"
+        );
+        redactor
+            .add_secret("secrets")
+            .expect("`secrets` is not contained in the substitution");
     }
 
     #[test]

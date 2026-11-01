@@ -798,7 +798,7 @@ mod tests {
             outcome.text()
         );
         assert!(
-            outcome.text().contains("***"),
+            outcome.text().contains("*redacted secret*"),
             "the secret is masked where it was: {}",
             outcome.text()
         );
@@ -835,7 +835,10 @@ mod tests {
                 "the {what} never carries the declared secret: {text}"
             );
         }
-        assert!(body.contains("***"), "the secret is masked where it was: {body}");
+        assert!(
+            body.contains("*redacted secret*"),
+            "the secret is masked where it was: {body}"
+        );
     }
 
     // Scenario: session_context donne les paramètres résolus par toolset, défauts compris

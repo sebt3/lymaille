@@ -17,8 +17,8 @@ mod toolsets;
 
 pub use agents::{
     AgentDefinition, AgentKind, AgentStore, AgentsError, AgentsResult, DetectedModel, ErrorClass,
-    InMemoryCatalog, InferenceError, InferenceProvider, InferenceRequest, InferenceResponse, Layered,
-    ManifestGap, ManifestView, ModelProfile, ProfileStore, ProjectManifest, Provider, ProviderLevel,
+    FinishReason, InMemoryCatalog, InferenceError, InferenceProvider, InferenceRequest, InferenceResponse,
+    Layered, ManifestGap, ManifestView, ModelProfile, ProfileStore, ProjectManifest, Provider, ProviderLevel,
     ProviderStore, ReportedUsage, ResolvedProfile, SamplingParams, SandboxLimits, ScriptedProvider,
     classify_status,
 };
@@ -41,7 +41,7 @@ pub use modules::{
     InMemoryMemoryStore, McpConnector, McpEnv, McpError, McpLister, McpNotification, McpRetryPolicy, McpTool,
     Memory, MemoryLevel, MemoryScope, MemoryScopes, MemoryStore, MemorySummary, ModulesError, ModulesResult,
     ScriptedConnector, TodoItem, TodoList, TodoStatus, function_name, mcp_module, mcp_shell_descriptor,
-    memory_module, memory_module_name, name_tools, todo_module,
+    memory_module, memory_module_name, name_tools, session_module, todo_module,
 };
 #[cfg(feature = "mcp-http")]
 pub use modules::{McpAuth, McpClientConfig, McpHeaders, RmcpConnector};
@@ -64,10 +64,11 @@ pub use secret::{DefaultSecretDetector, SecretDetector};
 pub use session::{
     AgentRef, Backoff, BoundaryKind, CancelHandle, Event, EventKind, EventSink, FormatVersion, History,
     InMemoryStore, InspectionTargetRef, Label, LabelAuthor, LabelTarget, Labels, McpInput, McpRecord,
-    Message, ModelSnapshot, NativeTool, NullSink, Outcome, Provenance, Reasoning, RecordingSink, Redactor,
-    RunId, RunSignals, ScriptInput, ScriptRecord, Segment, SegmentContext, SessionError, SessionId,
-    SessionKind, SessionResult, SessionState, SessionStore, SleepOutcome, TaggedValue, TokenCounters,
-    ToolCall, TurnGate, TurnId, TurnPermit, restore_notices, unresolved_call_notices,
+    Message, ModelSnapshot, NativeTool, NullSink, Outcome, PendingEdits, Provenance, Reasoning,
+    RecordingSink, Redactor, ReviewState, RunId, RunSignals, ScriptInput, ScriptRecord, Segment,
+    SegmentContext, SessionEdits, SessionError, SessionId, SessionKind, SessionResult, SessionState,
+    SessionStore, SleepOutcome, TaggedValue, TokenCounters, ToolCall, TurnGate, TurnId, TurnPermit,
+    normalize_title, restore_notices, review_state, unresolved_call_notices,
 };
 pub use tools::{InspectEnv, InspectTool, InspectionHost, session_tool_definitions};
 pub use toolsets::{
@@ -77,6 +78,6 @@ pub use toolsets::{
     ScriptError, SessionFilter, SessionIndex, SessionMeta, SessionSummary, Skill, SkillTool, Toolset,
     ToolsetContext, ToolsetStore, ToolsetsError, ToolsetsResult, TypeRequirement, VersionWarning, assemble,
     builder_registration, builtin_rhai_pad_skill, check_context, check_creation_rule, check_declared_version,
-    check_template, config_registration, delegable_subagents, extract_contract, render_prompt, render_skill,
-    session_context_registration, skill_definition,
+    check_session_module_rule, check_template, config_registration, delegable_subagents, extract_contract,
+    render_prompt, render_skill, session_context_registration, skill_definition,
 };

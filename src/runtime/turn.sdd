@@ -62,6 +62,7 @@ Must:
 
   Appel d'un tool natif enregistré par `with_native_tool` : la boucle l'appelle par son nom avec les arguments du modèle, sans passer par le scratchpad ; le texte rendu (ou l'erreur) est masqué par le @Redactor, borné par le plafond de rendu de la @Budget (`render_cap_chars`), puis ajouté à l'historique comme tout résultat d'outil. Un nom ni `rhai_pad` ni enregistré rend toujours un résultat d'erreur « unknown tool ». La boucle de tour ne dépend pas de `toolsets` : `skill` y entre par ce trait.
   Les définitions que la requête envoie sont celles du @SegmentContext, assemblées par l'hôte à partir de @rhai_pad_definition (./definition.sdd) et de la définition de chaque tool natif ; la boucle ne les fabrique pas.
+  Réponse tronquée (Décision du 2026-11-01 (accord du développeur principal, relevé du spike R2)) : quand la raison de fin est `Length`, la boucle émet l'événement `ResponseTruncated { has_text, has_tool_calls }` ; si la réponse n'a ni texte ni appel d'outil (un modèle à raisonnement qui a consommé tout le budget de sortie), le tour se termine en `Failed` avec le message fixe « the response was cut by the output limit before any text or tool call » (jamais copié dans l'historique, qui reste valide) au lieu d'un tour valide mais vide. Une réponse tronquée qui porte du texte ou des appels d'outil suit son cours (un appel aux arguments coupés est déjà rendu comme appel erroné). Les jetons de raisonnement rapportés s'ajoutent au compteur `reasoning` de la session.
 
 Must not:
   Lire l'horloge système ou dormir en dehors de @Clock et de @CancelHandle::sleep ; ouvrir un fichier ou un processus.
@@ -178,6 +179,16 @@ Scenario: l'enregistrement d'un nom réservé ou en double est refusé
   When ils sont enregistrés
   Then chaque enregistrement fautif est refusé et le premier tool valide reste appelable
 
+Scenario: une réponse vide tronquée par la limite de sortie échoue explicitement
+  Given un fournisseur scripté dont la réponse a la raison de fin Length, aucun texte et aucun appel d'outil, avec 12 jetons de raisonnement
+  When le tour s'exécute
+  Then l'issue est Failed avec le message fixe, l'événement ResponseTruncated est émis, l'historique ne contient aucun message d'assistant vide, et le compteur de raisonnement vaut 12
+
+Scenario: une réponse tronquée qui porte du texte suit son cours
+  Given une réponse Length avec le texte `Bonjour`
+  When le tour s'exécute
+  Then l'issue est Valid, la réponse vaut `Bonjour` et ResponseTruncated est émis avec has_text vrai
+
 Tasks:
   [x] #1 Tests puis implémentation (lot R1), validé le 2026-10-30.
   [x] #2 Décidé le 2026-10-30 par le développeur principal : un tool inconnu rend un résultat d'erreur au modèle ; le tool `skill` (../toolsets/native.sdd, non livré) s'y branchera par un point d'extension ajouté avec ce domaine. À confirmer.
@@ -185,4 +196,6 @@ Tasks:
   [x] #4 Décidé le 2026-10-30 par le développeur principal : le report du masquage des fragments (secret coupé entre deux fragments, ../session/event.sdd #6 et #7) retient les `longest_secret_len - 1` derniers caractères jusqu'au fragment suivant ou à la fin de la réponse. À confirmer.
   [x] #5 Décidé le 2026-10-30 par le développeur principal : `Overrun` est vérifié à la frontière d'itération et non par une minuterie concurrente, faute d'horloge asynchrone injectée ; un appel unique plus long que le délai le déclenche donc après son retour. À confirmer.
   [x] #6 `with_native_tool` et le routage des tools natifs (point d'extension de #2) : tests puis implémentation, lot P1 ; décision d'architecture posée le 2026-10-31, `runtime` ne dépendant pas de `toolsets`, le trait est dans `session` (./native_tool.sdd).
-  [ ] #7 `with_session_edits` (Décision du 2026-11-01 (accord du développeur principal), lot S2) : après chaque appel d'outil la boucle vide la cellule, applique le titre (@normalize_title, @Redactor, `set_title`, événement `TitleChanged`) et ajoute pour chaque signalement une étiquette `review-requested: <raison>` (raison bornée à 200 caractères, masquée, auteur automatique, cible la session) avec l'événement `ReviewRequested` ; la persistance de fin de tour les inclut. Scenarios : un titre posé par un script apparaît dans l'état et l'événement ; un signalement ajoute l'étiquette ; un secret n'apparaît nulle part.
+  [x] #7 `with_session_edits` (Décision du 2026-11-01 (accord du développeur principal), lot S2) : après chaque appel d'outil la boucle vide la cellule, applique le titre (@normalize_title, @Redactor, `set_title`, événement `TitleChanged`) et ajoute pour chaque signalement une étiquette `review-requested: <raison>` (raison bornée à 200 caractères, masquée, auteur automatique, cible la session) avec l'événement `ReviewRequested` ; la persistance de fin de tour les inclut. Scenarios : un titre posé par un script apparaît dans l'état et l'événement ; un signalement ajoute l'étiquette ; un secret n'apparaît nulle part.
+  [?] Posé à l'implémentation (#7) : `with_session_edits` prend `&mut self` et rend `&mut Self` (chaînable comme `with_native_tool`, sans erreur possible) ; la cellule est vidée après chaque appel d'outil, `rhai_pad` comme tool natif, annulé compris ; le titre est masqué, normalisé puis masqué à nouveau (une coupure ne laisse pas le début d'un secret), la raison est masquée, mise sur une ligne et bornée à 200 caractères ; `ReviewRequested` porte la raison masquée (vide si aucune).
+  [x] #8 Troncature de la réponse et jetons de raisonnement (Décision du 2026-11-01 (accord du développeur principal, relevé du spike R2), lot R3) : tests puis implémentation ; variante d'événement `ResponseTruncated` dans ../session/event.sdd.

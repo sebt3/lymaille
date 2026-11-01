@@ -23,19 +23,53 @@ pub enum ErrorClass {
     ContextOverflow,
 }
 
-/// Usage reported by the provider for one response: prompt tokens and completion tokens.
+/// Why the server stopped generating a response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum FinishReason {
+    /// The model reached a natural end of its answer.
+    Stop,
+    /// The output limit cut the response.
+    Length,
+    /// The model stopped to call tools.
+    ToolCalls,
+    /// Any other reason the server reports.
+    Other,
+}
+
+/// Usage reported by the provider for one response: prompt tokens, completion tokens and, when given, the reasoning
+/// tokens (part of the completion tokens).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ReportedUsage {
     prompt: u64,
     completion: u64,
+    reasoning: Option<u64>,
 }
 
 impl ReportedUsage {
     /// Builds the usage: the prompt tokens and the completion tokens.
     #[must_use]
     pub const fn new(prompt: u64, completion: u64) -> Self {
-        Self { prompt, completion }
+        Self {
+            prompt,
+            completion,
+            reasoning: None,
+        }
+    }
+
+    /// Sets the reasoning tokens the provider reports (part of the completion tokens).
+    #[must_use]
+    pub const fn with_reasoning(mut self, reasoning: u64) -> Self {
+        self.reasoning = Some(reasoning);
+        self
+    }
+
+    /// Returns the reasoning tokens, if the provider reports them.
+    #[must_use]
+    pub const fn reasoning(&self) -> Option<u64> {
+        self.reasoning
     }
 
     /// Returns the prompt tokens.
@@ -151,13 +185,31 @@ impl InferenceRequest {
 pub struct InferenceResponse {
     message: Message,
     usage: Option<ReportedUsage>,
+    finish_reason: Option<FinishReason>,
 }
 
 impl InferenceResponse {
     /// Builds a response from the assistant message and the reported usage.
     #[must_use]
     pub const fn new(message: Message, usage: Option<ReportedUsage>) -> Self {
-        Self { message, usage }
+        Self {
+            message,
+            usage,
+            finish_reason: None,
+        }
+    }
+
+    /// Sets the finish reason the server reports.
+    #[must_use]
+    pub const fn with_finish_reason(mut self, reason: FinishReason) -> Self {
+        self.finish_reason = Some(reason);
+        self
+    }
+
+    /// Returns the finish reason, `None` when the server does not give one.
+    #[must_use]
+    pub const fn finish_reason(&self) -> Option<FinishReason> {
+        self.finish_reason
     }
 
     /// Returns the message of the assistant.
@@ -344,8 +396,8 @@ mod tests {
     use std::sync::Arc;
 
     use super::{
-        ErrorClass, InferenceError, InferenceProvider as _, InferenceRequest, InferenceResponse,
-        ReportedUsage, ScriptedProvider, classify_status,
+        ErrorClass, FinishReason, InferenceError, InferenceProvider as _, InferenceRequest,
+        InferenceResponse, ReportedUsage, ScriptedProvider, classify_status,
     };
     use crate::agents::{ModelProfile, ResolvedProfile};
     use crate::session::{Message, Reasoning};
@@ -740,6 +792,48 @@ mod tests {
             1,
             "the request received after the poisoning must be recorded"
         );
+    }
+
+    // Scenario: la raison de fin et les jetons de raisonnement se portent
+    #[test]
+    fn finish_reason_and_reasoning_tokens_are_carried() {
+        let usage = ReportedUsage::new(10, 20).with_reasoning(15);
+        let response = answer("x").with_finish_reason(FinishReason::Length);
+        let response = InferenceResponse::new(response.message().clone(), Some(usage))
+            .with_finish_reason(FinishReason::Length);
+        assert_eq!(response.finish_reason(), Some(FinishReason::Length));
+        assert_eq!(response.usage().and_then(|u| u.reasoning()), Some(15));
+        assert_eq!(
+            response.usage().map(|u| (u.prompt(), u.completion())),
+            Some((10, 20))
+        );
+        let plain = answer("x");
+        assert_eq!(
+            plain.finish_reason(),
+            None,
+            "a response without a reason must give None"
+        );
+        assert_eq!(plain.usage().and_then(|u| u.reasoning()), None);
+    }
+
+    #[test]
+    fn finish_reason_serializes_in_snake_case() {
+        let json = serde_json::to_string(&FinishReason::ToolCalls).expect("serializes");
+        assert_eq!(json, "\"tool_calls\"");
+        let back: FinishReason = serde_json::from_str("\"length\"").expect("deserializes");
+        assert_eq!(back, FinishReason::Length);
+    }
+
+    #[tokio::test]
+    async fn scripted_provider_returns_the_scripted_finish_reason() {
+        let provider = ScriptedProvider::new(vec![
+            Ok(answer("cut").with_finish_reason(FinishReason::Length)),
+            Ok(answer("plain")),
+        ]);
+        let first = provider.complete(request("a")).await.expect("scripted");
+        assert_eq!(first.finish_reason(), Some(FinishReason::Length));
+        let second = provider.stream(request("b"), |_| {}).await.expect("scripted");
+        assert_eq!(second.finish_reason(), None);
     }
 
     #[test]

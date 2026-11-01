@@ -64,7 +64,7 @@ Scenario: la troncature ne coupe pas un caractère multi-octets
 Scenario: les arguments MCP sont masqués
   Given un redactor contenant `tok-123` et des arguments `{"auth": "tok-123"}`
   When un @McpRecord est construit
-  Then les arguments valent `{"auth": "***"}`
+  Then les arguments valent `{"auth": "*redacted secret*"}`
 
 Tasks:
   [x] #1 Tests puis implémentation.

@@ -21,7 +21,7 @@ Accepts:
   @session_context_registration: un @ResolvedContext et le @Redactor de la session (`Arc<Redactor>`) ; rend une étape d'enregistrement (@EngineBuilder::with_registration, ../scratchpad/engine.sdd).
 
 Returns:
-  @SkillTool::call: sans argument, la liste des skills disponibles (nom et description) ; avec un nom, le corps rendu ; avec un nom de document, ce document. Chaque texte est d'abord masqué par le @Redactor de la session (chaque secret déclaré devient `***`), puis plafonné par @truncate_middle.
+  @SkillTool::call: sans argument, la liste des skills disponibles (nom et description) ; avec un nom, le corps rendu ; avec un nom de document, ce document. Chaque texte est d'abord masqué par le @Redactor de la session (chaque secret déclaré devient `*redacted secret*`), puis plafonné par @truncate_middle.
   `session_context()` : une table Rhai de copie (paramètres résolus par toolset, noms des rôles liés), jamais de référence de secret, et masquée par le @Redactor de la session dans ses textes, ses clés et ses nombres.
 
 Raises:
@@ -73,7 +73,7 @@ Scenario: même valeur depuis un module et depuis un script
 Scenario: un secret déclaré à la session n'apparaît jamais dans session_context()
   Given une session dont le contexte porte un paramètre `api_token` égal à un secret déclaré au @Redactor, que la détection de `../toolsets/toolset_context.sdd` ne voit pas
   When un script appelle `session_context()`
-  Then le secret n'apparaît pas dans le résultat, et le texte masqué `***` le remplace
+  Then le secret n'apparaît pas dans le résultat, et le texte masqué `*redacted secret*` le remplace
 
 Scenario: un secret déclaré n'apparaît jamais dans le texte d'un skill
   Given un skill dont la description, le corps et un document annexe citent le paramètre qui porte le secret déclaré

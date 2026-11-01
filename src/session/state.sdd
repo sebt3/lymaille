@@ -20,6 +20,7 @@ Exposes:
   @SessionState::kind
   @SessionState::parent
   @SessionState::inspection_target
+  @SessionState::title, @SessionState::set_title, @SessionState::display_title (contrat dans ./title.sdd ; le champ `title` est optionnel et omis quand il est absent)
 
 Accepts:
   @SessionState::new: un @SessionId, un @AgentRef (nom et empreinte de la définition), le nom du ToolsetContext, les versions de toolsets

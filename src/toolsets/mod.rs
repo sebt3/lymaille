@@ -21,7 +21,7 @@ pub use assemble::{Assembled, assemble};
 pub use builder::{DraftEntry, DraftKind, DraftStore, builder_registration};
 pub use compat::{
     Delegation, Gap, GapKind, RemovalReason, RemovedSubagent, check_context, check_creation_rule,
-    delegable_subagents,
+    check_session_module_rule, delegable_subagents,
 };
 pub use config::{
     ConfigEnv, ConfigStores, InspectionSlot, ScriptError, SessionFilter, SessionIndex, SessionSummary,

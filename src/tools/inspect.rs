@@ -646,10 +646,14 @@ mod tests {
         let cancel = CancelHandle::new();
         let trigger = cancel.clone();
         let arguments = json!({"script": "loop { }"});
-        let (result, ()) = tokio::join!(fixture.tool.call(&arguments, &cancel), async move {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            trigger.cancel();
-        });
+        let (result, ()) = tokio::join!(
+            tokio::time::timeout(Duration::from_secs(5), fixture.tool.call(&arguments, &cancel)),
+            async move {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                trigger.cancel();
+            }
+        );
+        let result = result.expect("the cancellation must stop the script within 5 seconds");
         assert!(result.is_err(), "a cancelled script is an error text: {result:?}");
     }
 

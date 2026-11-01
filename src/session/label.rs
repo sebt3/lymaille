@@ -4,7 +4,8 @@
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 
-use super::{RunId, TurnId};
+use super::title::single_line;
+use super::{Redactor, RunId, TurnId};
 use crate::clock::{Clock, Timestamp};
 
 /// Message of the deserialization error raised for an empty label text.
@@ -138,6 +139,31 @@ impl Labels {
         self.entries.last()
     }
 
+    /// Adds the label `review-requested: <reason>` (just `review-requested` when nothing is left of the reason) on the
+    /// session, authored automatically and dated by `clock`. The raw `reason` is masked, put on one line, bounded to 200
+    /// characters and masked again. Returns the reason as stored.
+    pub(crate) fn add_review_requested(
+        &mut self,
+        reason: &str,
+        redactor: &Redactor,
+        clock: &dyn Clock,
+    ) -> String {
+        let reason = single_line(&redactor.redact(reason), MAX_REASON_CHARS)
+            .map_or_else(String::new, |bounded| redactor.redact(&bounded));
+        let text = if reason.is_empty() {
+            REVIEW_REQUESTED.to_owned()
+        } else {
+            format!("{REVIEW_REQUESTED}: {reason}")
+        };
+        let _added = self.add(text, LabelTarget::Session, LabelAuthor::Automatic, clock);
+        reason
+    }
+
+    /// Adds the label `review-done` on the session, authored automatically and dated by `clock`.
+    pub(crate) fn add_review_done(&mut self, clock: &dyn Clock) {
+        let _added = self.add(REVIEW_DONE, LabelTarget::Session, LabelAuthor::Automatic, clock);
+    }
+
     /// Returns every label, in the order they were added.
     pub fn iter(&self) -> std::slice::Iter<'_, Label> {
         self.entries.iter()
@@ -149,12 +175,51 @@ impl Labels {
     }
 }
 
+/// Longest reason of a review request, in characters, ellipsis included.
+const MAX_REASON_CHARS: usize = 200;
+
+/// Reserved label text of a review request, optionally followed by `: <reason>`.
+const REVIEW_REQUESTED: &str = "review-requested";
+
+/// Reserved label text of a session marked as analyzed.
+const REVIEW_DONE: &str = "review-done";
+
+/// State of the review of a session, read from its labels. Labels are only added: marking a session analyzed erases
+/// nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ReviewState {
+    /// The session was flagged for analysis, with the reason given (possibly empty).
+    Requested(String),
+    /// The session was marked as analyzed.
+    Done,
+}
+
+/// Returns the review state of a session: the last review label wins (`review-requested[: <reason>]` or `review-done`),
+/// `None` when the session carries none.
+#[must_use]
+pub fn review_state(labels: &Labels) -> Option<ReviewState> {
+    labels.iter().rev().find_map(|label| {
+        let text = label.text();
+        if text == REVIEW_DONE {
+            return Some(ReviewState::Done);
+        }
+        let rest = text.strip_prefix(REVIEW_REQUESTED)?;
+        if rest.is_empty() {
+            return Some(ReviewState::Requested(String::new()));
+        }
+        rest.strip_prefix(": ")
+            .map(|reason| ReviewState::Requested(reason.to_owned()))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
 
-    use super::{Label, LabelAuthor, LabelTarget, Labels};
+    use super::{Label, LabelAuthor, LabelTarget, Labels, ReviewState, review_state};
     use crate::clock::{ManualClock, Timestamp};
+    use crate::session::Redactor;
     use crate::session::{RunId, TurnId};
 
     fn run(id: &str) -> RunId {
@@ -329,5 +394,174 @@ mod tests {
             0,
             "a refused label must leave the list unchanged"
         );
+    }
+
+    // Scenario: le dernier mot gagne dans l'état de relecture
+    #[test]
+    fn the_last_word_wins_in_the_review_state() {
+        let clock = ManualClock::new(Timestamp::from_millis(10));
+        let mut labels = Labels::new();
+        assert_eq!(
+            review_state(&labels),
+            None,
+            "a session without review label has no state"
+        );
+        let _reason = labels.add_review_requested("lent", &Redactor::new(), &clock);
+        assert_eq!(
+            review_state(&labels),
+            Some(ReviewState::Requested("lent".to_owned())),
+            "a flag gives Requested with its reason"
+        );
+        clock.advance(Duration::from_millis(5));
+        labels.add_review_done(&clock);
+        assert_eq!(
+            review_state(&labels),
+            Some(ReviewState::Done),
+            "marking gives Done"
+        );
+        let _second = labels.add_review_requested("encore lent", &Redactor::new(), &clock);
+        assert_eq!(
+            review_state(&labels),
+            Some(ReviewState::Requested("encore lent".to_owned())),
+            "a later flag gives Requested again"
+        );
+        let texts: Vec<_> = labels
+            .iter()
+            .map(|label| (label.text().to_owned(), label.author()))
+            .collect();
+        assert_eq!(
+            texts,
+            vec![
+                ("review-requested: lent".to_owned(), LabelAuthor::Automatic),
+                ("review-done".to_owned(), LabelAuthor::Automatic),
+                ("review-requested: encore lent".to_owned(), LabelAuthor::Automatic),
+            ],
+            "labels are only added, automatic, in the reserved vocabulary"
+        );
+        assert!(
+            labels.iter().all(|label| *label.target() == LabelTarget::Session),
+            "review labels target the session"
+        );
+        assert_eq!(
+            labels.iter().map(Label::date).collect::<Vec<_>>(),
+            vec![
+                Timestamp::from_millis(10),
+                Timestamp::from_millis(15),
+                Timestamp::from_millis(15)
+            ],
+            "each label is dated by the clock"
+        );
+    }
+
+    #[test]
+    fn a_reason_is_masked_on_one_line_and_bounded() {
+        let clock = ManualClock::new(Timestamp::from_millis(0));
+        let mut redactor = Redactor::new();
+        redactor.add_secret("s3cr3t-token").expect("a long enough secret");
+        let mut labels = Labels::new();
+        let stored = labels.add_review_requested("leak of s3cr3t-token\nsecond line", &redactor, &clock);
+        assert_eq!(
+            stored, "leak of *redacted secret* second line",
+            "the reason is masked and on one line"
+        );
+        let long = labels.add_review_requested(&"x".repeat(300), &redactor, &clock);
+        assert_eq!(
+            long.chars().count(),
+            200,
+            "the reason is bounded to 200 characters"
+        );
+        assert!(long.ends_with('\u{2026}'), "a cut reason ends with an ellipsis");
+        let texts: Vec<_> = labels.iter().map(|label| label.text().to_owned()).collect();
+        assert_eq!(
+            texts.first().map(String::as_str),
+            Some("review-requested: leak of *redacted secret* second line"),
+            "the label carries the stored reason"
+        );
+        assert!(
+            texts.iter().all(|text| !text.contains("s3cr3t-token")),
+            "no label holds the secret"
+        );
+    }
+
+    #[test]
+    fn an_empty_reason_still_flags_and_other_labels_are_ignored() {
+        let clock = ManualClock::new(Timestamp::from_millis(0));
+        let mut labels = Labels::new();
+        let _reason = labels.add_review_requested("", &Redactor::new(), &clock);
+        assert_eq!(
+            review_state(&labels),
+            Some(ReviewState::Requested(String::new())),
+            "an empty reason is a flag without reason"
+        );
+        add_accepted(
+            &mut labels,
+            "good",
+            LabelTarget::Session,
+            LabelAuthor::Human,
+            &clock,
+        );
+        add_accepted(
+            &mut labels,
+            "review-done-ish",
+            LabelTarget::Session,
+            LabelAuthor::Human,
+            &clock,
+        );
+        assert_eq!(
+            review_state(&labels),
+            Some(ReviewState::Requested(String::new())),
+            "labels outside the reserved vocabulary do not change the state"
+        );
+        let mut plain = Labels::new();
+        add_accepted(
+            &mut plain,
+            "good",
+            LabelTarget::Session,
+            LabelAuthor::Human,
+            &clock,
+        );
+        assert_eq!(review_state(&plain), None, "free labels give no review state");
+    }
+
+    // Mutant: the first masking removed from add_review_requested. The secret straddles the 200th character.
+    #[test]
+    fn a_secret_straddling_the_reason_bound_leaves_no_piece() {
+        let secret = "s3cr3t-token";
+        let mut redactor = Redactor::new();
+        redactor.add_secret(secret).expect("a long enough secret");
+        let mut labels = Labels::new();
+        let clock = ManualClock::new(Timestamp::from_millis(0));
+        let stored =
+            labels.add_review_requested(&format!("{}{secret} tail", "z".repeat(192)), &redactor, &clock);
+        let chars: Vec<char> = secret.chars().collect();
+        let text = labels.iter().map(Label::text).collect::<String>();
+        for window in chars.windows(6) {
+            let piece: String = window.iter().collect();
+            assert!(
+                !stored.contains(&piece),
+                "the piece `{piece}` is in the reason: {stored}"
+            );
+            assert!(
+                !text.contains(&piece),
+                "the piece `{piece}` is in the label: {text}"
+            );
+        }
+    }
+
+    // Mutant: the second masking removed from add_review_requested. The normalization rebuilds `ab cd ef`.
+    #[test]
+    fn a_secret_rebuilt_by_the_normalization_is_masked_in_a_reason() {
+        let mut redactor = Redactor::new();
+        redactor.add_secret("ab cd ef").expect("a long enough secret");
+        for raw in ["ab\ncd ef", "ab  cd   ef"] {
+            let mut labels = Labels::new();
+            let clock = ManualClock::new(Timestamp::from_millis(0));
+            let stored = labels.add_review_requested(raw, &redactor, &clock);
+            assert_eq!(stored, "*redacted secret*", "only the mask is left");
+            assert!(
+                labels.iter().all(|label| !label.text().contains("ab cd ef")),
+                "no label holds the rebuilt secret"
+            );
+        }
     }
 }

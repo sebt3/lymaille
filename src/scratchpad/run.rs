@@ -64,7 +64,7 @@ pub struct PadSnapshot {
 }
 
 /// The Debug of a snapshot shows the names of its variables and of its function keys, and the number of its warnings. It
-/// never shows a value nor a source text, which hold the secrets the snapshot was masked of.
+/// never shows a value nor a source text, which may hold secrets.
 impl std::fmt::Debug for PadSnapshot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PadSnapshot")
@@ -159,7 +159,7 @@ impl RunOutcome {
         &self.record
     }
 
-    /// The persistable state of the pad after this run, with the secrets masked.
+    /// The persistable state of the pad after this run, without the secrets.
     #[must_use]
     pub const fn snapshot(&self) -> &PadSnapshot {
         &self.snapshot
@@ -412,7 +412,7 @@ impl Scratchpad {
         } = settlement;
         let cap = self.engine.limits().render_cap_chars();
         let (snapshot, excluded) = if self.persistent {
-            build_snapshot(&self.engine, state, env.redactor)
+            build_snapshot(state, env.redactor)
         } else {
             (PadSnapshot::empty(), Vec::new())
         };
@@ -464,7 +464,7 @@ impl Scratchpad {
         }
     }
 
-    /// The persistable state of the pad as the last run left it, with the secrets masked.
+    /// The persistable state of the pad as the last run left it, without the secrets.
     #[must_use]
     pub fn snapshot(&self) -> PadSnapshot {
         self.snapshot
@@ -697,10 +697,10 @@ fn candidates_of(engine: &ScratchpadEngine, state: &PadState) -> CandidateSet {
     CandidateSet::new(functions, modules, variables)
 }
 
-/// The text of a warning for a function whose masked form cannot be kept.
+/// The text of a warning for a function that holds a secret.
 fn excluded_message(key: &str) -> String {
     format!(
-        "warning: function `{key}` holds a secret that its masked form cannot keep; it was not persisted."
+        "warning: function `{key}` holds a secret and was not persisted; it stays usable in this session only."
     )
 }
 
@@ -767,76 +767,55 @@ fn error_text(rendered: &str, cap: usize, notices: &str, redactor: &Redactor) ->
     (format!("{}{notices}", text.text()), text.truncated())
 }
 
-/// The persistable state of the pad, masked of the secrets: the variables and the function sources. It also returns the
-/// keys of the functions that cannot be kept in their masked form.
-fn build_snapshot(
-    engine: &ScratchpadEngine,
-    state: &PadState,
-    redactor: &Redactor,
-) -> (PadSnapshot, Vec<String>) {
+/// The persistable state of the pad: the variables and the function sources. A variable or a function that holds a secret
+/// is left out, not masked: a masked value would come back as a misleading `*redacted secret*`. The variables left out are warned of in
+/// the snapshot; the keys of the functions left out are returned, for a notice in the text.
+fn build_snapshot(state: &PadState, redactor: &Redactor) -> (PadSnapshot, Vec<String>) {
     let scope = snapshot_scope(&state.scope);
-    let variables = scope
-        .variables()
-        .iter()
-        .map(|(name, value)| (name.clone(), mask_value(value, redactor)))
-        .collect();
+    let mut warnings = scope.warnings().to_vec();
+    let mut variables = BTreeMap::new();
+    for (name, value) in scope.variables() {
+        if holds_secret(value, redactor) || redactor.redact(name) != *name {
+            warnings.push(PersistWarning::secret(redactor.redact(name)));
+        } else {
+            let _previous = variables.insert(name.clone(), value.clone());
+        }
+    }
     let mut functions = BTreeMap::new();
     let mut excluded = Vec::new();
     for (key, text) in &state.sources {
-        match masked_source(engine, redactor, key, text) {
-            Some((masked_key, masked_text)) => {
-                let _previous = functions.insert(masked_key, masked_text);
-            }
-            None => excluded.push(key.clone()),
+        if redactor.redact(text) == *text && redactor.redact(key) == *key {
+            let _previous = functions.insert(key.clone(), text.clone());
+        } else {
+            excluded.push(key.clone());
         }
     }
     let snapshot = PadSnapshot {
         variables,
         functions,
-        warnings: scope.warnings().to_vec(),
+        warnings,
     };
     (snapshot, excluded)
 }
 
-/// A tagged value with the secrets masked: every string, and every key of a table.
-fn mask_value(value: &TaggedValue, redactor: &Redactor) -> TaggedValue {
+/// Whether a tagged value holds a declared secret: in a string, in the bytes of a blob, or in a key of a table, at any
+/// depth.
+fn holds_secret(value: &TaggedValue, redactor: &Redactor) -> bool {
     match value {
-        TaggedValue::String(text) => TaggedValue::String(redactor.redact(text)),
-        TaggedValue::Array(items) => {
-            TaggedValue::Array(items.iter().map(|item| mask_value(item, redactor)).collect())
+        TaggedValue::String(text) => redactor.redact(text) != *text,
+        TaggedValue::Array(items) => items.iter().any(|item| holds_secret(item, redactor)),
+        TaggedValue::Map(entries) => entries
+            .iter()
+            .any(|(key, item)| redactor.redact(key) != *key || holds_secret(item, redactor)),
+        TaggedValue::Blob(bytes) => {
+            let text = String::from_utf8_lossy(bytes);
+            redactor.redact(&text) != *text
         }
-        TaggedValue::Map(entries) => TaggedValue::Map(
-            entries
-                .iter()
-                .map(|(key, item)| (redactor.redact(key), mask_value(item, redactor)))
-                .collect(),
-        ),
         TaggedValue::Unit
         | TaggedValue::Bool(_)
         | TaggedValue::Int(_)
         | TaggedValue::Float(_)
-        | TaggedValue::Char(_)
-        | TaggedValue::Blob(_) => value.clone(),
-    }
-}
-
-/// A function source with the secrets masked. The masked source is kept only when it still compiles and still defines
-/// exactly one function, under the masked key; otherwise the function is excluded.
-fn masked_source(
-    engine: &ScratchpadEngine,
-    redactor: &Redactor,
-    key: &str,
-    text: &str,
-) -> Option<(String, String)> {
-    let masked_key = redactor.redact(key);
-    let masked_text = redactor.redact(text);
-    if masked_key == key && masked_text == text {
-        return Some((masked_key, masked_text));
-    }
-    let found = extract_function_sources(engine, &masked_text).ok()?;
-    match found.as_slice() {
-        [only] if only.key() == masked_key => Some((masked_key, masked_text)),
-        _ => None,
+        | TaggedValue::Char(_) => false,
     }
 }
 
@@ -845,6 +824,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::pin::Pin;
     use std::sync::Arc;
+    use std::sync::PoisonError;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::task::{Context, Poll};
     use std::time::Duration;
@@ -853,6 +833,7 @@ mod tests {
 
     use super::{PadSnapshot, RunEnv, RunOutcome, RunStatus, Scratchpad};
     use crate::clock::{ManualClock, Timestamp};
+    use crate::scratchpad::UnpersistableReason;
     use crate::scratchpad::{
         CoreGroup, GrantedModule, Grants, ScratchpadEngine, ScratchpadLimits, ScriptErrorClass,
     };
@@ -1448,7 +1429,11 @@ mod tests {
         let env = RunEnv::new("agent", &redactor, &clock);
         let cancel = CancelHandle::new();
         let outcome = pad.run("\"Bearer tok-123456\"", &cancel, &env).await;
-        assert!(outcome.text().contains("***"), "masked: {}", outcome.text());
+        assert!(
+            outcome.text().contains("*redacted secret*"),
+            "masked: {}",
+            outcome.text()
+        );
         assert!(!outcome.text().contains("tok-123456"), "no secret in the text");
         let record = outcome.record();
         assert!(
@@ -1462,7 +1447,7 @@ mod tests {
         let failing = pad.run("throw \"Bearer tok-123456\"", &cancel, &env).await;
         assert_eq!(failed(&failing), ScriptErrorClass::Runtime, "a runtime error");
         let error = failing.record().error.as_deref().unwrap_or_default();
-        assert!(error.contains("***"), "the masked error: {error}");
+        assert!(error.contains("*redacted secret*"), "the masked error: {error}");
         assert!(
             !error.contains("tok-123456"),
             "no secret in the error record: {error}"
@@ -1641,33 +1626,317 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn secrets_are_masked_before_the_state_keeps_the_variables_and_the_function_sources() {
-        let pad = Scratchpad::new(plain());
+    /// A redactor that declares `s3cr3t-value`.
+    fn secret_redactor() -> Redactor {
         let mut redactor = Redactor::new();
         let _added = redactor.add_secret("s3cr3t-value");
+        redactor
+    }
+
+    // Scenario: une variable ou une fonction qui contient un secret n'est pas persistée
+    #[tokio::test]
+    async fn a_variable_or_a_function_holding_a_secret_is_not_persisted() {
+        let pad = Scratchpad::new(plain());
+        let redactor = secret_redactor();
         let clock = ManualClock::new(Timestamp::from_millis(0));
         let env = RunEnv::new("agent", &redactor, &clock);
         let cancel = CancelHandle::new();
         let outcome = pad
             .run(
-                "let k = \"s3cr3t-value\"; fn key() { \"s3cr3t-value\" } k",
+                "let k = \"s3cr3t-value\"; let n = 3; fn key() { \"s3cr3t-value\" } n",
                 &cancel,
                 &env,
             )
             .await;
-        assert_eq!(outcome.text(), "***", "the rendered result is masked");
+        assert_eq!(outcome.status(), RunStatus::Ok, "the run: {}", outcome.text());
         let snapshot = outcome.snapshot();
         assert_eq!(
-            snapshot.variables().get("k"),
-            Some(&TaggedValue::String("***".to_owned())),
-            "k is masked"
+            snapshot.variables().get("n"),
+            Some(&TaggedValue::Int(3)),
+            "n is persisted"
         );
-        let source = snapshot.functions().get("key/0").map_or("", String::as_str);
-        assert!(source.contains("***"), "the function source is masked: {source}");
+        assert!(!snapshot.variables().contains_key("k"), "k is not persisted");
         assert!(
-            !source.contains("s3cr3t-value"),
-            "no secret in the function source"
+            !snapshot.functions().contains_key("key/0"),
+            "key is not persisted"
+        );
+        let state = format!("{:?} {:?}", snapshot.variables(), snapshot.functions());
+        for (leak, what) in [("s3cr3t-value", "secret"), ("*redacted secret*", "masked value")] {
+            assert!(!state.contains(leak), "no {what} anywhere in the state: {state}");
+        }
+        let [warning] = outcome.warnings() else {
+            panic!("one persistence warning, for k: {:?}", outcome.warnings());
+        };
+        assert_eq!(warning.variable(), "k");
+        assert_eq!(warning.reason(), &UnpersistableReason::Secret);
+        assert!(
+            !warning.message().contains("s3cr3t-value") && warning.message().contains("`k`"),
+            "the warning names the variable and never the value: {}",
+            warning.message()
+        );
+        assert!(
+            outcome.text().contains("`k`") && outcome.text().contains("`key/0`"),
+            "the text names both: {}",
+            outcome.text()
+        );
+        assert!(
+            !outcome.text().contains("s3cr3t-value"),
+            "no secret in the text: {}",
+            outcome.text()
+        );
+        // The pad keeps the real value during the session.
+        let alive = pad
+            .run(
+                "k == \"s3cr3t-value\" && key() == \"s3cr3t-value\"",
+                &cancel,
+                &env,
+            )
+            .await;
+        assert_eq!(
+            alive.text(),
+            "true",
+            "the pad still holds the real value: {}",
+            alive.text()
+        );
+        // Restored, both are absent and the other variable is back.
+        let restored = Scratchpad::restore(plain(), snapshot.variables(), snapshot.functions()).into_pad();
+        let n = eval(&restored, "n").await;
+        assert_eq!(n.text(), "3", "n is restored");
+        let k = eval(&restored, "k").await;
+        assert!(
+            matches!(k.status(), RunStatus::Failed(_)),
+            "k is absent: {}",
+            k.text()
+        );
+        let key = eval(&restored, "key()").await;
+        assert!(
+            matches!(key.status(), RunStatus::Failed(_)),
+            "key is absent: {}",
+            key.text()
+        );
+    }
+
+    // Scenario: une variable ou une fonction qui contient un secret n'est pas persistée
+    #[tokio::test]
+    async fn a_secret_nested_in_a_value_excludes_the_whole_variable() {
+        let pad = Scratchpad::new(plain());
+        let redactor = secret_redactor();
+        let clock = ManualClock::new(Timestamp::from_millis(0));
+        let env = RunEnv::new("agent", &redactor, &clock);
+        let cancel = CancelHandle::new();
+        let outcome = pad
+            .run(
+                "let a = [1, #{ \"s3cr3t-value\": 1 }]; let b = #{ x: [\"pre s3cr3t-value post\"] }; let ok = [1, \"fine\"]; 1",
+                &cancel,
+                &env,
+            )
+            .await;
+        let snapshot = outcome.snapshot();
+        assert!(!snapshot.variables().contains_key("a"), "a (key) is excluded");
+        assert!(
+            !snapshot.variables().contains_key("b"),
+            "b (nested string) is excluded"
+        );
+        assert!(snapshot.variables().contains_key("ok"), "ok is persisted");
+        let state = format!("{:?}", snapshot.variables());
+        assert!(!state.contains("s3cr3t-value"), "no secret in the state: {state}");
+        assert_eq!(
+            outcome.warnings().len(),
+            2,
+            "one warning each: {:?}",
+            outcome.warnings()
+        );
+    }
+
+    /// A redactor that declares `tok_secret`, which is a valid Rhai identifier, so that it can sit in a name.
+    fn name_redactor() -> Redactor {
+        let mut redactor = Redactor::new();
+        let _added = redactor.add_secret("tok_secret");
+        redactor
+    }
+
+    // Scenario: une variable ou une fonction qui contient un secret n'est pas persistée
+    #[tokio::test]
+    async fn a_secret_in_a_variable_name_excludes_it_and_the_warning_masks_the_name() {
+        let pad = Scratchpad::new(plain());
+        let redactor = name_redactor();
+        let clock = ManualClock::new(Timestamp::from_millis(0));
+        let env = RunEnv::new("agent", &redactor, &clock);
+        let cancel = CancelHandle::new();
+        let outcome = pad
+            .run(
+                "let tok_secret = 1; let my_tok_secret_x = 2; let fine = 3; fine",
+                &cancel,
+                &env,
+            )
+            .await;
+        assert_eq!(outcome.status(), RunStatus::Ok, "the run: {}", outcome.text());
+        let snapshot = outcome.snapshot();
+        assert_eq!(
+            snapshot
+                .variables()
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            ["fine"],
+            "only the variable without a secret in its name is persisted"
+        );
+        assert_eq!(outcome.warnings().len(), 2, "{:?}", outcome.warnings());
+        for warning in outcome.warnings() {
+            assert_eq!(warning.reason(), &UnpersistableReason::Secret);
+            assert!(
+                !warning.variable().contains("tok_secret")
+                    && warning.variable().contains("*redacted secret*"),
+                "the warning carries the masked name: {}",
+                warning.variable()
+            );
+            assert!(
+                !warning.message().contains("tok_secret"),
+                "no secret in the message: {}",
+                warning.message()
+            );
+        }
+        assert!(
+            !outcome.text().contains("tok_secret"),
+            "no secret in the text: {}",
+            outcome.text()
+        );
+    }
+
+    // Scenario: une variable ou une fonction qui contient un secret n'est pas persistée
+    #[tokio::test]
+    async fn a_secret_in_a_function_key_excludes_the_function() {
+        let pad = Scratchpad::new(plain());
+        // The declared secret `secret_f/0` is spelled by the key only: the source text has `secret_f()`, so only the
+        // test of the key can exclude the function.
+        let mut redactor = Redactor::new();
+        let _added = redactor.add_secret("secret_f/0");
+        let clock = ManualClock::new(Timestamp::from_millis(0));
+        let env = RunEnv::new("agent", &redactor, &clock);
+        let cancel = CancelHandle::new();
+        let outcome = pad
+            .run("fn secret_f() { 1 } fn fine() { 2 } fine()", &cancel, &env)
+            .await;
+        assert_eq!(outcome.status(), RunStatus::Ok, "the run: {}", outcome.text());
+        let snapshot = outcome.snapshot();
+        assert_eq!(
+            snapshot
+                .functions()
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            ["fine/0"],
+            "only the function without a secret in its key is persisted"
+        );
+        assert!(
+            outcome.text().contains("function `*redacted secret*`") && !outcome.text().contains("secret_f/0"),
+            "the text names the function, masked: {}",
+            outcome.text()
+        );
+    }
+
+    // Scenario: une variable ou une fonction qui contient un secret n'est pas persistée
+    #[tokio::test]
+    async fn a_blob_spelling_a_secret_is_not_persisted() {
+        let pad = Scratchpad::new(plain());
+        let redactor = secret_redactor();
+        let clock = ManualClock::new(Timestamp::from_millis(0));
+        let env = RunEnv::new("agent", &redactor, &clock);
+        let cancel = CancelHandle::new();
+        let outcome = pad
+            .run(
+                "let b = blob(12, 0); b.write_utf8(0..12, \"s3cr3t-value\"); let c = blob(2, 7); 1",
+                &cancel,
+                &env,
+            )
+            .await;
+        assert_eq!(outcome.status(), RunStatus::Ok, "the run: {}", outcome.text());
+        let snapshot = outcome.snapshot();
+        assert!(!snapshot.variables().contains_key("b"), "b is excluded");
+        assert!(snapshot.variables().contains_key("c"), "an ordinary blob stays");
+        let [warning] = outcome.warnings() else {
+            panic!("one warning, for b: {:?}", outcome.warnings());
+        };
+        assert_eq!(warning.variable(), "b");
+        assert_eq!(warning.reason(), &UnpersistableReason::Secret);
+    }
+
+    // Scenario: une variable ou une fonction qui contient un secret n'est pas persistée
+    #[tokio::test]
+    async fn the_earlier_warnings_keep_their_emission_order() {
+        let pad = Scratchpad::new(plain());
+        let redactor = secret_redactor();
+        let clock = ManualClock::new(Timestamp::from_millis(0));
+        let env = RunEnv::new("agent", &redactor, &clock);
+        let cancel = CancelHandle::new();
+        let outcome = pad
+            .run(
+                "let zc = |x| x; let ac = |x| x; let mm = \"s3cr3t-value\"; 1",
+                &cancel,
+                &env,
+            )
+            .await;
+        let names: Vec<&str> = outcome
+            .warnings()
+            .iter()
+            .map(crate::scratchpad::PersistWarning::variable)
+            .collect();
+        assert_eq!(
+            names,
+            ["ac", "zc", "mm"],
+            "the pre-existing warnings first, in their order; the secret ones after"
+        );
+    }
+
+    // Scenario: le secret reste utilisable dans le pad, masqué dans toute sortie
+    #[tokio::test]
+    async fn the_secret_is_usable_in_the_pad_and_masked_in_every_output() {
+        let received: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = Arc::clone(&received);
+        let mut module = Module::new();
+        let _call = rhai::FuncRegistration::new("send").set_into_module(
+            &mut module,
+            move |token: ImmutableString| {
+                sink.lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push(token.to_string());
+                "done".to_owned()
+            },
+        );
+        let Some(api) = GrantedModule::new("api", Shared::new(module)) else {
+            panic!("a valid module name");
+        };
+        let Some(grants) = Grants::new().with_group(CoreGroup::Host).with_module(api) else {
+            panic!("the module is accepted");
+        };
+        let pad = Scratchpad::new(engine_with(grants, ScratchpadLimits::new(), |_engine| {}));
+        let redactor = secret_redactor();
+        let clock = ManualClock::new(Timestamp::from_millis(0));
+        let env = RunEnv::new("agent", &redactor, &clock);
+        let cancel = CancelHandle::new();
+        let outcome = pad
+            .run(
+                "let k = \"s3cr3t-value\"; api::send(k); print(k); k",
+                &cancel,
+                &env,
+            )
+            .await;
+        assert_eq!(outcome.status(), RunStatus::Ok, "the run: {}", outcome.text());
+        let calls = received.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        assert_eq!(
+            calls,
+            vec!["s3cr3t-value".to_owned()],
+            "the module received the real value"
+        );
+        assert!(
+            outcome.text().contains("*redacted secret*"),
+            "masked in the text: {}",
+            outcome.text()
+        );
+        assert!(
+            !outcome.text().contains("s3cr3t-value"),
+            "no secret in the text: {}",
+            outcome.text()
         );
     }
 

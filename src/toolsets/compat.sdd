@@ -16,16 +16,19 @@ Exposes:
   @RemovedSubagent
   @RemovalReason
   @check_creation_rule
+  @check_session_module_rule
 
 Accepts:
   @check_context: un @ToolsetContext, les @Toolset de l'agent et une recherche de @ContextType par nom.
   @delegable_subagents: la @AgentDefinition d'un agent de travail, ses sous-agents (@AgentDefinition), leurs toolsets, un @ToolsetContext et la recherche de types.
   @check_creation_rule: une @AgentDefinition, la table des définitions de ses sous-agents et le nom du module de création de toolsets.
+  @check_session_module_rule: une @AgentDefinition, la table des définitions de ses sous-agents et le nom du module `session`.
 
 Returns:
   @check_context: la liste des @Gap (type, exigence, paramètre requis manquant, valeur qui viole un schéma du type (`InvalidValue` : paramètre rendu ou `*`, règle violée, jamais la valeur), rôle obligatoire absent, type exigé introuvable ; toolset introuvable seulement pour @delegable_subagents) ; vide si compatible.
   @delegable_subagents: une @Delegation : les identifiants des sous-agents compatibles (`kept()`, dans l'ordre de la définition) et les sous-agents retirés (`removed()`, @RemovedSubagent : identifiant et @RemovalReason `DefinitionMissing`, `ToolsetMissing` ou `Incompatible` avec les @Gap), sans erreur ; une vérification qui échoue par erreur (type incohérent, inclusion cyclique) donne `Incompatible` avec une liste d'écarts vide. Le retrait est donc visible de l'hôte et de la boucle de tour, qui peuvent l'émettre ou le journaliser (décision du 2026-10-30 : échec fermé avec avertissement) ; la librairie n'écrit aucun journal elle-même.
   @check_creation_rule: succès, ou @ToolsetsError::Forbidden.
+  @check_session_module_rule: succès, ou @ToolsetsError::Forbidden.
 
 Raises:
   @ToolsetsError::Incompatible: levée par @delegable_subagents (le contrôle de démarrage) pour l'agent principal quand ses écarts ne sont pas vides ; la liste des @Gap est dans l'erreur. @check_context rend les écarts sans les lever, et propage les erreurs de `flatten`.
@@ -41,6 +44,7 @@ Must:
   Pour l'agent principal, un écart fait échouer le démarrage avec un message explicite ; pour un sous-agent, il le retire de la liste délégable, sans erreur (`agent-sessions/toolsets#FR-4`, `AC-3`).
   Les rôles propres d'un toolset (@RoleDecl) obligatoires comptent comme les rôles du type.
   Le module de création de toolsets (`toolset_creator`) n'est accordable qu'à un agent de nature `Config` (`agent-sessions#BR-8`) : une définition qui l'accorde à un agent de travail ou à un sous-agent est refusée avec un message qui nomme la règle (`agent-sessions/toolsets#AC-8`).
+  Le module `session` (titre et signalement pour analyse, ../modules/session_module.sdd) est accordable aux natures `Work` et `Config`, pas à `Sub` : une définition de sous-agent qui l'accorde est refusée avec un message qui nomme la règle (@check_session_module_rule).
   Le contrôle se fait au chargement ou à l'enregistrement d'une définition, puis à la création de la session.
 
 Depends on:
@@ -111,6 +115,11 @@ Scenario: module de création refusé pour un agent de travail
   When la règle est vérifiée
   Then il échoue avec Forbidden en nommant la règle
 
+Scenario: module session refusé pour un sous-agent
+  Given un sous-agent à qui est accordé le module `session`, puis un agent de travail et un agent de configuration qui l'ont
+  When la règle est vérifiée
+  Then le sous-agent échoue avec Forbidden en nommant la règle, et les deux autres sont acceptés
+
 Scenario: valeur de mauvais type est un écart
   Given un toolset exigeant `cluster@1.0` et un contexte dont `namespace` vaut 5 alors que le type le déclare texte
   When le contexte est vérifié
@@ -160,3 +169,4 @@ Tasks:
   [x] #5 Règle de création alignée sur la nature `Config` (DSD du 2026-10-29) : @check_creation_rule ne dépend plus de la délégation : seule la nature `Config` peut recevoir `toolset_creator`, y compris pour chaque sous-agent de la table reçue (décidé le 2026-10-29) ; les Scenarios « creation module refused … » sont à réécrire en conséquence. À faire après `definition.sdd` #12.
       Validé le 2026-10-29 (validator, 58 mutants dont 55 tués) sous `scripts/check` complet.
   [x] #8 Correctif du 2026-10-31 (validation indépendante) : requis de la racine hors forme plate (`context_type.sdd`, Must), Scenarios « requis … », « propriété non déclarée … » et « propriété déclarée à toute profondeur » ci-dessus, assertions de valeur absente et de débogage ajoutées aux Scenarios existants. Tests vus rouges avant correction ; mutants : voir le rapport du développeur. En attente de validation par le validateur.
+  [?] Règle d'accord du module `session` (lot S2, décision du 2026-11-01) : @check_session_module_rule est ajoutée, ré-exportée à la racine de la crate ; elle contrôle aussi tout sous-agent de la table reçue. Elle n'est pas encore appelée par un assembleur : l'appel au chargement d'une définition reste à brancher avec l'hôte, comme @check_creation_rule.

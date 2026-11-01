@@ -25,6 +25,7 @@ Raises:
   @SessionError::InvalidNativeTool: un tool natif est refusé à l'enregistrement (nom réservé `rhai_pad` ou nom déjà enregistré, ../runtime/turn.sdd) ; porte le nom du tool. Texte `Display` : « invalid native tool `<nom>`: its name is reserved or already registered ».
   @SessionError::Poisoned: un verrou interne empoisonné.
   @SessionError::SecretTooShort: un secret non vide de moins de 6 caractères est refusé à l'ajout (`./redact.sdd`) ; le message ne contient pas le secret.
+  @SessionError::SecretInPlaceholder: une chaîne contenue dans le texte de substitution `*redacted secret*` est refusée à l'ajout (`./redact.sdd`), car elle serait re-masquée à l'intérieur de la substitution ; le message ne contient pas le secret. Texte `Display` : « a value to mask must not be contained in the text that replaces a masked value ».
   @SessionError::NotSubSession: une session parente est posée sur une session qui n'est pas de nature `Sub` ; porte l'identifiant de la session.
   @SessionError::NotConfigSession: une cible d'inspection est posée sur une session qui n'est pas de nature `Config` (`./state.sdd`) ; porte l'identifiant de la session. Textes `Display` : « an inspection target can only be set on a configuration session, not on session {id} » et « a parent session can only be set on a sub-agent session, not on session {id} ».
   @SessionError::UnknownSession: aucun état sauvegardé sous l'identifiant demandé (`../runtime/restore.sdd`) ; porte l'identifiant. Texte `Display` : « no saved session `{id}` ».

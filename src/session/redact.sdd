@@ -19,18 +19,19 @@ Accepts:
 
 Returns:
   @Redactor::add_secret: `Ok(())` si le secret est retenu ou ignoré (chaîne vide) ; sinon l'erreur ci-dessous.
-  @Redactor::redact: le texte où chaque occurrence d'un secret est remplacée par `***`.
+  @Redactor::redact: le texte où chaque occurrence d'un secret est remplacée par `*redacted secret*`.
   @Redactor::redact_json: la valeur où chaque chaîne (valeurs et clés d'objet) est masquée de même.
 
 Raises:
+  @SessionError::SecretInPlaceholder: à l'ajout d'une chaîne contenue dans le texte de substitution `*redacted secret*` (par exemple `secret`, `redacted` ou `d secret`) : elle serait re-masquée à l'intérieur de la substitution à chaque passage. Le secret n'est pas retenu et le message ne le contient pas.
   @SessionError::SecretTooShort: à l'ajout d'un secret non vide de moins de 6 caractères. Le secret n'est pas retenu et le
     message ne le contient pas.
 
 Must:
+  Substitution (Décision du 2026-11-01 (accord du développeur principal)) : le texte qui remplace un secret est `*redacted secret*`, constante unique de ./redact.rs, lisible par le LLM et par l'humain. Masquer deux fois donne le même résultat que masquer une fois (idempotence), garantie par le refus de @SessionError::SecretInPlaceholder.
   Un secret de moins de 6 caractères n'est jamais retenu : il masquerait trop (`agent-sessions/session#FR-8`, décision du 2026-10-27).
   Quand un secret en contient un autre, le plus long est masqué d'abord, pour ne laisser aucun reste.
-  Le masquage est idempotent tant qu'aucun secret ne commence ni ne finit par `*` ; sinon le `*` du masque peut se recombiner avec un
-    secret voisin, limite connue et assumée (aucun secret ne fuit pour autant : le masque ne révèle rien).
+  Le masquage est idempotent tant qu'aucun secret déclaré ne chevauche un bord du masque `*redacted secret*` (un secret qui commence par un suffixe du masque, ou finit par un préfixe du masque : cas simple, un secret qui commence ou finit par `*`) ; sinon le bord du masque peut se recombiner avec le texte voisin et un second passage masquer de nouveau, limite connue et assumée (aucun secret ne fuit pour autant : le masque ne révèle rien ; décision du 2026-11-01, précise celle du 2026-10-29).
   Le `Debug` de @Redactor ne montre jamais un secret, seulement leur nombre.
   @Redactor n'est ni sérialisable ni cloné vers l'état persisté.
   Un texte sans secret est rendu inchangé.
@@ -44,17 +45,17 @@ Depends on:
 
 Can modify:
   /Cargo.toml: ajout de `serde_json` seulement.
-  ./error.rs: variante `SecretTooShort` seulement (voir ./error.sdd).
+  ./error.rs: variantes `SecretTooShort` et `SecretInPlaceholder` seulement (voir ./error.sdd).
 
 Scenario: un secret est masqué partout
   Given un redactor contenant `tok-123`
   When on masque `Bearer tok-123 and tok-123`
-  Then le résultat vaut `Bearer *** and ***`
+  Then le résultat vaut `Bearer *redacted secret* and *redacted secret*`
 
 Scenario: le secret le plus long d'abord
   Given les secrets `abcdef` et `abcdefgh`
   When on masque `xabcdefghx`
-  Then le résultat vaut `x***x`
+  Then le résultat vaut `x*redacted secret*x`
 
 Scenario: secret trop court refusé
   Given un redactor
@@ -65,7 +66,7 @@ Scenario: secret trop court refusé
 Scenario: secret de six caractères accepté
   Given un redactor
   When le secret `s3cr3t` est ajouté
-  Then il est accepté et masquer `s3cr3t` donne `***`
+  Then il est accepté et masquer `s3cr3t` donne `*redacted secret*`
 
 Scenario: longueur comptée en caractères
   Given un redactor
@@ -75,7 +76,7 @@ Scenario: longueur comptée en caractères
 Scenario: chaînes et clés JSON
   Given un redactor contenant `s3cr3t`
   When on masque `{"s3cr3t": ["a s3cr3t b", 1]}`
-  Then le résultat vaut `{"***": ["a *** b", 1]}`
+  Then le résultat vaut `{"*redacted secret*": ["a *redacted secret* b", 1]}`
 
 Scenario: le Debug cache les secrets
   Given un redactor contenant `s3cr3t`
@@ -86,6 +87,16 @@ Scenario: secret vide ignoré
   Given un redactor auquel un secret vide est ajouté
   When on masque `hello`
   Then le résultat vaut `hello`
+
+Scenario: la substitution est lisible et le masquage idempotent
+  Given le secret `s3cr3t-value`
+  When un texte qui le contient est masqué une fois puis une seconde fois
+  Then les deux résultats sont égaux et montrent `*redacted secret*` à la place du secret
+
+Scenario: un secret contenu dans la substitution est refusé
+  Given les chaînes `secret`, `redacted` et `*redacted secret*`
+  When chacune est ajoutée par add_secret
+  Then chacune échoue avec SecretInPlaceholder, rien n'est retenu, et le message ne contient pas la chaîne
 
 Tasks:
   [x] #1 Tests puis implémentation.
@@ -99,3 +110,4 @@ Tasks:
       Décidé le 2026-10-29 par le développeur principal : statu quo, la chaîne vide reste ignorée.
   [x] #6 La variante `SecretTooShort` est ajoutée à `SessionError` (`./error.rs`, hors `Owns` de cette spec) : voir `./error.sdd` #4.
       Validé le 2026-10-29 par le développeur principal.
+  [x] #P11 Substitution `*redacted secret*` à la place de `***` (Décision du 2026-11-01 (accord du développeur principal)) : constante `MASK` de ./redact.rs, erreur `SecretInPlaceholder` (nouvelle variante de ./error.sdd, Display sans le secret), tous les tests et specs qui attendent `***` mis à jour (redact, audit, run, native, turn, config, title...) ; les Scenarios ci-dessus. Idempotence prouvée par un test.

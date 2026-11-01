@@ -44,6 +44,7 @@ Must:
   Flux : chaque fragment de texte est transmis au récepteur dans l'ordre ; les fragments de raisonnement ne le sont pas ; l'usage est lu du dernier événement s'il existe.
   Aucune lecture de l'environnement, aucun fichier ; l'adresse et la clé ne sortent jamais dans une erreur, un `Debug` ou un événement ; aucun réessai ici (le backoff est celui de la boucle de tour).
   Les tests tournent contre un faux serveur HTTP local (`tokio::net`), sans réseau extérieur ; un essai de bout en bout contre un vrai modèle vit hors de la librairie, dans `spikes/` (qui peut lire l'environnement).
+  Dérives du serveur (Décision du 2026-11-01 (accord du développeur principal, relevé du spike R2)) : l'adaptateur lit la raison de fin de la réponse (`stop`, `length`, `tool_calls`, autre) et la rend dans @FinishReason, lit les jetons de raisonnement de `completion_tokens_details.reasoning_tokens` quand ils existent, et retire les sauts de ligne de tête (`\n` et `\r`) du texte final et du premier fragment de flux (artefact du gabarit Qwen de vLLM mesuré par le spike R2 : `\n\n` en tête) sans toucher au milieu ni à la fin du texte.
 
 Depends on:
   ./inference.sdd
@@ -92,6 +93,16 @@ Scenario: la détection reporte la taille de contexte du serveur
   When detect_models est appelé
   Then le premier porte 262144 comme taille de contexte et le second n'en porte aucune
 
+Scenario: les sauts de ligne de tête sont retirés
+  Given un faux serveur qui répond le texte `\n\nBonjour\n` puis, en flux, les fragments `\n\n`, `Bon`, `jour`
+  When complete puis stream sont appelés
+  Then le texte final vaut `Bonjour\n` et les fragments émis sont `Bon` et `jour` (le fragment de seuls sauts de ligne n'est pas émis)
+
+Scenario: la raison de fin et les jetons de raisonnement sont lus
+  Given un faux serveur qui répond `finish_reason` length et `reasoning_tokens` 15
+  When complete est appelé
+  Then la réponse porte FinishReason::Length et un usage de raisonnement de 15
+
 Tasks:
   [x] #1 Spike court (lot R0, fait le 2026-10-31, `spikes/rig-probe/README.md`) : confirmer dans `rig-core` 0.43 hors dépôt, par un petit programme, que le client OpenAI-compatible (chat completions) décode `reasoning` et `reasoning_content`, fusionne `additional_params` à plat, expose le flux de deltas et l'usage, et que `list_models` reporte `max_model_len` dans `context_length` (sinon @detect_models lit `/v1/models` lui-même) ; consigner les mesures ici et lever le TBD de `agents.md` ; déclarer la dépendance `rig-core` et la feature `rig` dans Cargo.toml avec l'accord du développeur principal (dépendance nouvelle).
   [x] #2 Tests puis implémentation (lot R1), déclaration dans ./mod.rs et ré-export dans ../lib.rs, derrière la feature `rig`.
@@ -107,3 +118,4 @@ Tasks:
       Mesuré sur `rig-core` =0.43.0 : voir le README du spike. À retenir : `rig` écrase le noyau par la table libre ; il ne reporte pas `max_model_len` ; `reasoning` et `reasoning_content` sont décodés ; le rejeu émet `reasoning_content` seulement, sceller avec le nom du dialecte ; un `usage: {}` vide fait échouer le décodage (un `usage` absent passe : risque à traiter en `Permanent` avec message clair) ; Rust 1.95.0, `default-features = false` suffit ; +46 crates avec la feature `reqwest`, doublon `base64` 0.22 à déclarer dans `allowed-duplicate-crates`.
       Limites connues de R1 (2026-10-31) : un appel d'outil à arguments invalides ferme le flux de `rig` ; les appels qui le suivent et l'usage final sont perdus (texte, raisonnement et appels précédents conservés ; l'appel fautif est rendu avec ses arguments bruts). HTTPS non exercé. Le rejeu contre un vrai serveur est le lot R2.
   [x] #4 Tests relevés à la validation de R1 (2026-10-31) : un flux qui se termine sans événement final rend une erreur `Transient` (tue le mutant de `ended`) ; le chemin `non_success_status` de `classify_transport` est testé, ou retiré s'il est inatteignable (le dire dans le rapport).
+  [x] #5 Raison de fin, jetons de raisonnement et sauts de ligne de tête (Décision du 2026-11-01 (accord du développeur principal, relevé du spike R2), lot R3) : tests puis implémentation.

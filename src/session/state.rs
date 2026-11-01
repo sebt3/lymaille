@@ -9,10 +9,10 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    FormatVersion, History, Labels, Message, RunSignals, Segment, SessionError, SessionId, SessionResult,
-    TaggedValue, TurnId,
+    FormatVersion, History, Labels, Message, Redactor, RunSignals, Segment, SessionError, SessionId,
+    SessionResult, TaggedValue, TurnId, title,
 };
-use crate::clock::Timestamp;
+use crate::clock::{Clock, Timestamp};
 
 /// Reference to the agent definition a session was built with: its name and the fingerprint of the definition. The
 /// fingerprint is an opaque text, supplied by the host or by the `agents` domain.
@@ -145,6 +145,8 @@ pub struct SessionState {
     parent: Option<SessionId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     inspection_target: Option<InspectionTargetRef>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
     created_at: Timestamp,
     agent: AgentRef,
     toolset_context: String,
@@ -173,6 +175,8 @@ struct StateRecord {
     parent: Option<SessionId>,
     #[serde(default)]
     inspection_target: Option<InspectionTargetRef>,
+    #[serde(default)]
+    title: Option<String>,
     #[serde(default = "default_created_at")]
     created_at: Timestamp,
     agent: AgentRef,
@@ -217,6 +221,7 @@ impl StateRecord {
             kind: self.kind,
             parent: self.parent,
             inspection_target: self.inspection_target,
+            title: self.title,
             created_at: self.created_at,
             agent: self.agent,
             toolset_context: self.toolset_context,
@@ -267,6 +272,7 @@ impl SessionState {
             kind: SessionKind::Work,
             parent: None,
             inspection_target: None,
+            title: None,
             created_at,
             agent,
             toolset_context: toolset_context.into(),
@@ -426,6 +432,47 @@ impl SessionState {
     #[must_use]
     pub const fn signals(&self) -> &BTreeMap<TurnId, RunSignals> {
         &self.signals
+    }
+
+    /// Returns the title set for the session, if any.
+    #[must_use]
+    pub fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+
+    /// Sets the title, normalized by [`normalize_title`](crate::normalize_title): one line, at most 120 characters. The last
+    /// writer wins. Returns the title as stored, or `None` when the normalized title is empty, in which case the state is
+    /// unchanged. The caller masks secrets before.
+    pub fn set_title(&mut self, text: &str) -> Option<&str> {
+        title::set(&mut self.title, text)
+    }
+
+    /// Sets the title from a raw text after masking it with `redactor`. The last writer wins.
+    pub(crate) fn set_title_masked(&mut self, text: &str, redactor: &Redactor) -> Option<&str> {
+        title::set_masked(&mut self.title, text, redactor)
+    }
+
+    /// Returns the title to show: the one set, or a default `<agent> · <context> · <date> — <start of the first user
+    /// message>` built from the metadata of the state. Masked by `redactor`; the state is not modified.
+    #[must_use]
+    pub fn display_title(&self, redactor: &Redactor) -> String {
+        title::display(self, redactor)
+    }
+
+    /// Adds the label `review-requested: <reason>` to the session, authored automatically. The reason is masked and
+    /// bounded; returns it as stored.
+    pub(crate) fn add_review_requested(
+        &mut self,
+        reason: &str,
+        redactor: &Redactor,
+        clock: &dyn Clock,
+    ) -> String {
+        self.labels.add_review_requested(reason, redactor, clock)
+    }
+
+    /// Adds the label `review-done` to the session, authored automatically. Nothing else changes.
+    pub(crate) fn add_review_done(&mut self, clock: &dyn Clock) {
+        self.labels.add_review_done(clock);
     }
 
     /// Returns the nature of the session.

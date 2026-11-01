@@ -39,4 +39,5 @@ Scenario: la cellule est vidée une fois
   Then le premier rend le dernier titre et les deux signalements dans l'ordre, le second rend une cellule vide
 
 Tasks:
-  [ ] #1 Tests puis implémentation (lot S2), déclaration dans ./mod.rs et ré-export dans ../lib.rs.
+  [x] #1 Tests puis implémentation (lot S2), déclaration dans ./mod.rs et ré-export dans ../lib.rs.
+  [?] Posé à l'implémentation : @PendingEdits expose `title()`, `reviews()` et `is_empty()` ; son `Debug` et celui de @SessionEdits ne montrent aucun texte.

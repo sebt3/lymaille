@@ -17,6 +17,10 @@ use super::{
 const CREATION_NATURE_RULE: &str = "the toolset-creation module is reserved to a configuration agent (nature Config): \
      a work agent or a sub-agent cannot hold it";
 
+/// Rule of the `session` module: a work or configuration agent may hold it, a sub-agent never does.
+const SESSION_MODULE_RULE: &str = "the session module (title and flag for analysis) is reserved to a work or \
+     configuration agent: a sub-agent cannot hold it";
+
 /// One gap between what a toolset requires and what the toolset context provides.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -390,6 +394,33 @@ pub fn check_creation_rule(
     Ok(())
 }
 
+/// Checks the rule of the `session` module: it is granted to a work agent or a configuration agent, never to a sub-agent,
+/// among `agent` and `subagents`.
+///
+/// # Errors
+///
+/// Returns [`ToolsetsError::Forbidden`] when `agent`, or one of `subagents`, is a sub-agent granted `session_module`. The
+/// message names the rule.
+pub fn check_session_module_rule(
+    agent: &AgentDefinition,
+    subagents: &[AgentDefinition],
+    session_module: &str,
+) -> ToolsetsResult<()> {
+    let refused = |definition: &AgentDefinition| {
+        definition.kind() == AgentKind::Sub
+            && definition
+                .modules()
+                .iter()
+                .any(|module| module.as_str() == session_module)
+    };
+    if refused(agent) || subagents.iter().any(refused) {
+        return Err(ToolsetsError::Forbidden {
+            rule: SESSION_MODULE_RULE,
+        });
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -397,7 +428,10 @@ mod tests {
     use serde_json::{Value, json};
     use vynil_core::Semver;
 
-    use super::{Gap, GapKind, RemovalReason, check_context, check_creation_rule, delegable_subagents};
+    use super::{
+        Gap, GapKind, RemovalReason, check_context, check_creation_rule, check_session_module_rule,
+        delegable_subagents,
+    };
     use crate::agents::{AgentDefinition, AgentKind};
     use crate::toolsets::{
         ContextLevel, ContextType, RoleDecl, RoleSpec, Toolset, ToolsetContext, ToolsetsError,
@@ -750,6 +784,50 @@ mod tests {
         assert!(
             check_creation_rule(&config, &[], CREATION_MODULE).is_ok(),
             "a configuration agent may hold the creation module"
+        );
+    }
+
+    // Scenario: module session refusé pour un sous-agent
+    #[test]
+    fn session_module_refused_for_a_sub_agent() {
+        let sub = sub_agent("worker", Vec::new()).with_modules(vec!["session".to_owned()]);
+        match check_session_module_rule(&sub, &[], "session") {
+            Err(ToolsetsError::Forbidden { rule }) => assert!(
+                rule.contains("session module") && rule.contains("sub-agent"),
+                "the message names the rule: {rule}"
+            ),
+            other => panic!("expected Forbidden, got {other:?}"),
+        }
+        let main = main_agent(vec!["worker".to_owned()]);
+        let listed = check_session_module_rule(&main, &[sub], "session");
+        assert!(
+            matches!(&listed, Err(ToolsetsError::Forbidden { rule }) if rule.contains("sub-agent")),
+            "a listed sub-agent holding the module is refused too, got {listed:?}"
+        );
+    }
+
+    #[test]
+    fn session_module_granted_to_work_and_configuration_agents_is_accepted() {
+        let work = main_agent(Vec::new()).with_modules(vec!["session".to_owned()]);
+        assert!(
+            check_session_module_rule(&work, &[], "session").is_ok(),
+            "a work agent may hold the session module"
+        );
+        let config = AgentDefinition::new(
+            "setup".to_owned(),
+            AgentKind::Config,
+            "You configure.".to_owned(),
+            "strix-qwen".to_owned(),
+        )
+        .with_modules(vec!["session".to_owned()]);
+        assert!(
+            check_session_module_rule(&config, &[], "session").is_ok(),
+            "a configuration agent may hold the session module"
+        );
+        let plain_sub = sub_agent("worker", Vec::new());
+        assert!(
+            check_session_module_rule(&work, &[plain_sub], "session").is_ok(),
+            "a sub-agent without the module is accepted"
         );
     }
 
