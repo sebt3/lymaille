@@ -118,7 +118,8 @@ Tasks:
       Prose corrigée (Accepts, rustdocs) le 2026-10-29 ; validé.
   [x] #18 Sérialisation texte (frontmatter YAML + prompt en corps) : `to_text` et `from_text`, avec les Scenarios de fin de ce fichier ; tests rouges puis implémentation, à valider.
       Validé le 2026-11-01 (validateur, lot pré-publication, scripts/check complet).
-  [ ] #20 Refus au chargement du module `session` accordé à un sous-agent (décision du 2026-11-01, ../toolsets/compat.sdd #9) : la raison cite la règle, copie privée du texte de ../toolsets/compat.rs épinglée par tests des deux côtés ; les Scenarios « module session … » ci-dessus ; tests vus rouges puis verts.
+  [x] #20 Refus au chargement du module `session` accordé à un sous-agent (décision du 2026-11-01, ../toolsets/compat.sdd #9) : la raison cite la règle, copie privée du texte de ../toolsets/compat.rs épinglée par tests des deux côtés ; les Scenarios « module session … » ci-dessus ; tests vus rouges puis verts.
+      Validé le 2026-11-01 (validateur, scripts/check complet ; mutations sur definition.rs : 43/43, aucun survivant, et 8/8 sur compat.rs, aucun survivant).
 
 Scenario: modèle désigné par le seul nom du profil
   Given une définition construite avec le profil `strix-qwen`
