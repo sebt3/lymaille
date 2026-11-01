@@ -1,0 +1,42 @@
+Spec: edits
+
+Purpose:
+  Cellule partagée par laquelle un module Rhai (domaine `modules`) demande à la session un changement d'état qu'il ne peut pas faire lui-même : poser le titre, signaler la session pour analyse. La boucle de tour (domaine `runtime`) la vide après chaque appel d'outil et applique les changements à l'état
+    (`agent-sessions#CON-1` : `modules` ne dépend pas de `runtime`, `session` les rejoint).
+
+Owns:
+  ./edits.rs
+
+References:
+  ./title.sdd
+  ./label.sdd
+
+Exposes:
+  @SessionEdits
+  @PendingEdits
+
+Accepts:
+  @SessionEdits::new: aucun argument ; partageable (`Arc`), `Send + Sync`.
+  @SessionEdits::set_title: un texte brut ; le dernier gagne avant la vidange.
+  @SessionEdits::flag_for_review: une raison brute (peut être vide).
+  @SessionEdits::take: aucun argument ; vide la cellule.
+
+Returns:
+  @SessionEdits::take: un @PendingEdits : le titre demandé (optionnel) et les demandes de signalement dans l'ordre.
+
+Must:
+  La cellule ne normalise ni ne masque rien : c'est la boucle de tour qui applique @normalize_title, le @Redactor et les étiquettes en appliquant les changements.
+  `take` rend chaque changement une seule fois. Un verrou empoisonné est récupéré (jamais de panique).
+  Aucune E/S, aucun secret conservé au-delà de la vidange.
+
+Depends on:
+  ./title.sdd
+  ./label.sdd
+
+Scenario: la cellule est vidée une fois
+  Given un titre demandé deux fois et deux signalements
+  When take est appelé deux fois
+  Then le premier rend le dernier titre et les deux signalements dans l'ordre, le second rend une cellule vide
+
+Tasks:
+  [ ] #1 Tests puis implémentation (lot S2), déclaration dans ./mod.rs et ré-export dans ../lib.rs.

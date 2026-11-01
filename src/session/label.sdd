@@ -12,12 +12,17 @@ Exposes:
   @LabelTarget
   @LabelAuthor
   @Labels
+  @ReviewState
+  @review_state
 
 Accepts:
   @Labels::add: un libellé (texte non vide du vocabulaire de l'hôte), une cible (@LabelTarget : session, tour ou run), un
     émetteur (@LabelAuthor : humain ou automatique) et une horloge (@Clock).
 
+  @review_state: les @Labels d'une session.
+
 Returns:
+  @review_state: l'état de relecture de la session : `Requested(raison)` si la dernière étiquette de relecture est un signalement, `Done` si c'est un marquage « analysée », `None` sinon (vocabulaire réservé : `review-requested` suivi éventuellement de `: <raison>`, et `review-done`).
   @Labels::add: `Some` de l'étiquette ajoutée, `None` si le libellé est vide.
   @Labels::iter: toutes les étiquettes dans l'ordre d'ajout.
   @Labels::for_target: les étiquettes d'une cible.
@@ -65,6 +70,11 @@ Scenario: étiquette vide refusée à la désérialisation
   When désérialisée en @Labels
   Then elle échoue
 
+Scenario: le dernier mot gagne dans l'état de relecture
+  Given des étiquettes `review-requested: lent` puis `review-done` puis `review-requested: encore lent`
+  When review_state est lu après chacune
+  Then Requested(lent), Done, Requested(encore lent)
+
 Tasks:
   [x] #4 Désérialisation validante de @Labels et son Scenario (rend caduque la seconde moitié de #3).
   [x] #1 Tests puis implémentation.
@@ -72,3 +82,4 @@ Tasks:
       `iter_without_into_iter`).
       Validé le 2026-10-29 par le développeur principal.
   [x] #2 Granularité et vocabulaire confirmés le 2026-10-27 (ASSUMPTION levée dans le DSD) : le vocabulaire est libre, défini par l'hôte.
+  [ ] #P8 @ReviewState et @review_state (Décision du 2026-11-01 (accord du développeur principal), lot S2) : le signalement et le marquage sont des étiquettes en ajout seul, auteur automatique, datées ; « analysée » n'efface rien. Tests puis implémentation.

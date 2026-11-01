@@ -14,6 +14,7 @@ Structure:
   ./mcp.rs: trait du connecteur MCP, tools, erreurs de connexion et connecteur scripté
   ./mcp_client.rs: connecteur MCP réel (HTTP streamable, `rmcp`), derrière la feature `mcp-http`
   ./mcp_module.rs: génération du module Rhai d'un rôle MCP (réel ou coquille), validation des arguments, reconnexion
+  ./session_module.rs: module Rhai `session` (titre, signalement pour analyse)
 
 Owns:
   ./mod.rs
@@ -31,6 +32,7 @@ References:
   ./mcp_name.sdd
   ./mcp.sdd
   ./mcp_module.sdd
+  ./session_module.sdd
   ./mcp_client.sdd
 
 Must:

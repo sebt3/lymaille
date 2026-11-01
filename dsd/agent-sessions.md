@@ -439,6 +439,15 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
 
 ## Open Issues
 
+- **Décidé:** le titre d'une session est posé par le LLM lui-même par `session::set_title` (module `session`, agents `Work` et `Config`) : il a tout le contexte et suit les règles de nommage de l'auteur de l'agent, sans second modèle ni requête dédiée. Le dernier qui écrit gagne (renommage humain à posteriori compris). Sans titre posé, la librairie calcule un titre par défaut (agent, contexte, date, début du premier message). Le titre est un texte non fiable : normalisé, borné à 120 caractères, masqué, rendu entre guillemets à l'agent de configuration.
+    - **Source:** user instruction, 2026-11-01
+
+- **Décidé:** l'agent de travail peut signaler sa session pour analyse (`session::flag(raison)`) ; l'agent de configuration la marque analysée (`sessions::mark_analyzed`). Les deux ajoutent une étiquette en ajout seul (`review-requested`, `review-done`), le dernier mot gagne dans l'état dérivé.
+    - **Source:** user instruction, 2026-11-01
+
+- **Décidé:** la mémoire d'un script reste bornée par collection, pas par imbrication, et le rendu complet d'une structure monstrueuse peut coûter de la mémoire ; mesuré le 2026-11-01 (`scratchpad/render.sdd` #2), accepté tel quel avec l'annulation de l'hôte comme seul garde-fou, cohérent avec l'absence de limite de durée.
+    - **Source:** user instruction, 2026-11-01
+
 - **Décidé:** le pad de workflow (`scratchpad.md`, extension réservée) est hors du périmètre 0.1 ; ses quatre questions sont tranchées dans `scratchpad.md` (nature `Workflow`, refus, kind de step distinct, authentification MCP à l'hôte).
     - **Source:** user instruction, 2026-10-31
 

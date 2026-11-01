@@ -1,0 +1,62 @@
+Spec: session_module
+
+Purpose:
+  Module Rhai `session` : le LLM pose lui-même le titre de sa session et peut la signaler pour analyse par l'agent de configuration
+    (`agent-sessions/session#FR-2`, `agent-sessions#BR-8`, décisions du 2026-11-01). Le titre vient du modèle qui a tout le contexte et des règles de nommage de l'auteur de l'agent (dans son prompt ou ses skills), sans second modèle ni requête dédiée.
+
+Owns:
+  ./session_module.rs
+
+References:
+  ../session/edits.sdd
+  ../session/title.sdd
+  ../session/label.sdd
+
+Exposes:
+  @session_module
+
+Accepts:
+  @session_module: la @SessionEdits (`Arc`) de la session et un lecteur du titre courant (fermeture `Fn() -> Option<String> + Send + Sync`, fournie par l'hôte) ; rend un `rhai::Module` à accorder comme les autres modules.
+
+Returns:
+  `session::set_title(texte)` : demande le titre (le dernier gagne) ; rend `()`.
+  `session::title()` : le titre courant, ou `()` si aucun n'est posé.
+  `session::flag(raison)` : signale la session pour analyse par l'agent de configuration, avec une raison courte ; rend `()`.
+
+Raises:
+  Une erreur de script rendue au LLM (texte sans valeur de secret) quand le texte du titre est vide ou blanc.
+
+Must:
+  Le module est accordable aux natures `Work` et `Config`, pas à `Sub` (la règle est celle de ../toolsets/compat.sdd : refus au chargement avec un message qui nomme la règle).
+  Les fonctions sont documentées (commentaires `///` : paramètres, effet) pour `functions("session")` et `find("title")`. Le module n'ajoute rien au contexte initial : il se découvre à la demande.
+  La normalisation, le masquage, la persistance et les événements sont ceux de ../session/title.sdd appliqués par la boucle de tour ; ce module n'écrit pas dans l'état.
+  `flag` n'a pas de moyen de retirer un signalement : « analysée » est l'affaire de l'agent de configuration (../toolsets/config.sdd).
+  Aucune E/S, aucune panique.
+
+Depends on:
+  ../session/edits.sdd
+  ../session/title.sdd
+  rhai
+
+Scenario: le LLM pose le titre et le relit
+  Given le module accordé et une cellule d'édition
+  When un script appelle `session::set_title("Migration loki")` puis `session::title()`
+  Then la cellule porte le titre demandé et `title()` rend le titre courant du lecteur
+
+Scenario: un titre vide est une erreur de script
+  Given le module accordé
+  When un script appelle `session::set_title("   ")`
+  Then le script reçoit une erreur et la cellule n'a rien demandé
+
+Scenario: le signalement porte une raison
+  Given le module accordé
+  When un script appelle `session::flag("réponse fausse sur le pod loki")`
+  Then la cellule porte un signalement avec cette raison
+
+Scenario: le module se découvre
+  Given le module accordé
+  When un script appelle `find("title")` puis `functions("session")`
+  Then `session::set_title` figure dans les deux, avec sa documentation
+
+Tasks:
+  [ ] #1 Tests puis implémentation (lot S2), déclaration dans ./mod.rs et ré-export dans ../lib.rs ; règle d'accord (Work et Config seulement) dans ../toolsets/compat.sdd, avec son Scenario.

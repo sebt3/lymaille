@@ -1,0 +1,70 @@
+Spec: title
+
+Purpose:
+  Titre d'une session : posé par le LLM lui-même (module `session`, ../modules/session_module.sdd) ou par l'hôte, borné et masqué, avec un titre par défaut calculé à partir des métadonnées quand personne n'en a posé
+    (`agent-sessions/session#FR-2`, `agent-sessions#CON-3`). Le dernier qui écrit gagne : un renommage humain à posteriori comme un renommage du modèle remplacent le titre.
+
+Owns:
+  ./title.rs
+
+References:
+  ./state.sdd
+  ./redact.sdd
+  ./event.sdd
+
+Exposes:
+  @normalize_title
+  @SessionState::title
+  @SessionState::set_title
+  @SessionState::display_title
+  @EventKind::TitleChanged (variante de ./event.sdd)
+
+Accepts:
+  @normalize_title: un texte.
+  @SessionState::set_title: un texte, qui passe par @normalize_title ; rend `None` si le titre normalisé est vide (l'état n'est pas modifié).
+  @SessionState::display_title: le @Redactor de la session ; ne modifie pas l'état.
+
+Returns:
+  @normalize_title: le texte sur une seule ligne : retours à la ligne et caractères de contrôle remplacés par une espace, espaces consécutives réduites à une, bords retirés, borné à 120 caractères (pas octets) avec `…` en fin si coupé ; `None` si le résultat est vide.
+  @SessionState::title: le titre posé, ou `None`.
+  @SessionState::display_title: le titre posé s'il existe ; sinon un titre par défaut `<agent> · <contexte> · <date> — <début du premier message>` : l'agent (empreinte exclue, son identifiant), le nom du contexte, la date de début de la session si l'état la porte (omise sinon), et le début du premier message de l'utilisateur (60 caractères, normalisé, masqué par le @Redactor, section omise si la session n'a aucun message). Le tout borné à 120 caractères comme un titre.
+
+Must:
+  Le titre est un texte brut non fiable : jamais de balisage interprété ici, l'hôte l'échappe à l'affichage. Il est masqué par le @Redactor avant d'être posé et avant tout événement ; un secret déclaré n'apparaît ni dans le titre, ni dans `display_title`, ni dans `TitleChanged`.
+  Le titre se persiste dans l'état (champ optionnel : un état ancien se relit sans titre ; si la règle de ./format.sdd l'exige, la version mineure du format augmente, jamais la majeure).
+  @EventKind::TitleChanged { title } est émis quand un titre est posé (le texte normalisé et masqué).
+  Le dernier écrivain gagne : aucun suivi de l'auteur du titre (décision du 2026-11-01).
+  Aucune E/S, aucune horloge propre (la date vient de l'état), aucune panique.
+
+Depends on:
+  ./state.sdd
+  ./redact.sdd
+  ./event.sdd
+
+Scenario: un titre est normalisé et borné
+  Given le texte `  Plan\nde   migration\t` puis un texte de 300 caractères puis un texte blanc
+  When normalize_title est appelé
+  Then `Plan de migration`, puis 120 caractères finissant par `…`, puis None
+
+Scenario: le dernier écrivain gagne
+  Given une session dont le titre est posé par le modèle puis par l'hôte puis par le modèle
+  When set_title est appelé trois fois
+  Then title rend le dernier
+
+Scenario: un secret n'entre jamais dans un titre
+  Given un secret déclaré au @Redactor et un titre qui le contient
+  When le titre est posé puis display_title lu
+  Then ni l'état, ni l'événement TitleChanged, ni display_title ne contiennent le secret
+
+Scenario: titre par défaut sans titre posé
+  Given une session sans titre, d'agent `ops-agent`, de contexte `prod-k8s`, dont le premier message de l'utilisateur est `pourquoi loki redémarre` 
+  When display_title est lu
+  Then il vaut `ops-agent · prod-k8s · <date> — pourquoi loki redémarre`, et sans message la dernière section est omise
+
+Scenario: un état ancien sans titre se relit
+  Given l'état JSON d'une version antérieure, sans champ titre
+  When il est relu
+  Then title rend None et le reste de l'état est identique
+
+Tasks:
+  [ ] #1 Tests puis implémentation (lot S2), variante `TitleChanged` dans ./event.sdd, déclaration dans ./mod.rs et ré-export dans ../lib.rs ; vérifier dans ./state.sdd ce que l'état porte de la date de début et du contexte, et le signaler (`[?]`) s'il manque.
