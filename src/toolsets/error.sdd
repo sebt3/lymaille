@@ -11,7 +11,7 @@ Exposes:
   @ToolsetsResult
 
 Raises:
-  @ToolsetsError::InvalidContextType: nom vide ou hors de `[a-z0-9-]+`, schéma de paramètres qui n'est pas un objet JSON Schema, schéma qui ne compile pas, schéma sérialisé de plus de 64 Kio (décision du 2026-10-31), rôle en double, inclusion cyclique.
+  @ToolsetsError::InvalidContextType: nom vide ou hors de `[A-Za-z0-9_-]+`, schéma de paramètres qui n'est pas un objet JSON Schema, schéma qui ne compile pas, schéma sérialisé de plus de 64 Kio (décision du 2026-10-31), rôle en double, inclusion cyclique.
   @ToolsetsError::InvalidToolset: nom vide, module absent ou qui ne compile pas, version illisible, exigence en double.
   @ToolsetsError::InvalidSkill: nom ou description hors limites, texte `SKILL.md` de plus de 256 Kio, frontmatter absent ou illisible, `name` ou `description` absent ou YAML null (décision du 2026-10-31), document annexe en double, skill ou document annexe inconnu. Champs : `name` ne porte que le nom refusé (ou demandé) ; `known` porte la liste des noms existants, séparée, rendue dans le message « (known: a, b) » (omise si la liste est vide). Décidé le 2026-10-31 (développeur principal).
   @ToolsetsError::InvalidContext: nom vide, rôle ou paramètre dont le nom est vide, secret probable dans une valeur.

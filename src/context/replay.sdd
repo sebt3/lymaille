@@ -25,6 +25,7 @@ Must:
   `IntraTurn` renvoie le raisonnement des seuls messages de l'assistant du tour courant, c'est-à-dire ceux qui suivent le dernier message utilisateur.
   Un raisonnement n'est renvoyé que s'il a un émetteur : le choix de ne le rejouer qu'à son émetteur est celui du domaine `agents`, non de ce fichier.
   Le résultat ne modifie jamais l'historique.
+  Un message `Discarded` (../session/history.sdd) n'a jamais de raisonnement à renvoyer : sa place dans la liste parallèle est vide, quel que soit le mode (`agent-sessions/session#FR-16`).
   @ReplayMode se sérialise en `none`, `intra_turn`, `all_turns` ; `parse` est l'inverse de `as_str` et refuse tout autre texte.
 
 Depends on:
@@ -52,6 +53,7 @@ Scenario: le texte du mode fait l'aller-retour
   Then le même mode revient, le JSON est le texte entre guillemets et `other` est refusé
 
 Tasks:
+  [ ] #5 Message `Discarded` : place vide dans la liste parallèle, quel que soit le mode (lot 0.2-A1) ; un test par mode.
   [x] #1 Tests puis implémentation.
   [x] #4 Test manquant : @ReplayMode::IntraTurn sans aucun message utilisateur (voir #3).
   [x] #3 Posé à l'implémentation : en mode `IntraTurn` sans aucun message utilisateur, tous les messages de l'assistant sont du tour courant ; un émetteur vide vaut « pas d'émetteur ».

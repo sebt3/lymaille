@@ -25,7 +25,7 @@ Returns:
 Must:
   @EventKind est `#[non_exhaustive]` et couvre : usage de tokens (prompt, complétion), todo modifiée, Memory modifiée (niveau et
     identifiant seulement, jamais le corps), script exécuté (@ScriptRecord), appel MCP (@McpRecord), ouverture d'une cible d'inspection (`TargetOpened`, avec la nature `definition` ou `session` et le nom ou l'identifiant, jamais de contenu), tentative de reconnexion MCP (`McpReconnect`, avec le rôle, le numéro de tentative et le délai en millisecondes), dépassement de délai
-    (`Overrun`, avec la durée écoulée), réessai d'inférence (numéro, délai en millisecondes, classe de l'erreur), début de tour,
+    (`Overrun`, avec la durée écoulée), réponse vide écartée (`EmptyResponse`, avec un booléen `will_retry` qui dit si le modèle est relancé ; aucune valeur de session), réessai d'inférence (numéro, délai en millisecondes, classe de l'erreur), début de tour,
     fragment de texte streamé (`TextDelta`, avec le tour et le texte du fragment), fin de tour (issue de type @Outcome, réponse
     complète), fin de run, interruption d'un run de sous-agent à la restauration de la session principale (`RunInterrupted`,
     avec l'identifiant du run et celui de la session du sous-agent, `agent-sessions/delegation#FR-14`).
@@ -66,7 +66,7 @@ Scenario: le @RecordingSink est partageable entre threads
 Scenario: chaque variante fait l'aller-retour et est listée
   Given un @Event de chaque variante de @EventKind, `RunInterrupted` compris
   When chacune est sérialisée puis désérialisée
-  Then chacune revient égale, et la liste des exemples nomme chacune des quatorze variantes
+  Then chacune revient égale, et la liste des exemples nomme chacune des dix-huit variantes
 
 Scenario: un run interrompu nomme son run et sa session de sous-agent
   Given un `RunInterrupted` pour le run `run-7` et la session `sub-7` de son sous-agent
@@ -74,6 +74,7 @@ Scenario: un run interrompu nomme son run et sa session de sous-agent
   Then le run et la session sont des identifiants nus, et l'événement se désérialise à la même valeur
 
 Tasks:
+  [ ] #13 Variante `EmptyResponse { will_retry }` (lot 0.2-A2, `agent-sessions/session#FR-16`) : aller-retour JSON et liste exhaustive des variantes mis à jour (dix-huit ; le décompte « quatorze » du Scenario ci-dessus était périmé, la liste en compte dix-sept avant cette variante).
   [x] #1 Tests puis implémentation.
   [x] #4 Variantes et champs posés à l'implémentation : `TokenUsage{prompt, completion}`, `TodoChanged`, `MemoryChanged{level, id}`, `Script`, `McpCall`,
       `Overrun{elapsed_ms}`, `InferenceRetry{attempt, delay_ms, error_class}`, `TurnStarted{turn}`, `TurnEnded{turn, outcome, response}`, `RunEnded{run, outcome}`, `RunInterrupted{run, session}` (lot D6, tâche #10).

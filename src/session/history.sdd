@@ -2,14 +2,15 @@ Spec: history
 
 Purpose:
   Historique persisté d'une session : chaque message tel que le modèle l'a reçu ou produit, avec le raisonnement et son émetteur, les
-    appels d'outils, les sorties plafonnées de `rhai_pad` et de `skill`, et les frontières de segment
-    (`agent-sessions/session#FR-12`, `agent-sessions/session#FR-14`).
+    appels d'outils, les sorties plafonnées de `rhai_pad` et de `skill`, les frontières de segment et le raisonnement des
+    réponses écartées (`agent-sessions/session#FR-12`, `agent-sessions/session#FR-14`, `agent-sessions/session#FR-16`).
 
 Owns:
   ./history.rs
 
 Exposes:
   @Message
+  @DiscardCause
   @ToolCall
   @Reasoning
   @History
@@ -18,7 +19,8 @@ Accepts:
   @History::push: un @Message.
   @History::push_user_during_turn: le texte d'un message utilisateur reçu pendant un tour.
   @Message: `System`, `User`, `Assistant` (texte, @Reasoning optionnel, @ToolCall), `ToolResult` (identifiant d'appel, nom de tool, contenu
-    tel que reçu par le modèle, taille d'origine si tronqué) et `Boundary` (@BoundaryKind).
+    tel que reçu par le modèle, taille d'origine si tronqué), `Boundary` (@BoundaryKind) et `Discarded` (@DiscardCause, @Reasoning optionnel).
+  @DiscardCause: `Empty` (réponse sans texte ni appel d'outil) ou `Truncated` (réponse coupée par la limite de sortie, sans texte ni appel d'outil) ; se sérialise en `empty` et `truncated`.
   @ToolCall: identifiant, nom du tool, arguments JSON.
   @Reasoning: l'émetteur (identifiant du fournisseur ou du modèle qui seul peut le rejouer) et le texte.
 
@@ -37,6 +39,7 @@ Must:
   Un message `ToolResult` retire l'appel correspondant de la liste des appels en attente ; un résultat sans appel connu est accepté
     mais ne retire rien (reprise d'un historique partiel).
   Les contenus et le raisonnement sont conservés tels quels, sans réécriture.
+  Un message `Discarded` garde, pour l'audit et le diagnostic, le raisonnement d'une réponse que la boucle de tour a écartée (`agent-sessions/session#FR-16`) : il ne porte ni texte ni appel d'outil, n'est jamais une partie de la conversation que le modèle a produite, ne crée aucun appel en attente et n'en retire aucun. Les consommateurs de l'historique qui bâtissent une requête, rejouent un raisonnement ou résument l'ont pour absent (voir les specs qui les possèdent).
   Se sérialise et se désérialise à l'identique ; les appels en attente se recalculent depuis les messages (aucun état caché).
 
 Depends on:
@@ -44,6 +47,14 @@ Depends on:
   ./error.sdd
   serde
   serde_json
+
+Can modify:
+  ../runtime/turn.rs: les trois `match` exhaustifs sur @Message (estimation de caractères, décompte des appels et du raisonnement) reçoivent une branche `Discarded` qui compte zéro ; rien d'autre (la logique de la réponse vide est dans ../runtime/turn.sdd #9).
+  ../context/replay.rs: branche `Discarded` sans raisonnement à renvoyer, avec sa spec ../context/replay.sdd et ses tests.
+  ../context/strategy.rs: branches `Discarded` du rendu pour le résumeur (rien n'est rendu), avec sa spec ../context/strategy.sdd et ses tests.
+  ../agents/inference.rs: branche `Discarded` de `emit_whole` (aucun fragment), avec sa spec ../agents/inference.sdd.
+  ../agents/rig.rs: branche `Discarded` de `convert_message` (aucun message `rig`), avec sa spec ../agents/rig.sdd et son test.
+  ./format.rs: @FormatVersion::CURRENT passe à 1.1, avec sa spec ./format.sdd et ses tests.
 
 Scenario: les messages gardent leur ordre et leur contenu
   Given un message utilisateur, un message assistant avec raisonnement et un appel d'outil, et son résultat
@@ -59,6 +70,11 @@ Scenario: message utilisateur accepté après le résultat
   Given le même appel avec son résultat désormais ajouté
   When push_user_during_turn est appelé
   Then le message est ajouté après le résultat
+
+Scenario: un message écarté garde son raisonnement et reste neutre
+  Given un message assistant avec un appel d'outil sans résultat, puis un message `Discarded` de cause `Truncated` portant un raisonnement
+  When pending_tool_calls est lu, puis l'historique est sérialisé et relu
+  Then l'appel reste en attente, le message écarté revient égal avec sa cause et son raisonnement, et `empty` et `truncated` sont les textes des deux causes
 
 Scenario: les appels en attente se déduisent des messages
   Given un message assistant avec deux appels d'outil et un résultat
@@ -77,6 +93,7 @@ Scenario: un résultat pour un appel inconnu ne change rien
   Then il est ajouté et `c1` reste en attente
 
 Tasks:
+  [ ] #4 Variante `Discarded` et type @DiscardCause (lot 0.2-A1, `agent-sessions/session#FR-16`) : tests puis implémentation. Une variante ajoutée à une énumération `#[non_exhaustive]` de la crate oblige les `match` internes à la traiter : ils sont listés dans les specs de ../runtime/turn.sdd, ../context/strategy.sdd, ../context/replay.sdd, ../agents/inference.sdd et ../agents/rig.sdd.
   [x] #3 Test du Scenario « unknown call » ci-dessus (comportement déjà en place).
   [x] #2 Posé à l'implémentation : @Message est une énumération à champs nommés sérialisée avec une étiquette `role` ; la taille d'origine d'une sortie
       tronquée s'exprime en caractères ; @History::push_user_during_turn prend un texte ; un résultat retire toutes les occurrences de son identifiant.

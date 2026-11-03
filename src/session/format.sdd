@@ -19,7 +19,7 @@ Raises:
   @SessionError::IncompatibleFormat: la majeure enregistrée diffère de la majeure courante.
 
 Must:
-  @FormatVersion::CURRENT vaut 1.0 pour le premier jalon.
+  @FormatVersion::CURRENT vaut 1.1 depuis la 0.2.0 : la mineure passe de 0 à 1 parce que l'historique gagne la variante `Discarded` (../session/history.sdd). Un état enregistré en 1.0 est relu sans changement ; un état 1.1 qui porte un message écarté n'est pas relisible par la 0.1.0 (variante inconnue d'elle) : la version mineure le consigne, elle ne l'empêche pas.
   Une mineure enregistrée plus récente ou plus ancienne que la courante est acceptée, la majeure égale.
   Une majeure enregistrée différente, plus ancienne ou plus récente, est refusée avec les deux versions dans l'erreur.
   Se sérialise en un objet `{"major": n, "minor": n}` ; un champ inconnu est ignoré à la lecture.
@@ -44,5 +44,6 @@ Scenario: majeure différente refusée
   Then les deux échouent avec IncompatibleFormat en nommant les deux versions
 
 Tasks:
+  [ ] #3 @FormatVersion::CURRENT passe à 1.1 (lot 0.2-A1, `agent-sessions/session#FR-16`) : un test qui lit un état en 1.0 sous la version courante (accepté) et un état en 1.1 portant un message écarté qui revient égal ; les tests qui supposent « 1.0 courante » sont mis à jour.
   [x] #1 Tests puis implémentation.
   [x] #2 Décidé le 2026-10-27 : refus sec entre majeures, sans point d'extension de migration ; à rouvrir à la première majeure.

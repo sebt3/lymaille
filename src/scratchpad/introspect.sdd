@@ -3,7 +3,7 @@ Spec: introspect
 Purpose:
   Introspection que le LLM appelle depuis Rhai : variables du scope, modules accordés, fonctions avec signature et documentation, toolsets et skills, avec une recherche
     lexicale `find`. Ne montre que ce qui est accordé, jamais les dépendances d'un toolset (`agent-sessions/scratchpad#FR-3`, `agent-sessions/scratchpad#AC-2`,
-    `agent-sessions/scratchpad#AC-6`, `agent-sessions/scratchpad#FR-9`, `agent-sessions/toolsets#FR-2`, `agent-sessions#FR-2`).
+    `agent-sessions/scratchpad#AC-6`, `agent-sessions/scratchpad#FR-9`, `agent-sessions/scratchpad#FR-14`, `agent-sessions/toolsets#FR-2`, `agent-sessions#FR-2`).
 
 Owns:
   ./introspect.rs
@@ -23,6 +23,7 @@ Depends on:
 Exposes:
   @Catalog
   @FunctionEntry
+  @FunctionEntry::usage
   @Origin
   @IntrospectionSource
   @VariableInfo
@@ -42,6 +43,7 @@ Accepts:
   @limits_notice: les @ScratchpadLimits ; rend le texte des limites du bac à sable.
 
 Returns:
+  @FunctionEntry::usage: le texte de la ligne d'usage de la documentation de la fonction, ou rien (voir `Must`).
   @Catalog::functions: les @FunctionEntry : chemin d'appel (`json_encode`, `grafana::loki_query`), signature, documentation (commentaires `///` joints par des retours à la ligne, ou absente), @Origin (`Core` avec le nom du groupe, `Format`, `Host`, `Module` avec le nom, `Script`).
   @Catalog::contains: vrai si une fonction de ce chemin et de cette arité est enregistrée dans une origine accordée.
   @limits_notice: un texte anglais décrit en `Must`.
@@ -64,6 +66,7 @@ Must:
   @Catalog est construit une fois à la construction du moteur ; seul l'état partagé de @IntrospectionSource change ensuite. L'état partagé est protégé par un verrou dont l'empoisonnement est récupéré (jamais de panique).
   `find` : la requête est découpée en mots (séparés par des blancs) ; un élément correspond quand chaque mot apparaît, sans tenir compte de la casse, dans son chemin, sa signature, sa documentation ou sa description. Les résultats sont triés : correspondance exacte du nom ou du chemin d'abord, puis nom contenant le mot, puis le reste, puis ordre alphabétique du chemin ; au plus 50 résultats. Une requête vide ou blanche est une erreur de script. La recherche porte sur les fonctions, modules, toolsets et skills accordés, jamais sur un élément non accordé (`agent-sessions/scratchpad#AC-2`).
   @limits_notice rend un texte anglais court qui contient, au minimum : les fonctions définies par `fn` ne voient pas les variables du scope mais reçoivent leurs arguments (et lisent le ToolsetContext par `session_context()`) ; une closure ou un pointeur de fonction fonctionne dans la session mais est perdu à la restauration (il n'est pas persisté), définir une `fn` pour ce qu'il faut garder ; `const` n'existe pas ; aucune limite d'opérations ni de durée : le modèle borne lui-même ses boucles, il ne peut pas interrompre un script (seule l'annulation de l'hôte l'arrête, et il ne la déclenche pas) ; le plafond de rendu en caractères et les plafonds de mémoire de la session (valeurs de ./limits.sdd, écrites lisiblement : `16 MiB`, `1 000 000`, `100 000`) ; un résultat tronqué se réduit en extrayant la partie utile avec les fonctions de ./format.sdd. Le skill intégré de `toolsets` (`agent-sessions/toolsets#FR-18`) l'embarque.
+  Ligne d'usage (`agent-sessions/scratchpad#FR-14`) : une ligne de documentation qui commence par `Usage: ` (sans espace de tête, une seule par fonction ; la première gagne) déclare l'appel attendu de la fonction. @FunctionEntry::usage rend ce qui suit le préfixe, sans espace de fin, ou rien si aucune ligne ne commence ainsi ou si le texte est vide. La ligne reste dans la documentation que `functions()` et `find` rendent, inchangée ; elle est lue ici et nulle part ailleurs (la correspondance se fait à la construction du catalogue, pas à chaque erreur). Cela vaut pour les fonctions de tout module accordé, MCP ou non (`agent-sessions/modules#FR-12` écrit la sienne). Une fonction non accordée n'a pas d'entrée et donc pas de ligne d'usage visible.
   Les fonctions d'introspection n'écrivent ni ne lisent rien d'autre que cet état : pas de E/S, pas d'horloge.
 
 Scenario: la recherche rend les fonctions et les skills limités aux modules accordés
@@ -101,6 +104,21 @@ Scenario: les fonctions portent signature et documentation
   Given le groupe pur
   When `functions()` est évalué
   Then `json_encode` apparaît avec la signature `json_encode(value: Dynamic) -> string` et une documentation non vide
+
+Scenario: une ligne d'usage est lue dans la documentation
+  Given une fonction de module dont la documentation tient en trois lignes, dont la deuxième est `Usage: grafana::loki_query(#{ query: "…" })`
+  When le catalogue est construit
+  Then `usage` de son entrée rend `grafana::loki_query(#{ query: "…" })`, et la documentation rendue par `functions()` contient encore les trois lignes
+
+Scenario: sans ligne d'usage, rien
+  Given une fonction dont la documentation ne contient aucune ligne commençant par `Usage: `, et une autre dont la ligne ne fait que `Usage: `
+  When le catalogue est construit
+  Then `usage` rend rien pour les deux
+
+Scenario: la première ligne d'usage gagne
+  Given une fonction dont la documentation porte deux lignes `Usage: …`
+  When le catalogue est construit
+  Then `usage` rend le texte de la première
 
 Scenario: les fonctions définies par le LLM sont listées avec leur documentation
   Given un pad où `/// Doubles a.\nfn f(a) { a * 2 }` a été défini et l'état partagé mis à jour
@@ -149,6 +167,7 @@ Scenario: find cherche dans la description d'un toolset
   Then le toolset `grafana` de genre `toolset` figure parmi les résultats
 
 Tasks:
+  [ ] #12 @FunctionEntry::usage et la ligne `Usage: ` (lot 0.2-B1, `agent-sessions/scratchpad#FR-14`, `sebt3/lymaille#3`) : trois Scenarios ci-dessus, tests puis implémentation. L'accesseur est public (la crate est publiée) et documenté ; le champ s'ajoute à la structure, dont le constructeur `pub(crate)` ne change pas de visibilité.
   [x] #1 Tests puis implémentation : @Catalog (filtrage et attribution) d'abord, puis les fonctions Rhai.
   [x] #2 Les noms des fonctions d'introspection (`vars`, `modules`, `functions`, `toolsets`, `skills`, `find`, `rules`) sont posés ; seul `find` est nommé par le DSD (`agent-sessions/scratchpad#AC-2`). Ils sont à confirmer avec l'auteur du skill intégré (`agent-sessions/toolsets#FR-18`) : le skill enseigne ces noms, ils sont un contrat avec les modèles.
       Décidé le 2026-10-29 par le développeur principal : noms validés.

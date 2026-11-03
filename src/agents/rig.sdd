@@ -104,6 +104,7 @@ Scenario: la raison de fin et les jetons de raisonnement sont lus
   Then la réponse porte FinishReason::Length et un usage de raisonnement de 15
 
 Tasks:
+  [ ] #R4 Message `Discarded` (../session/history.sdd) : la conversion en message `rig` ne produit rien pour lui, comme pour une frontière ; la boucle de tour ne le met déjà pas dans la requête (lot 0.2-A1, défense en profondeur pour un autre appelant). Un test de conversion.
   [x] #1 Spike court (lot R0, fait le 2026-10-31, `spikes/rig-probe/README.md`) : confirmer dans `rig-core` 0.43 hors dépôt, par un petit programme, que le client OpenAI-compatible (chat completions) décode `reasoning` et `reasoning_content`, fusionne `additional_params` à plat, expose le flux de deltas et l'usage, et que `list_models` reporte `max_model_len` dans `context_length` (sinon @detect_models lit `/v1/models` lui-même) ; consigner les mesures ici et lever le TBD de `agents.md` ; déclarer la dépendance `rig-core` et la feature `rig` dans Cargo.toml avec l'accord du développeur principal (dépendance nouvelle).
   [x] #2 Tests puis implémentation (lot R1), déclaration dans ./mod.rs et ré-export dans ../lib.rs, derrière la feature `rig`.
       Choix posés à l'implémentation (lot R1, à valider) :

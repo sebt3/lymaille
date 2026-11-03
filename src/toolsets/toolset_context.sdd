@@ -21,7 +21,7 @@ Exposes:
 Accepts:
   @ToolsetContext::with_secret_detector: un `Arc<dyn SecretDetector>` (../secret.sdd) ; les appels suivants de `with_parameter`, `with_role`, `with_override` et `resolve` (valeurs par défaut) jugent avec lui (@DefaultSecretDetector sinon).
   @ToolsetContext::check: un `&dyn SecretDetector` ; rend vrai si aucune valeur ni référence de rôle du contexte ne ressemble à un secret pour ce détecteur.
-  @ToolsetContext::new: un nom et un @ContextLevel (`User`, `Project` ou `Session`) ; constructeurs chaînés : un paramètre (nom, valeur JSON), une liaison de rôle (nom du rôle, nom de la référence que l'hôte résout), une surcharge pour un toolset (nom du toolset, nom du paramètre, valeur).
+  @ToolsetContext::new: un nom et un @ContextLevel (`User`, `Shared` ou `Session`) ; constructeurs chaînés : un paramètre (nom, valeur JSON), une liaison de rôle (nom du rôle, nom de la référence que l'hôte résout), une surcharge pour un toolset (nom du toolset, nom du paramètre, valeur).
   @ToolsetContext::resolve: les valeurs par défaut déclarées par les toolsets de l'agent (nom du toolset, nom du paramètre, valeur) ; rend un @ResolvedContext.
 
 Returns:
@@ -37,6 +37,7 @@ Must:
   Deux valeurs par défaut pour le même couple (toolset, paramètre) sont refusées par @resolve (@ToolsetsError::InvalidContext), jamais départagées en silence.
   @ResolvedContext est une copie indépendante : en modifier une valeur n'affecte pas le contexte.
   Se sérialise et se désérialise à l'identique ; les tables sont ordonnées.
+  @ContextLevel se sérialise en `user`, `shared` et `session` ; l'ancien nom `project` de la 0.1 (`Project`, renommé `Shared` en 0.2.0 : `sebt3/lymaille#5`) est encore accepté à la désérialisation, lu comme `Shared` et jamais écrit. La variante `Project` n'existe plus. Le niveau d'un contexte n'entre ni dans sa clé de stockage ni dans la résolution des valeurs.
 
 Depends on:
   ./error.sdd
@@ -44,10 +45,18 @@ Depends on:
   serde
   serde_json
 
+Can modify:
+  ./native.rs, ./template.rs, ./config.rs, ./compat.rs, ./store.rs, ./context_type.rs, ./assemble.rs et ../tools/inspect.rs: seulement les occurrences de `ContextLevel::Project` de leurs tests et de leur rustdoc, qui deviennent `ContextLevel::Shared` (renommage mécanique, aucun autre changement de comportement), avec leurs specs respectives.
+
 Scenario: le remplacement l'emporte sur le contexte, qui l'emporte sur le défaut
   Given un défaut `5`, un paramètre de contexte `7` et un remplacement `9` pour le même paramètre de toolset
   When le contexte est résolu
   Then la valeur vaut 9 pour ce toolset, 7 sans remplacement, et 5 sans l'un ni l'autre
+
+Scenario: le niveau partagé fait l'aller-retour et l'ancien nom est relu
+  Given un contexte de niveau `Shared`, puis un JSON de la 0.1 dont le niveau vaut `project`
+  When le premier est sérialisé puis désérialisé, et le second désérialisé
+  Then le premier revient égal avec le niveau `shared` dans son texte, et le second a le niveau `Shared`
 
 Scenario: seuls les noms de rôles sortent
   Given un contexte liant le rôle `k8s` à la référence `prod-k8s`
@@ -70,6 +79,7 @@ Scenario: un détecteur de l'hôte juge paramètres, rôles et surcharges
   Then `tok_abc` est refusé par InvalidContext dans les trois cas et `sk-abc` accepté, et check rend les mêmes verdicts sur un contexte désérialisé
 
 Tasks:
+  [ ] #7 Renommer `ContextLevel::Project` en `Shared`, alias de lecture `project` (lot 0.2-C1, `agent-sessions#Glossaire`, `sebt3/lymaille#5`) : le Scenario ci-dessus d'abord, puis le renommage, puis toutes les occurrences de la crate (tests de `native`, `template`, `config`, `compat`, `store`, `context_type` et de ../tools/inspect.sdd compris). Rupture d'API publique assumée pour la 0.2.0.
   [x] #1 Tests puis implémentation.
       Validé le 2026-10-29 (validator, mutations manuelles) sous `SKIP=deny scripts/check`.
   [x] #3 Décisions posées le 2026-10-29 (à confirmer) : les références de rôle et les valeurs par défaut passent par le même contrôle de secret que les valeurs de paramètres ; un doublon de valeur par défaut est une erreur.

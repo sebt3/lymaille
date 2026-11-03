@@ -249,6 +249,7 @@ Scenario: le secret reste utilisable dans le pad, masqué dans toute sortie
   Then l'appel du module a reçu la vraie valeur, et le texte rendu au LLM montre `*redacted secret*` à la place
 
 Tasks:
+  [ ] #18 L'ensemble des candidats construit à chaque erreur (`candidates_of`) reçoit les lignes d'usage des fonctions visibles, par @CandidateSet::with_usage (./suggest.sdd #6), lues de @FunctionEntry::usage (./introspect.sdd #12) : lot 0.2-B2, `agent-sessions/scratchpad#FR-14`. Scenario de bout en bout : un script appelle `sandbox::read_file("p")` sur un moteur dont le module `sandbox` a une fonction à table et une ligne d'usage ; l'erreur rendue contient `sandbox::read_file(#{ path: "…" })`. Ne touche ni la table des erreurs ni le masquage.
   [x] #1 Tests puis implémentation, dans l'ordre : pad et persistance entre appels, erreurs et rendu, avertissements, annulation (jeton miroir), audit et masquage, restauration.
       Validé le 2026-10-29 (validator, 12 mutants tués) sous `SKIP=deny scripts/check`. Lot E2 complet (tâches #10 à #14).
   [x] #2 Posé : le pad est un type de ce fichier et la boucle de tour (domaine `session`, tâche #2 de ../session/session.sdd) l'emploie ; elle range @PadSnapshot dans @SessionState (mutateurs `pub(crate)`) et émet l'événement de script depuis @ScriptRecord. Ce fichier ne dépend pas de @SessionState.

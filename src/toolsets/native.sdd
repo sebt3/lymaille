@@ -37,7 +37,7 @@ Must:
   Le texte du skill intégré n'affirme que ce que le scratchpad fait : chaque affirmation est vérifiée en exécutant le script qu'elle décrit (`built_in_claims_hold_in_the_scratchpad`), y compris les groupes `pure`, `format` et `host` de `modules()`, `functions("global")`, `functions("script")`, `functions("<module>")`, et la recherche de `find` (tous les mots, cinquante résultats au plus).
 
   @SkillTool implémente @NativeTool (../session/native_tool.sdd) : `name` rend `skill`, `definition` rend @skill_definition, `call` lit les arguments JSON `name` et `document` (tous deux optionnels) et rend le texte de `SkillTool::call`, l'erreur de skill inconnu comprise, comme texte d'erreur du résultat d'outil. @skill_definition rend la définition plate `name`, `description`, `parameters` (propriétés `name` et `document`, de type chaîne, aucune obligatoire) ; la `description` est, en anglais : `Read the skills granted to this session. With no argument, lists them (name and description). With `name`, returns the text of that skill; with `name` and `document`, one of its annex documents. Read `rhai-pad` first.`
-  Le corps du skill intégré `rhai-pad` (texte anglais) comprend, dans cet ordre : le fonctionnement d'un appel (valeur du dernier statement, état qui persiste) ; la découverte (`vars`, `modules`, `functions`, `toolsets`, `skills`, `find`, `rules`) ; `session_context()` ; un abrégé de Rhai d'une douzaine de lignes pour un modèle qui connaît Rhai approximativement (variables, chaînes à interpolation, tableaux, maps, closures (perdues à la restauration de session), boucles, `fn`, `try`/`catch`, `()`), qui renvoie à `functions()` et `find()` pour le reste ; un premier appel et un second appel d'exemple, le second utilisant une variable et une `fn` du premier ; le bloc @limits_notice. Chaque exemple et chaque affirmation de l'abrégé s'exécute dans un test (`built_in_claims_hold_in_the_scratchpad`), la sémantique du `;` final comprise : elle n'est écrite qu'après avoir été mesurée.
+  Le corps du skill intégré `rhai-pad` (texte anglais) comprend, dans cet ordre : le fonctionnement d'un appel (valeur du dernier statement, état qui persiste) ; la découverte (`vars`, `modules`, `functions`, `toolsets`, `skills`, `find`, `rules`) ; `session_context()` ; un abrégé de Rhai d'une douzaine de lignes pour un modèle qui connaît Rhai approximativement (variables, chaînes à interpolation, tableaux, maps, closures (perdues à la restauration de session), boucles, `fn`, `try`/`catch`, `()`), qui renvoie à `functions()` et `find()` pour le reste ; les pièges des modèles qui connaissent mal Rhai (`agent-sessions/scratchpad#FR-9`, `sebt3/lymaille#3`) : une chaîne brute qui contient `"#` s'écrit `##"…"##` et `r#"…"#` n'existe pas en Rhai, une chaîne entre accents graves ne peut pas contenir d'accent grave, une `fn` ne voit pas les variables du scope, et toute fonction d'un module MCP prend une seule table `#{ … }` (la ligne `Usage:` de sa documentation l'écrit) ; un premier appel et un second appel d'exemple, le second utilisant une variable et une `fn` du premier ; le bloc @limits_notice. Chaque exemple et chaque affirmation de l'abrégé s'exécute dans un test (`built_in_claims_hold_in_the_scratchpad`), la sémantique du `;` final comprise : elle n'est écrite qu'après avoir été mesurée.
 
 Depends on:
   ./skill.sdd
@@ -100,6 +100,11 @@ Scenario: chaque affirmation du skill intégré sur le scratchpad est vraie
   When chaque affirmation du texte (valeur finale, `let` persistant, `print` avant le résultat, `vars()`, `modules()`, `functions()`, `find()`, `rules()`) est exécutée
   Then chacune se vérifie, et les appels erronés (`functions("nope")`, `find("")`) échouent
 
+Scenario: les pièges de Rhai énoncés par le skill intégré sont vrais
+  Given le texte du skill intégré, et un scratchpad dont un module de test expose une fonction à un paramètre table
+  When les quatre pièges sont exécutés : `##"a"#b"##` rendu comme `a"#b`, `r#"x"#` refusé à la compilation, une chaîne entre accents graves contenant un accent grave refusée à la compilation, et la fonction du module appelée avec un texte (échec, la table seule `#{ k: 1 }` réussit)
+  Then chacun se vérifie comme le texte l'annonce, et le texte contient les quatre pièges
+
 Scenario: le texte du skill intégré décrit l'origine, le genre et la recherche
   Given le texte du skill intégré
   When on le lit
@@ -116,6 +121,7 @@ Scenario: les exemples du skill intégré s'exécutent
   Then le second voit la variable et la `fn` du premier, et chaque résultat annoncé par le texte se vérifie
 
 Tasks:
+  [ ] #5 Les quatre pièges de Rhai dans le corps du skill intégré `rhai-pad` (lot 0.2-B3, `agent-sessions/scratchpad#FR-9`, `AC-14`, `sebt3/lymaille#3`) : le Scenario « les pièges de Rhai … sont vrais » d'abord (rouge faute du texte), puis le texte, dans l'ordre fixé par `Must`. Le texte reste en anglais et chaque affirmation s'exécute (`built_in_claims_hold_in_the_scratchpad` est étendu ou doublé d'un test voisin). Le gabarit du skill ne change pas de forme.
   [x] #1 Tests puis implémentation, vérifié le 2026-10-30.
       Livré le 2026-10-30 (implémentation, à valider par le développeur principal). Écarts et choix posés, à relire :
       - le skill intégré s'appelle `rhai-pad` : un nom de skill n'admet pas `_` (./skill.sdd) ; l'outil reste `rhai_pad` dans son texte ;

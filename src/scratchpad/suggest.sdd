@@ -3,7 +3,7 @@ Spec: suggest
 Purpose:
   Candidats les plus proches quand une fonction, un module ou une variable est introuvable, pris parmi les seuls éléments accordés. Rend les erreurs de Rhai
     exploitables par le LLM sans jamais lui révéler un élément non accordé (`agent-sessions/scratchpad#FR-6`, `agent-sessions/scratchpad#AC-12`,
-    `agent-sessions#BR-2`).
+    `agent-sessions/scratchpad#FR-14`, `agent-sessions#BR-2`).
 
 Owns:
   ./suggest.rs
@@ -20,9 +20,11 @@ Exposes:
   @suggest_for
   @nearest
   @CandidateSet
+  @CandidateSet::with_usage
 
 Accepts:
   @CandidateSet::new: les chemins d'appel des fonctions visibles (@Catalog et fonctions définies par le LLM, ./introspect.sdd), les noms des modules accordés et les noms des variables du scope. Aucun autre élément n'entre dans l'ensemble.
+  @CandidateSet::with_usage: les lignes d'usage des fonctions visibles, des paires (chemin d'appel, texte d'usage) tirées de @FunctionEntry::usage (./introspect.sdd) ; un chemin qui n'est pas un candidat de fonction est ignoré. Rend l'ensemble, chaînable. @CandidateSet::new reste inchangé : sans cet appel, aucun usage.
   @nearest: un nom demandé, une liste de candidats (chaînes) et un nombre maximal de suggestions.
   @suggest_for: une @ScratchpadError::NotFound (genre, nom, nom de la fonction du script où elle est survenue) et un @CandidateSet.
 
@@ -35,7 +37,7 @@ Must:
   Aucune suggestion ne nomme un élément absent de l'ensemble : une fonction d'un module non accordé, une dépendance de toolset ou une fonction d'un groupe non accordé n'est jamais suggérée, même si elle est la plus proche (`agent-sessions/scratchpad#AC-12`).
   Distance : la distance d'édition de Levenshtein sur les caractères (valeurs scalaires Unicode), sensible à la casse. Pour un nom demandé non qualifié (sans `::`), elle se calcule aussi contre le dernier segment de chaque chemin candidat, et la plus petite des deux retient le candidat : `loki_querry` désigne `grafana::loki_query`. Pour un nom qualifié, la distance porte sur le chemin entier.
   Seuil : un candidat est retenu si sa distance est au plus `clamp(longueur du nom demandé / 3, 1, 3)`. Au plus trois suggestions sont rendues.
-  Distance zéro (le nom existe mais l'appel a la mauvaise arité ou les mauvais types) : le candidat est rendu avec sa signature (`grafana::loki_query(query: string, range: string) -> map`) au lieu de son seul chemin, pour que le LLM voie les paramètres attendus.
+  Distance zéro (le nom existe mais l'appel a la mauvaise arité ou les mauvais types) : le candidat est rendu avec sa signature (`grafana::loki_query(query: string, range: string) -> map`) au lieu de son seul chemin, pour que le LLM voie les paramètres attendus. Si la fonction déclare une ligne d'usage (@CandidateSet::with_usage), le candidat est rendu `{signature}; call it as: {usage}` (`grafana::loki_query(arguments: Map); call it as: grafana::loki_query(#{ query: "…" })`), pour qu'un modèle qui ne connaît pas la syntaxe d'une table Rhai la voie dans l'erreur (`agent-sessions/scratchpad#FR-14`). Sans ligne d'usage, le rendu est celui d'avant. Le texte d'usage n'est jamais ajouté à un candidat de distance non nulle.
   Un nom demandé vide ou sans candidat assez proche ne produit aucune suggestion ; la fonction ne panique jamais, y compris sur un nom très long (la distance est calculée en une complexité bornée par le produit des longueurs, les noms de plus de 128 caractères étant tronqués à 128).
   Variable introuvable alors que l'erreur est survenue dans une fonction du script (@ScratchpadError::NotFound portant le nom de cette fonction) et que le nom est une variable du scope : l'erreur est complétée de l'indication `functions cannot see scope variables: pass `{name}` as an argument`, parce qu'une `fn` du script ne lit pas le scope.
     Observed in: spikes/rhai-1-25 (`scope_visibility`) : `Variable not found` dans une `fn` qui lit une variable du scope.
@@ -75,6 +77,21 @@ Scenario: un nombre d'arguments incorrect affiche la signature
   Given la fonction visible `grafana::loki_query(query: string, range: string) -> map`
   When un script appelle `grafana::loki_query("x")`
   Then la suggestion est cette signature
+
+Scenario: un nombre d'arguments incorrect sur une fonction à table montre l'appel attendu
+  Given la fonction visible `sandbox::read_file(arguments: Map)` avec la ligne d'usage `sandbox::read_file(#{ path: "…" })`
+  When un script appelle `sandbox::read_file("path")`
+  Then la suggestion est `sandbox::read_file(arguments: Map); call it as: sandbox::read_file(#{ path: "…" })`
+
+Scenario: l'usage d'une fonction proche n'est pas montré
+  Given les mêmes fonctions, et un script qui appelle `sandbox::read_fil`
+  When les suggestions sont calculées
+  Then la suggestion est le seul chemin `sandbox::read_file`, sans signature ni usage
+
+Scenario: un usage donné pour un chemin inconnu est ignoré
+  Given un usage fourni pour `other::secret`, qui n'est pas un candidat de fonction
+  When les suggestions sont calculées
+  Then `other::secret` n'apparaît nulle part dans le message
 
 Scenario: le seuil exclut les noms éloignés
   Given la fonction visible `grafana::loki_query`
@@ -127,6 +144,7 @@ Scenario: les modules des fonctions visibles sont nommés une seule fois chacun
   Then `grafana` est suggéré une seule fois
 
 Tasks:
+  [ ] #6 @CandidateSet::with_usage et le rendu `call it as:` à distance zéro (lot 0.2-B2, `agent-sessions/scratchpad#FR-14`, `sebt3/lymaille#3`) : trois Scenarios ci-dessus, tests puis implémentation. Dépend de ./introspect.sdd #12.
   [x] #1 Tests puis implémentation, vérifié le 2026-10-30.
   [x] #2 Posé : seuil, plafond de trois suggestions et distance de Levenshtein. Réglages à ajuster à la mesure sur le jeu de tâches de référence (`agent-sessions#Risques`) ; ils n'affectent aucune règle de sécurité (le périmètre des candidats ne change pas).
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).

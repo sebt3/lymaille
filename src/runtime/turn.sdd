@@ -3,7 +3,7 @@ Spec: turn
 Purpose:
   Boucle de tour d'une session : un message entre (utilisateur, injection d'un watcher ou tâche d'un run batch), le modèle est appelé jusqu'à une réponse finale sans appel d'outil, chaque appel du tool `rhai_pad` s'exécute dans le scratchpad de la session ;
     erreurs transitoires réessayées avec backoff, compaction avant requête, annulation, dépassement de délai signalé, persistance en fin de tour
-    (`agent-sessions/session#FR-4`, `FR-5`, `FR-6`, `FR-7`, `AC-3`, `AC-9`, `agent-sessions#FR-4`, `agent-sessions#FR-6`).
+    (`agent-sessions/session#FR-4`, `FR-5`, `FR-6`, `FR-7`, `FR-16`, `AC-3`, `AC-9`, `AC-11`, `AC-12`, `agent-sessions#FR-4`, `agent-sessions#FR-6`).
 
 Owns:
   ./turn.rs
@@ -62,7 +62,10 @@ Must:
 
   Appel d'un tool natif enregistré par `with_native_tool` : la boucle l'appelle par son nom avec les arguments du modèle, sans passer par le scratchpad ; le texte rendu (ou l'erreur) est masqué par le @Redactor, borné par le plafond de rendu de la @Budget (`render_cap_chars`), puis ajouté à l'historique comme tout résultat d'outil. Un nom ni `rhai_pad` ni enregistré rend toujours un résultat d'erreur « unknown tool ». La boucle de tour ne dépend pas de `toolsets` : `skill` y entre par ce trait.
   Les définitions que la requête envoie sont celles du @SegmentContext, assemblées par l'hôte à partir de @rhai_pad_definition (./definition.sdd) et de la définition de chaque tool natif ; la boucle ne les fabrique pas.
-  Réponse tronquée (Décision du 2026-11-01 (accord du développeur principal, relevé du spike R2)) : quand la raison de fin est `Length`, la boucle émet l'événement `ResponseTruncated { has_text, has_tool_calls }` ; si la réponse n'a ni texte ni appel d'outil (un modèle à raisonnement qui a consommé tout le budget de sortie), le tour se termine en `Failed` avec le message fixe « the response was cut by the output limit before any text or tool call » (jamais copié dans l'historique, qui reste valide) au lieu d'un tour valide mais vide. Une réponse tronquée qui porte du texte ou des appels d'outil suit son cours (un appel aux arguments coupés est déjà rendu comme appel erroné). Les jetons de raisonnement rapportés s'ajoutent au compteur `reasoning` de la session.
+  Réponse tronquée (Décision du 2026-11-01 (accord du développeur principal, relevé du spike R2)) : quand la raison de fin est `Length`, la boucle émet l'événement `ResponseTruncated { has_text, has_tool_calls }` ; si la réponse n'a ni texte ni appel d'outil (un modèle à raisonnement qui a consommé tout le budget de sortie), le tour se termine en `Failed` avec le message fixe « the response was cut by the output limit before any text or tool call » (jamais copié dans l'historique, qui reste valide) au lieu d'un tour valide mais vide ; avant d'échouer, la boucle ajoute à l'historique un message `Discarded` de cause `Truncated` qui porte le raisonnement partiel de la réponse (masqué comme tout raisonnement, avec son émetteur), car sans lui l'échec ne se diagnostique pas (`agent-sessions/session#FR-16`, `sebt3/lymaille#2`). Une réponse tronquée qui porte du texte ou des appels d'outil suit son cours (un appel aux arguments coupés est déjà rendu comme appel erroné). Les jetons de raisonnement rapportés s'ajoutent au compteur `reasoning` de la session.
+  Réponse vide (`agent-sessions/session#FR-16`, `sebt3/lymaille#1`) : une réponse sans appel d'outil et dont le texte est vide ou ne contient que des blancs, n'est pas une réponse finale, quelle que soit sa raison de fin sauf `Length` (la réponse vide coupée est le cas du paragraphe précédent : elle échoue sans relance). La boucle ne l'ajoute pas comme message d'assistant ; elle ajoute un message `Discarded` de cause `Empty` qui garde le raisonnement (masqué, avec son émetteur) et émet `EmptyResponse { will_retry }`. Si aucune relance n'a eu lieu depuis la dernière réponse non vide, `will_retry` vaut vrai : la boucle ajoute à l'historique un message utilisateur correctif de texte fixe (anglais, jamais masqué car sans donnée : « Your previous response was empty: it had no text and no tool call. A tool call written inside your reasoning is not executed. Reply with your answer in text, or make the tool call you intended. ») et refait une requête, qui compte dans le plafond d'itérations et dans le nombre d'appels au modèle. Si la réponse suivante est vide aussi, `will_retry` vaut faux et le tour se termine en `Failed` avec le message fixe « the response was empty (no text and no tool call), even after a reminder ». Une réponse non vide remet le compteur de relances à zéro : une seconde réponse vide plus loin dans le même tour reçoit son propre rappel. Les jetons de raisonnement rapportés comptent comme pour toute réponse.
+  Limite connue, acceptée : le rappel est un message utilisateur, et le mode de rejeu `IntraTurn` repart du dernier message utilisateur (../context/replay.sdd) ; à la requête de relance, le raisonnement des étapes précédentes du même tour n'est donc plus rejoué. La relance suit une anomalie ; le contourner demanderait un rôle de message que les modèles visés n'acceptent pas en cours de conversation.
+  La requête envoyée au modèle ne contient jamais de message `Discarded` : la boucle les retire de la liste qu'elle bâtit, et le raisonnement de ces messages n'est jamais rejoué quel que soit le mode du profil. Ils comptent pour zéro caractère dans l'estimation de tokens de repli.
 
 Must not:
   Lire l'horloge système ou dormir en dehors de @Clock et de @CancelHandle::sleep ; ouvrir un fichier ou un processus.
@@ -184,12 +187,43 @@ Scenario: une réponse vide tronquée par la limite de sortie échoue explicitem
   When le tour s'exécute
   Then l'issue est Failed avec le message fixe, l'événement ResponseTruncated est émis, l'historique ne contient aucun message d'assistant vide, et le compteur de raisonnement vaut 12
 
+Scenario: le raisonnement d'une réponse coupée est conservé
+  Given une réponse Length sans texte ni appel d'outil dont le raisonnement vaut `penser longtemps` (émetteur `m1`)
+  When le tour s'exécute
+  Then l'historique se termine par un message `Discarded` de cause `Truncated` qui porte ce raisonnement et cet émetteur, aucune seconde requête n'est faite, et un secret déclaré dans le raisonnement y est masqué
+
+Scenario: une réponse vide après un résultat d'outil est relancée avec un message correctif
+  Given un fournisseur scripté qui demande `rhai_pad`, puis répond sans texte ni appel d'outil avec du raisonnement (raison de fin Stop), puis répond « fait »
+  When le tour s'exécute
+  Then l'issue est Valid, la réponse est « fait », `EmptyResponse` est émis avec will_retry vrai, et la troisième requête se termine par le message utilisateur correctif de texte fixe
+
+Scenario: le raisonnement d'une réponse vide est gardé mais jamais renvoyé
+  Given la même séquence, avec le mode de rejeu `AllTurns`
+  When le tour s'exécute
+  Then l'historique contient un message `Discarded` de cause `Empty` avec le raisonnement, et aucune requête envoyée au fournisseur ne contient de message `Discarded` ni ce raisonnement
+
+Scenario: une relance vide échoue
+  Given un fournisseur scripté dont les deux réponses sont vides
+  When le tour s'exécute
+  Then l'issue est Failed avec le message fixe de la réponse vide, deux `EmptyResponse` sont émis (will_retry vrai puis faux), l'historique reste valide et se termine par le rappel puis la seconde réponse écartée
+
+Scenario: un texte fait de blancs est une réponse vide
+  Given une réponse Stop dont le texte vaut « \n  » et sans appel d'outil
+  When le tour s'exécute
+  Then elle est traitée comme une réponse vide
+
+Scenario: deux réponses vides séparées par une réponse utile reçoivent chacune un rappel
+  Given une réponse vide, puis un appel d'outil, puis une réponse vide, puis « fini »
+  When le tour s'exécute
+  Then l'issue est Valid et deux rappels ont été ajoutés
+
 Scenario: une réponse tronquée qui porte du texte suit son cours
   Given une réponse Length avec le texte `Bonjour`
   When le tour s'exécute
   Then l'issue est Valid, la réponse vaut `Bonjour` et ResponseTruncated est émis avec has_text vrai
 
 Tasks:
+  [ ] #9 Réponse vide relancée une fois et raisonnement des réponses écartées conservé (lot 0.2-A3, `agent-sessions/session#FR-16`, `sebt3/lymaille#1` et `#2`) : tests des Scenarios « réponse vide » et « raisonnement tronqué », puis implémentation. Dépend des tâches 0.2-A1 (../session/history.sdd #4) et 0.2-A2 (../session/event.sdd #13). Les `match` exhaustifs sur @Message de `turn.rs` (estimation de caractères, décompte des appels et du raisonnement) traitent `Discarded` pour zéro.
   [x] #1 Tests puis implémentation (lot R1), validé le 2026-10-30.
   [x] #2 Décidé le 2026-10-30 par le développeur principal : un tool inconnu rend un résultat d'erreur au modèle ; le tool `skill` (../toolsets/native.sdd, non livré) s'y branchera par un point d'extension ajouté avec ce domaine. À confirmer.
   [x] #3 Décidé le 2026-10-30 par le développeur principal : plafond d'itérations par tour de 200 par défaut (`agent-sessions/session#FR-4` ne fixe aucune limite ; sans plafond, un modèle qui boucle sur un outil ne s'arrêterait jamais). À confirmer.

@@ -3,7 +3,7 @@ Spec: mcp_module
 Purpose:
   Génération du module Rhai d'un rôle MCP à partir de `tools/list`, en mode réel (les fonctions appellent le tool) et en mode coquille (mêmes noms, signatures et documentation, tout appel rend l'erreur d'inspection seule) ;
     validation des arguments contre le JSON Schema du tool, reconnexion avec backoff court, enregistrements d'appel
-    (`agent-sessions/modules#FR-6`, `FR-9`, `FR-10`, `FR-11`, `AC-3`, `AC-4`, `AC-5`, `AC-6`, `AC-7`).
+    (`agent-sessions/modules#FR-6`, `FR-9`, `FR-10`, `FR-11`, `FR-12`, `AC-3`, `AC-4`, `AC-5`, `AC-6`, `AC-7`, `AC-8`).
 
 Owns:
   ./mcp_module.rs
@@ -28,7 +28,8 @@ Accepts:
 
 Returns:
   Module réel : une fonction par tool, à un paramètre map (`grafana::loki_query(#{...})`) ; le retour est le JSON du tool converti en `Dynamic`.
-  La documentation introspectable de chaque fonction (commentaires de métadonnées Rhai) contient la description MCP, le nom MCP d'origine et le schéma d'entrée sérialisé.
+  La documentation introspectable de chaque fonction (commentaires de métadonnées Rhai) contient la description MCP, le nom MCP d'origine, le schéma d'entrée sérialisé et la ligne d'usage de `agent-sessions/modules#FR-12`.
+  Ligne d'usage : une ligne `Usage: {rôle}::{fonction}(#{ champs })` (préfixe lu par ../scratchpad/introspect.sdd), où les champs sont les propriétés obligatoires du schéma d'entrée, dans l'ordre du `required` du schéma, chacune suivie d'un exemple selon son type (`type` du schéma : chaîne `"…"`, entier `0`, nombre `0.0`, booléen `false`, tableau `[]`, objet `#{}` ; autre cas ou absence de `type` : `()`). Un nom de champ qui n'est pas un identifiant Rhai valide s'écrit entre guillemets (`"my-field": "…"`). Seuls les champs obligatoires sont écrits dans l'appel, douze au plus ; la ligne entière ne dépasse pas 400 caractères (au-delà elle se coupe après le dernier champ entier qui tient, suivi de `, …`). Sans propriété obligatoire : `{rôle}::{fonction}(#{})`. Les propriétés facultatives sont nommées sur la ligne suivante : `Optional fields: a, b` (omise s'il n'y en a pas ; douze noms au plus). Ni valeur par défaut, ni énumération, ni description du schéma n'entrent dans ces lignes (`agent-sessions#CON-3`).
   Descripteur de coquille : mêmes noms de fonction, mêmes paramètres (un map) et même documentation que le module réel.
 
 Raises:
@@ -89,6 +90,36 @@ Scenario: la documentation reprend le schéma
   When la documentation de sa fonction est lue
   Then elle contient le schéma et le nom `query`
 
+Scenario: la documentation porte la ligne d'usage
+  Given sous le rôle `sandbox` un tool `read_file` dont le schéma exige le champ chaîne `path` et accepte l'entier facultatif `limit`
+  When la documentation de la fonction est lue
+  Then elle contient la ligne `Usage: sandbox::read_file(#{ path: "…" })` suivie de la ligne `Optional fields: limit`
+
+Scenario: les exemples suivent le type de chaque champ obligatoire
+  Given un tool dont les champs obligatoires sont une chaîne, un entier, un nombre, un booléen, un tableau, un objet et un champ sans type, dans cet ordre
+  When la ligne d'usage est lue
+  Then elle écrit `"…"`, `0`, `0.0`, `false`, `[]`, `#{}` et `()` dans cet ordre
+
+Scenario: un nom de champ qui n'est pas un identifiant est entre guillemets
+  Given un tool dont le champ obligatoire `my-field` est une chaîne
+  When la ligne d'usage est lue
+  Then elle contient `"my-field": "…"`
+
+Scenario: sans champ obligatoire
+  Given un tool sans propriété obligatoire
+  When la ligne d'usage est lue
+  Then elle vaut `Usage: sandbox::tool(#{})`
+
+Scenario: la ligne d'usage est bornée et ne divulgue ni défaut ni énumération
+  Given un tool de trente champs obligatoires aux noms longs, dont l'un a un défaut `défaut-secret-x` et un autre une énumération `valeur-enum-x`
+  When la ligne d'usage est lue
+  Then elle compte au plus 400 caractères, ne nomme pas plus de douze champs et ne contient ni `défaut-secret-x` ni `valeur-enum-x`
+
+Scenario: la coquille porte la même ligne d'usage
+  Given le même tool vu par le descripteur de coquille
+  When la documentation de sa fonction est lue
+  Then elle contient la même ligne d'usage que le module réel
+
 Scenario: appel réussi
   Given un tool qui rend `{"rows": [1, 2]}`
   When un script appelle la fonction avec des arguments valides
@@ -135,6 +166,7 @@ Scenario: runtime current_thread
   Then l'erreur explicite de `vynil-core` est rendue et le connecteur n'a reçu aucun appel
 
 Tasks:
+  [ ] #8 Ligne d'usage et ligne des champs facultatifs dans la documentation de chaque fonction, modes réel et coquille (lot 0.2-B1, `agent-sessions/modules#FR-12`, `AC-8`, `sebt3/lymaille#3`) : les six Scenarios ci-dessus, tests puis implémentation. Écrit pour la lecture de ../scratchpad/introspect.sdd #12.
   [x] #1 Tests puis implémentation (`McpReconnect` est livré, ../session/event.sdd #8). Code et tests livrés, validés le 2026-10-30 (validator, mutations manuelles, trois écarts de tests corrigés) sous `SKIP=deny scripts/check`, puis `scripts/check` complet après l'autorisation de `MIT-0` (voir #6).
   [x] #2 `agent-sessions/modules#FR-7` : les notifications MCP alimentent la source `mcp` des watchers (Décision du 2026-10-31 (accord du développeur principal), lot Q4) : le connecteur livre `next_notification()` (./mcp.sdd #5, ./mcp_client.sdd #5) et l'hôte les relie à `EventHub::notify` ; la source `workspace` est alimentée de même à partir des événements `TodoChanged` et `MemoryChanged` qui existent déjà (fonction de conversion dans ../delegation/sources.sdd #3).
   [x] #3 Posé : le modèle de validation est `jsonschema` et le message d'erreur du schéma n'est jamais rendu tel quel (il peut citer la valeur) : seuls le chemin du champ et la nature de la règle violée entrent dans l'erreur Rhai. À confirmer. Décidé le 2026-10-30 par le développeur principal. 

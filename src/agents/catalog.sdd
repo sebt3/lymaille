@@ -2,7 +2,7 @@ Spec: catalog
 
 Purpose:
   Traits de stockage du catalogue (agents, fournisseurs, profils de modèle) que l'hôte implémente, un stockage en mémoire pour les tests,
-    et la cascade @Layered qui empile un catalogue par niveau (le niveau projet au-dessus du niveau utilisateur)
+    et la cascade @Layered qui empile un catalogue par niveau (le niveau partagé au-dessus du niveau utilisateur)
     (`agent-sessions#CON-1`, `agent-sessions/agents#FR-4`, `FR-6`, `FR-7`).
 
 Owns:
@@ -22,7 +22,7 @@ Accepts:
   @ProfileStore::get_profile / put_profile: un nom / un @ModelProfile.
   @ProviderStore::get_provider / put_provider: un nom / un @Provider.
   @Layered::new: une couche haute `top` et une couche basse `base`, chacune un stockage qui implémente le trait demandé
-    (un catalogue par niveau, que l'hôte empile : le niveau projet en haut, le niveau utilisateur en bas).
+    (un catalogue par niveau, que l'hôte empile : le niveau partagé en haut, le niveau utilisateur en bas).
 
 Returns:
   Chaque `get_*` rend l'objet s'il existe, sinon rien. Chaque `put_*` remplace l'objet de même nom.

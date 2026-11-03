@@ -108,6 +108,7 @@ Scenario: la surcharge remplace le défaut, une surcharge vide non
   Then il rend `custom` pour la première, et @DEFAULT_SUMMARY_PROMPT pour les trois autres
 
 Tasks:
+  [ ] #P6 Message `Discarded` (../session/history.sdd) : la stratégie par défaut ne le rend pas dans le texte donné au résumeur (ni ligne, ni raisonnement), les messages qui l'entourent gardent leur ordre (lot 0.2-A1, `agent-sessions/session#FR-16`). Un test.
   [x] #1 Tests (résumeur simulé) puis implémentation.
   [x] #4 Rendre les appels d'outil et le nom de l'outil de chaque résultat dans la transcription, et le Scenario « les appels d'outils et les noms d'outils sont dans la transcription » (défaut relevé au rapport du lot F2).
   [x] #6 Tests mineurs relevés : contenu multiligne, forme exacte de la ligne `reasoning: `, historique inchangé aussi sur le chemin de succès.

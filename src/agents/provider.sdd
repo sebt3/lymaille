@@ -2,7 +2,7 @@ Spec: provider
 
 Purpose:
   Fournisseur d'inférence comme entité nommée : type de fournisseur, adresse et authentification par références que l'hôte résout. Vit à un niveau, utilisateur par défaut
-    (`agent-sessions/agents#FR-6`).
+    (`agent-sessions/agents#FR-6`, `agent-sessions#Glossaire`, niveau partagé).
 
 Owns:
   ./provider.rs
@@ -16,7 +16,7 @@ Exposes:
 Accepts:
   @Provider::new_with_detector: les paramètres de @Provider::new et un `&dyn SecretDetector` (../secret.sdd) ; @Provider::new utilise @DefaultSecretDetector.
   @Provider::check: un `&dyn SecretDetector` ; rend vrai si aucune référence du fournisseur ne ressemble à un secret pour ce détecteur.
-  @Provider::new: le nom, le type de fournisseur (texte, p. ex. `openai`, `anthropic`, `ollama`), une référence d'adresse et une référence d'authentification optionnelle, et un @ProviderLevel (`User` ou `Project`).
+  @Provider::new: le nom, le type de fournisseur (texte, p. ex. `openai`, `anthropic`, `ollama`), une référence d'adresse et une référence d'authentification optionnelle, et un @ProviderLevel (`User`, le défaut, ou `Shared`).
 
 Returns:
   Accesseurs en lecture seule pour chaque champ.
@@ -26,10 +26,20 @@ Must:
   Le nom, le type et les références sont non vides, sinon `None`.
   Se sérialise et se désérialise à l'identique ; la désérialisation applique les mêmes refus que le constructeur.
   Le `Debug` ne montre que le nom, le type et le niveau.
+  @ProviderLevel se sérialise en `user` et `shared` ; l'ancien nom `project` de la 0.1 (`Project`, renommé `Shared` en 0.2.0 : le mot prêtait à confusion avec la notion de projet de l'application hôte, `sebt3/lymaille#5`) est encore accepté à la désérialisation et lu comme `Shared`, jamais écrit. La variante `Project` n'existe plus.
 
 Depends on:
   serde
   ../secret.sdd
+
+Can modify:
+  ./catalog.rs: les occurrences de `ProviderLevel::Project` de ses tests et de son rustdoc deviennent `Shared` (« niveau partagé »), avec ./catalog.sdd.
+  ./mod.rs et ../lib.rs: ré-export inchangé (le type garde son nom) ; rien à modifier sauf si le compilateur l'exige.
+
+Scenario: le niveau partagé fait l'aller-retour et l'ancien nom est relu
+  Given un fournisseur de niveau `Shared`, puis un JSON de la 0.1 dont le niveau vaut `project`
+  When le premier est sérialisé puis désérialisé, et le second désérialisé
+  Then le premier revient égal avec le niveau `shared` dans son texte, et le second a le niveau `Shared`
 
 Scenario: les références sont des noms
   Given un fournisseur construit avec la référence d'adresse `vllm-strix` et la référence d'authentification `vllm-key`
@@ -62,6 +72,7 @@ Scenario: un détecteur de l'hôte juge les références
   Then la première est refusée (None) et la seconde acceptée, et Provider::check rend les mêmes verdicts sur un fournisseur chargé
 
 Tasks:
+  [ ] #5 Renommer `ProviderLevel::Project` en `Shared`, alias de lecture `project` (lot 0.2-C1, `agent-sessions#Glossaire`, `sebt3/lymaille#5`) : le Scenario ci-dessus d'abord, puis le renommage, puis toutes les occurrences de la crate (tests de ./catalog.sdd compris). Rupture d'API publique assumée pour la 0.2.0.
   [x] #4 Tests manquants : préfixe `sk-` (dont `SK-`), blanc dans une référence, nom et type blancs, désérialisation JSON d'une référence en clair (refus). Rendre `sk-` insensible à la casse.
   [x] #1 Tests puis implémentation.
   [x] #3 Posé à l'implémentation : une référence est refusée si elle est vide, contient un blanc, un `://` suivi d'un `@`, ou commence par `sk-` ou `Bearer` (casse indifférente pour les deux, décidé) ; une URL sans identifiants est acceptée ; `kind` et `name` ne sont testés que sur le vide.
