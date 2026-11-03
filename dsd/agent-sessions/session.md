@@ -101,6 +101,19 @@ non-interruption sur le temps.
     - **Source:** user instruction, 2026-10-26 ; agent-sessions#DEC-13 ; granularité et vocabulaire d'étiquettes libres (définis par l'hôte) confirmés, user instruction, 2026-10-27
     - **Verified by:** `AC-10`
 
+- **FR-16 - MUST:** Un tour ne se termine jamais valide sans réponse. Une réponse du modèle qui n'a ni texte ni appel
+  d'outil, quelle que soit sa raison de fin, est écartée : elle n'entre pas dans les messages envoyés au modèle. La
+  librairie relance alors le modèle une seule fois, avec un message correctif ajouté à l'historique ; si la relance est elle aussi
+  vide, le tour échoue avec un message fixe. Chaque réponse vide produit un événement. Une réponse coupée par la limite de
+  sortie sans texte ni appel d'outil échoue sans relance (même limite, même coupure). Dans les deux cas, le raisonnement
+  produit jusque-là (complet pour une réponse vide, partiel pour une réponse coupée) est conservé dans l'historique avec son
+  émetteur, marqué comme écarté (vide ou tronqué) et masqué des secrets ; il n'est jamais renvoyé au modèle et se lit à
+  l'audit et au diagnostic (FR-12).
+    - **Source:** `sebt3/lymaille#1` (famille Qwen3.x : l'appel d'outil écrit dans le bloc de raisonnement, réponse vide
+      jugée valide, 1 occurrence sur 25 exécutions) et `#2` (raisonnements de 40 000 caractères coupés par la limite de
+      sortie, échec impossible à diagnostiquer), 2026-11-03 ; relance unique puis échec, user instruction, 2026-11-03
+    - **Verified by:** `AC-11`, `AC-12`
+
 ## Décisions
 
 - **DEC-1 - Collisions d'écriture laissées au stockage**
@@ -163,6 +176,13 @@ Source: user instruction, 2026-10-24
   du même tour, après le résultat de l'outil, sans ouvrir de second tour.
 - **AC-10:** Une étiquette ajoutée à un run après la fin de la session est restituée à la restauration avec son émetteur et sa
   date ; ajouter une seconde étiquette conserve la première.
+- **AC-11:** Avec un fournisseur simulé dont la première réponse n'a ni texte ni appel d'outil mais du raisonnement, puis
+  répond « fait », le tour est valide et sa réponse est « fait » ; la requête de la relance se termine par le message correctif,
+  l'historique garde le raisonnement de la réponse écartée marqué vide, et un événement de réponse vide a été émis. Si la
+  relance est vide elle aussi, le tour échoue avec le message fixe et l'historique reste valide.
+- **AC-12:** Avec un fournisseur simulé dont la réponse est coupée par la limite de sortie sans texte ni appel d'outil et porte du
+  raisonnement, le tour échoue sans relance ; l'historique garde le raisonnement partiel marqué tronqué, et la requête suivante
+  du modèle (nouveau tour) ne le contient pas.
 
 ## Réalisation SpecDD
 
@@ -172,7 +192,7 @@ Specs dans `src/session/` (une par fichier source, spec de répertoire `session.
 - `id.sdd` : identifiants typés de session, de tour et de run.
 - `format.sdd` : version du format de session et règle de compatibilité à la restauration (FR-3, AC-2).
 - `error.sdd` : erreur typée du module.
-- `history.sdd` : historique persisté, raisonnement, appels d'outils, frontières de segment (FR-1).
+- `history.sdd` : historique persisté, raisonnement, appels d'outils, frontières de segment, réponses écartées (FR-1, FR-16).
 - `segment.sdd` : contexte d'un segment tel que le modèle l'a reçu (prompt rendu, tools natifs, profil résolu).
 - `tagged_value.sdd` : valeurs de variables étiquetées par leur type réel (`char`, `blob`, entier, flottant).
 - `state.sdd` : état persisté et (dé)sérialisation JSON, nature de la session, parent, cible d'inspection (FR-1, FR-2).

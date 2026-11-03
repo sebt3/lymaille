@@ -36,9 +36,13 @@ fournit l'abstraction des fournisseurs.
   ContextType et de définitions de ToolsetContext prédéterminés, stockés par trait.
     - **Source:** user instruction, 2026-10-24
 
-- **FR-5 - MUST:** Au démarrage, l'utilisateur choisit un agent principal (de travail ou de configuration) et un ToolsetContext ; la session sait ainsi
-  quel environnement elle pilote.
-    - **Source:** agent-sessions#BO-3
+- **FR-5 - MUST:** Une session démarre sur un contexte de travail (un ToolsetContext, `agent-sessions#BR-9`) : l'agent principal
+  (de travail ou de configuration) en découle, et la session sait ainsi quel environnement elle pilote. L'hôte désigne à la
+  librairie l'agent et le ToolsetContext ; l'utilisateur ne choisit pas d'agent, et la librairie ne demande aucune approbation en
+  cours de session pour élargir ce que le contexte a fixé avant son début. La résolution du contexte vers l'agent par défaut
+  relève de l'hôte.
+    - **Source:** agent-sessions#BO-3 ; reformulé, `sebt3/lymaille#4` et `#5`, 2026-11-03 : le texte d'origine disait que
+      l'utilisateur choisit un agent principal au démarrage
     - **Verified by:** `AC-1`
 
 ## Mapping fournisseur, modèle et agent
@@ -48,10 +52,10 @@ capacités, tokenisation) ne sont pas toujours fiables : une couche de surcharge
 et ce que l'agent consomme.
 
 - **FR-6 - MUST:** Un fournisseur est une entité nommée (type de fournisseur `rig`, adresse et authentification par
-  références) qui vit à un niveau, utilisateur par défaut, et se stocke par un trait.
+  références) qui vit à un niveau (utilisateur par défaut, ou partagé), et se stocke par un trait.
     - **Source:** user instruction, 2026-10-24
 
-- **FR-7 - MUST:** Un profil de modèle est une entité nommée, de niveau utilisateur ou projet et stockée par un trait,
+- **FR-7 - MUST:** Un profil de modèle est une entité nommée, de niveau utilisateur ou partagé et stockée par un trait,
   qui désigne un fournisseur et un modèle et peut surcharger les métadonnées détectées : taille maximale de contexte,
   support des appels d'outils, paramètres d'échantillonnage, indice de tokenisation, nombre maximal de requêtes simultanées, mode de rejeu du raisonnement. Le profil résolu est la détection
   recouverte par les surcharges ; la surcharge l'emporte toujours.
@@ -78,7 +82,8 @@ et ce que l'agent consomme.
 ## Acceptation
 
 - **AC-1:** Une session démarrée avec l'agent A et le ToolsetContext C rend un prompt système contenant les valeurs de
-  C, et n'offre que les toolsets de A.
+  C, et n'offre que les toolsets de A ; l'agent et le contexte viennent de l'hôte, sans choix de l'utilisateur ni approbation en
+  cours de session.
 - **AC-2:** Un profil qui surcharge la taille de contexte annoncée par le fournisseur est celle qu'utilise le calcul de
   compaction de `agent-sessions/context-window#FR-2`.
 

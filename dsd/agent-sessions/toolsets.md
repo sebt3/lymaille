@@ -37,7 +37,7 @@ uniquement) s'appliquent.
     - **Source:** agent-sessions#DEC-11 ; user instruction, 2026-10-24
     - **Verified by:** `AC-3`, `AC-4`
 
-- **FR-5 - MUST:** Un ToolsetContext est une entité nommée qui vit à un niveau (utilisateur, projet ou session) et se
+- **FR-5 - MUST:** Un ToolsetContext est une entité nommée qui vit à un niveau (utilisateur, partagé ou session) et se
   stocke par un trait ; il ne contient que des références, pas de secret.
     - **Source:** user instruction, 2026-10-24 ; agent-sessions#CON-3
 
@@ -79,7 +79,7 @@ uniquement) s'appliquent.
     - **Source:** user instruction, 2026-10-25
     - **Verified by:** `AC-9`
 
-- **FR-9 - MUST:** Un ContextType est une entité nommée qui vit à un niveau (utilisateur ou projet) et se stocke par un
+- **FR-9 - MUST:** Un ContextType est une entité nommée qui vit à un niveau (utilisateur ou partagé) et se stocke par un
   trait ; un toolset le référence par son nom, et ce schéma est la seule source du vocabulaire des rôles et paramètres
   partagés.
     - **Source:** agent-sessions#DEC-11
@@ -141,6 +141,14 @@ uniquement) s'appliquent.
     - **Source:** user instruction, 2026-10-29 ; agent-sessions#BR-8
     - **Verified by:** `AC-14`
 
+- **FR-20 - MUST:** Le nom d'un ContextType est un identifiant non vide de lettres ASCII, chiffres, tirets et soulignés
+  (`[A-Za-z0-9_-]+`), majuscules comprises : un hôte y porte un préfixe réservé de son catalogue (`G_cluster`) que l'identifiant
+  soit lisible comme variable Rhai (`_`) ou non (`-`). Les noms qui ne diffèrent que par la casse sont deux types distincts.
+  Aucun mécanisme d'espace de noms n'est ajouté : le préfixe est une convention de l'hôte.
+    - **Source:** `sebt3/lymaille#5` point 1 (hôte miryad-core : le `-` est exclu des identifiants Rhai, le `_` y est valide),
+      2026-11-03 ; absence d'espace de noms, user instruction, 2026-11-03
+    - **Verified by:** `AC-15`
+
 ## Questions ouvertes
 
 
@@ -174,6 +182,8 @@ uniquement) s'appliquent.
 - **AC-14:** Un agent de configuration ouvre un contexte qui lie le rôle `grafana`, puis `contexts::check` d'un agent de
   travail contre ce contexte rend la liste des écarts sans exécuter de fonction ; la session de configuration lit les erreurs d'une
   session passée sans que le texte ne contienne un secret déclaré.
+- **AC-15:** Un ContextType nommé `G_cluster-2` est accepté et retrouvé par ce nom exact, `g_cluster-2` en est un autre ; un nom vide ou
+  qui contient une espace, un point ou un caractère non ASCII est refusé.
 
 ## Réalisation SpecDD
 

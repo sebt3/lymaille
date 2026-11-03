@@ -79,9 +79,13 @@ et closures. `agent-sessions#CON-2` place le moteur dans `vynil-core`.
 
 - **FR-9 - MUST:** Les limites de `agent-sessions#CON-4` sont exposées au LLM par le skill intégré sur `rhai_pad`
   (`agent-sessions/toolsets#FR-18`), avec la façon de les contourner : passer les données en argument et lire le
-  ToolsetContext par `session_context()` (`agent-sessions/toolsets#FR-17`) ; `const` n'existe pas (FR-12).
-    - **Source:** agent-sessions#CON-4
-    - **Verified by:** `AC-6`
+  ToolsetContext par `session_context()` (`agent-sessions/toolsets#FR-17`) ; `const` n'existe pas (FR-12). Il dit aussi ce que
+  les modèles qui connaissent mal Rhai se trompent à écrire : une chaîne brute qui contient `"#` s'écrit `##"…"##` (le `r#"…"#`
+  de Rust n'existe pas en Rhai), une chaîne entre accents graves ne peut pas contenir d'accent grave, et toute fonction d'un
+  module MCP prend une seule table `#{ … }` (FR-14).
+    - **Source:** agent-sessions#CON-4 ; trois règles ajoutées, `sebt3/lymaille#3` (« Related »), 2026-11-03 : appliquées dans
+      les exécutions des hôtes, elles ont ramené les erreurs de script de 14 à 0 et les appels de 60 à 9-10
+    - **Verified by:** `AC-6`, `AC-14`
 
 - **FR-10 - MUST:** Un appel MCP ou d'inférence en cours depuis un script est abandonné à l'annulation du run, sans
   attendre sa fin.
@@ -97,6 +101,17 @@ et closures. `agent-sessions#CON-2` place le moteur dans `vynil-core`.
   a définies est lisible, et ces fonctions ne sont pas appelables. Aucun script n'est rejoué pour ouvrir la cible (`DEC-1`).
     - **Source:** user instruction, 2026-10-29
     - **Verified by:** `AC-13`
+
+- **FR-14 - MUST:** Quand une fonction existe mais est appelée avec un nombre ou des types d'arguments qui ne lui conviennent
+  pas, l'erreur rendue au LLM montre comment l'appeler. Pour une fonction à un seul paramètre map, cas de toute fonction
+  générée d'un module MCP (`agent-sessions/modules#FR-10`), l'appel attendu est écrit sous la forme Rhai d'une table littérale
+  construite d'après le schéma d'entrée du tool (`read_file(#{ path: "…" })`), les champs obligatoires d'abord. Toute fonction de
+  module peut déclarer cette ligne d'usage dans sa documentation ; l'introspection la lit (`agent-sessions#FR-2`) et ne la
+  montre qu'avec les éléments accordés (`agent-sessions#BR-2`).
+    - **Source:** `sebt3/lymaille#3`, 2026-11-03 : « function not found … Closest candidates: read_file(arguments: Map) » ne
+      montre pas la syntaxe `#{…}` ; Qwen3.6 et Qwen3.8-flash en ont dérivé dès le premier appel (60 appels et 14 erreurs
+      de script pour une tâche de 9-10 appels)
+    - **Verified by:** `AC-14`
 
 ## Décisions
 
@@ -242,6 +257,9 @@ Source: user instruction, 2026-10-30
 
 - **AC-13:** Dans `rhai_prod_inspect`, `functions()` liste les fonctions d'un module MCP de la cible avec leur documentation et l'appel de l'une
   d'elles rend l'erreur d'inspection seule sans appel réseau ; sur une session passée, la valeur d'une variable se lit et son écriture échoue.
+- **AC-14:** Un script qui appelle `sandbox::read_file("path")`, fonction MCP dont le schéma exige le champ texte `path`, reçoit une
+  erreur qui contient `read_file(#{ path: "…" })` ; le skill intégré sur `rhai_pad` contient les trois règles de FR-9, et chacune
+  de ses affirmations est vraie quand on l'exécute.
 
 ## Réalisation SpecDD
 
@@ -255,8 +273,8 @@ Specs créées dans `src/scratchpad/` (une par fichier source prévu, spec de r�
 - `render.sdd` : rendu borné, JSON compact, troncature début et fin avec avis (FR-5, AC-4).
 - `format.sdd` : fonctions de formatage exposées au LLM (FR-8, AC-5).
 - `persist.sdd` : variables étiquetées, détection des closures, fonctions par texte source, restauration (FR-2, FR-7, DEC-1, AC-1, AC-8).
-- `introspect.sdd` : catalogue, introspection et recherche `find` (FR-3, FR-9, AC-2, AC-6).
-- `suggest.sdd` : candidats les plus proches parmi les seuls éléments accordés (FR-6, AC-12).
+- `introspect.sdd` : catalogue, introspection et recherche `find`, ligne d'usage d'une fonction (FR-3, FR-9, FR-14, AC-2, AC-6, AC-14).
+- `suggest.sdd` : candidats les plus proches parmi les seuls éléments accordés, appel attendu d'une fonction existante (FR-6, FR-14, AC-12, AC-14).
 - `run.sdd` : le pad et l'exécution d'un appel de `rhai_pad` (FR-1, FR-5, FR-7, FR-10, DEC-3, AC-1, AC-4, AC-8, AC-9).
 
 État au 2026-10-31 : toutes ces specs sont implémentées et couvertes par des tests de comportement et de mutation (`scripts/mutants`). Une annulation n'est pas rattrapable par `try/catch` d'un script (vérifié sur la version de Rhai épinglée), et l'absence de limite de durée est vérifiée par un test long `#[ignore]` de deux minutes réelles. Le tool `rhai_pad` est appelé par la boucle de tour (`src/runtime/turn.rs`).

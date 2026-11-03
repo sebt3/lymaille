@@ -73,6 +73,13 @@ d'extension pour les modules fournis par l'hôte.
     - **Source:** user instruction, 2026-10-29
     - **Verified by:** `AC-7`
 
+- **FR-12 - MUST:** La documentation introspectable de chaque fonction MCP contient une ligne d'usage, l'appel Rhai attendu
+  construit d'après le schéma d'entrée du tool (`agent-sessions/scratchpad#FR-14`) : `read_file(#{ path: "…" })`, champs
+  obligatoires d'abord avec une valeur d'exemple par type, champs facultatifs nommés à la suite. La ligne est bornée en taille
+  et ne porte ni valeur par défaut ni énumération du schéma (`agent-sessions#CON-3`).
+    - **Source:** `sebt3/lymaille#3`, 2026-11-03
+    - **Verified by:** `AC-8`
+
 ## Extension réservée : connaissance
 
 Hors du premier jalon et sans exigence, le besoin n'étant pas avéré. Principe consigné : un module Rhai optionnel de
@@ -101,6 +108,8 @@ Source: user instruction, 2026-10-24
 
 - **AC-7:** Avec un serveur MCP simulé exposant deux tools et un connecteur qui n'offre que `list_tools`, le module coquille a deux
   fonctions documentées et l'appel de l'une rend l'erreur d'inspection seule ; un serveur injoignable fait échouer l'ouverture de la cible.
+- **AC-8:** Avec un serveur MCP simulé dont un tool exige le champ texte `path` et accepte l'entier facultatif `limit`, la documentation de la
+  fonction contient la ligne d'usage `read_file(#{ path: "…" })` suivie du champ facultatif `limit`.
 
 ## Réalisation SpecDD
 
@@ -110,7 +119,7 @@ Specs dans `src/modules/`, implémentées (des tâches de durcissement restent l
 - `error.sdd` : erreur typée du module.
 - `todo.sdd` : liste de tâches et module Rhai `todo` (FR-1, AC-1).
 - `memory.sdd`, `memory_module.sdd` : Memory par niveau, trait de stockage, modules `memory_user`, `memory_project`, `memory_session` (FR-2 à FR-5, AC-2).
-- `mcp_name.sdd`, `mcp.sdd`, `mcp_module.sdd` : nommage des fonctions, traits de connecteur, génération du module en mode réel et coquille, validation JSON Schema, reconnexion (FR-6, FR-9 à FR-11, AC-3 à AC-7).
+- `mcp_name.sdd`, `mcp.sdd`, `mcp_module.sdd` : nommage des fonctions, traits de connecteur, génération du module en mode réel et coquille, validation JSON Schema, reconnexion, ligne d'usage (FR-6, FR-9 à FR-12, AC-3 à AC-8).
 - `mcp_client.sdd` : connecteur MCP réel HTTP streamable sur `rmcp`, derrière la feature `mcp-http` (FR-6, CON-5).
 
 État au 2026-11-01 : tout est livré, y compris `FR-7` (notifications MCP vers les watchers) : le connecteur MCP appelle `notify` sur la source `mcp` (`delegation/sources.sdd` #2, confirmé par le validateur le 2026-11-01 ; tests de notifications et d'annulation ajoutés). FR-8 (modules de l'hôte) ne demande aucun code : un module construit par l'hôte entre dans `Grants`.

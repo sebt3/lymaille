@@ -10,7 +10,9 @@ remplacer l'inférence actuelle de vanyline et à fournir à miryad-core des ét
 Statut du document : cadrage initial complet au 2026-10-24. Les points restants sont marqués `TBD`, dans les Open Issues
 ou dans la Solution concernée.
 
-Avancement de la réalisation au 2026-11-01 : les sept Solutions ont leurs specs `.sdd`, implémentées et validées (`session`, `context-window`, `scratchpad`, `agents`, `toolsets`, `modules`, `delegation`, plus la boucle de tour dans `src/runtime/` ; voir la section « Réalisation SpecDD » de chacune). Les pièces d'assemblage qui manquaient au 2026-10-31 sont livrées : la restauration de session de bout en bout (`src/runtime/restore.rs`, lot S1), l'adaptateur `rig` (`src/agents/rig.rs`, feature Cargo `rig`, lots R0 à R3), le manifeste de projet (`src/agents/manifest.rs`, lot M1), le prompt de résumé par défaut (`src/context/strategy.rs`, lot P3) et l'essai de bout en bout du rejeu du raisonnement, clos par la décision du 2026-11-01 dans `context-window`. Le module de création de toolsets (`toolsets` FR-8) reste à l'hôte (décision du 2026-10-31) ; la librairie en tient la règle d'accord et le nom réservé. Ne reste que le geste de publication 0.1 (version, `publish`, étiquette).
+Avancement de la réalisation au 2026-11-01 : les sept Solutions ont leurs specs `.sdd`, implémentées et validées (`session`, `context-window`, `scratchpad`, `agents`, `toolsets`, `modules`, `delegation`, plus la boucle de tour dans `src/runtime/` ; voir la section « Réalisation SpecDD » de chacune). Les pièces d'assemblage qui manquaient au 2026-10-31 sont livrées : la restauration de session de bout en bout (`src/runtime/restore.rs`, lot S1), l'adaptateur `rig` (`src/agents/rig.rs`, feature Cargo `rig`, lots R0 à R3), le manifeste de projet (`src/agents/manifest.rs`, lot M1), le prompt de résumé par défaut (`src/context/strategy.rs`, lot P3) et l'essai de bout en bout du rejeu du raisonnement, clos par la décision du 2026-11-01 dans `context-window`. Le module de création de toolsets (`toolsets` FR-8) reste à l'hôte (décision du 2026-10-31) ; la librairie en tient la règle d'accord et le nom réservé. La version 0.1.0 est publiée.
+
+Lot 0.2.0 (2026-11-03) : cinq issues des hôtes (vanyline, miryad-core, `sebt3/lymaille#1` à `#5`) sont traduites en exigences : la réponse vide n'est plus un tour valide et le raisonnement d'une réponse écartée est conservé (`session` FR-16), l'erreur d'un appel de fonction MCP au mauvais type d'argument montre la syntaxe attendue (`modules` FR-12, `scratchpad` FR-14), les identifiants de ContextType acceptent `_` et les majuscules (`toolsets` FR-20), le niveau intermédiaire des fournisseurs, profils et ToolsetContext s'appelle `Shared` et non plus `Project` (rupture d'API, d'où la 0.2.0), et le contexte de travail, non l'agent, est le point de départ d'une session (BO-3, BR-9, `agents` FR-5). Les Solutions concernées portent le détail.
 
 ## Objectif et problème
 
@@ -29,8 +31,12 @@ réutilise d'un environnement cible à l'autre.
     - **Source:** user instruction, 2026-10-24
 
 - **BO-3:** Un même outillage (fonctions et skills) s'utilise sur plusieurs environnements cibles sans être
-  réécrit ; l'utilisateur choisit l'agent et l'environnement au démarrage.
-    - **Source:** user instruction, 2026-10-24
+  réécrit. Une session démarre sur un *contexte de travail* (le projet, le bac à sable, l'écran d'où la conversation
+  s'ouvre), pas sur le choix d'un agent : comme on choisit un répertoire dans un outil de développement, non une
+  personnalité. L'agent principal découle de ce contexte, et les limites de la session sont posées avant son début par ce
+  contexte, non par une approbation en cours de session.
+    - **Source:** user instruction, 2026-10-24 ; reformulé, `sebt3/lymaille#4` et `#5`, 2026-11-03 (hôtes vanyline et
+      miryad-core) : le texte d'origine disait que l'utilisateur choisit l'agent et l'environnement au démarrage
 
 - **BO-4:** Une session longue reste exploitable : son état de travail survit à la compaction et à la reprise, et un
   humain peut suivre le travail en cours.
@@ -60,8 +66,8 @@ Source: user instruction, 2026-10-24
 
 ## Acteurs
 
-- **Utilisateur humain :** choisit l'agent et l'environnement, converse en session interactive, suit la todo et les
-  Memory.
+- **Utilisateur humain :** ouvre une session depuis un contexte de travail (l'agent principal en découle, BR-9), converse en
+  session interactive, suit la todo et les Memory.
 - **Agent principal (LLM) :** conduit une session non déléguée ; deux types, l'**agent de travail** et l'**agent de configuration**.
 - **Agent de travail (`Work`) :** agent productif, interactif ou batch, qui peut déléguer.
 - **Agent de configuration (`Config`) :** agent interactif qui écrit des toolsets et des skills ; il ne délègue pas, n'appelle aucun serveur MCP, lit les sessions passées et inspecte un environnement de production sans pouvoir l'exécuter (BR-8).
@@ -99,10 +105,17 @@ Le mot « contexte » n'apparaît jamais seul dans les documents de ce domaine :
   `SKILL.md`, dont le corps est lu à la demande par le LLM.
 - **ToolsetContext :** jeu nommé de paramètres et de liaisons de rôles MCP, unique par session, qui alimente le
   templating des prompts et des skills et décide quel MCP joue quel rôle.
+- **Contexte de travail :** ce depuis quoi l'utilisateur ouvre une session et qui la borne avant qu'elle ne commence : un
+  ToolsetContext, dont le type (ContextType) dit de quel genre d'environnement il s'agit. La nature de la session et son
+  agent principal par défaut en découlent, par la configuration de l'hôte (BR-9).
 - **Rôle MCP :** nom logique (par exemple `grafana`) qu'un ToolsetContext lie à un serveur MCP concret.
 - **ContextType :** schéma nommé de paramètres et de rôles MCP (par exemple `cluster`). Un toolset exige un ou plusieurs
   ContextType ; un ToolsetContext leur est compatible s'il fournit les champs requis.
-- **Niveau (Level) :** utilisateur, projet ou session. Les trois cohabitent.
+- **Niveau (Level) :** utilisateur, intermédiaire ou session. Les trois cohabitent. Le niveau intermédiaire se nomme
+  *partagé* (`Shared`) pour les fournisseurs, les profils de modèle, les ContextType et les ToolsetContext : il est partagé
+  par un ensemble d'utilisateurs de l'hôte, et le mot « projet » y prêtait à confusion avec la notion de projet de
+  l'application hôte (`sebt3/lymaille#5`). Pour la Memory, il garde le nom *projet* (`memory_project`) : voir l'Open Issue sur
+  l'unification du vocabulaire.
 - **Memory :** article rattaché à un niveau, avec un identifiant, un titre (ce que la liste affiche) et un corps. Clé :
   niveau et identifiant. Remplace les notions de « fait » et de « connaissance » évoquées au départ.
 - **Projet :** niveau regroupant des Memory et un manifeste d'agents principaux, de sous-agents, de toolsets, de
@@ -153,6 +166,15 @@ Le mot « contexte » n'apparaît jamais seul dans les documents de ce domaine :
   d'amélioration continue (DEC-13).
     - **Source:** user instruction, 2026-10-29
     - **Verified by:** `AC-6bis`
+
+- **BR-9 - MUST:** Le point de départ d'une session est un contexte de travail (un ToolsetContext), non un agent. La nature
+  de la session et son agent principal par défaut en découlent par la configuration de l'hôte pour le type de ce contexte ;
+  l'utilisateur ne choisit pas d'agent, et les limites de la session (capacités, bac à sable) sont fixées avant son début
+  par cette configuration, jamais par une approbation en cours de session (DEC-2). La librairie démarre une session avec
+  l'agent et le ToolsetContext qu'on lui désigne et en vérifie la compatibilité (`agent-sessions/toolsets#FR-4`) ; la
+  résolution contexte vers agent relève de l'hôte.
+    - **Source:** `sebt3/lymaille#4` et `#5`, 2026-11-03 (hôtes vanyline et miryad-core) ; BO-3
+    - **Verified by:** `agent-sessions/agents#AC-1`
 
 ## Exigences fonctionnelles transverses
 
@@ -453,6 +475,15 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
 
 - **Décidé:** le pad de workflow (`scratchpad.md`, extension réservée) est hors du périmètre 0.1 ; ses quatre questions sont tranchées dans `scratchpad.md` (nature `Workflow`, refus, kind de step distinct, authentification MCP à l'hôte).
     - **Source:** user instruction, 2026-10-31
+
+- **Décidé:** le contexte de travail, non l'agent, sélectionne la session (BO-3, BR-9) ; pour la 0.2.0 la crate n'ajoute aucun champ : l'hôte fait le lien entre le type de contexte et l'agent par défaut.
+    - **Source:** user instruction, 2026-11-03 (`sebt3/lymaille#4`, `#5`)
+
+- **TBD:** faut-il porter l'agent principal par défaut (et la nature de session) sur le `ContextType` lui-même, pour que deux hôtes ne réécrivent pas le même lien ? À déterminer à l'usage des hôtes ; un champ optionnel serait un changement mineur du type (`toolsets` FR-9), sans rupture. Aucune exigence avant que les deux hôtes aient livré leur lien.
+    - **Source:** `sebt3/lymaille#5` point 3, 2026-11-03
+
+- **TBD:** unifier le vocabulaire du niveau intermédiaire pour la Memory (`MemoryLevel::Project`, module `memory_project`, « projet » du manifeste et du glossaire) avec le niveau `Shared` des fournisseurs et des ToolsetContext. Exclu de la 0.2.0 (décision du développeur principal, 2026-11-03) : renommer `memory_project` touche les prompts et skills qui le citent. À reprendre si la confusion avec le projet de l'hôte se confirme pour la Memory.
+    - **Source:** `sebt3/lymaille#5` point 2, 2026-11-03
 
 - **Décidé:** la librairie n'est publiée (0.1, fin de `publish = false`) que lorsque ce DSD est complet : aucun cas d'usage n'est
   livré partiellement, hors idées non finalisées.
