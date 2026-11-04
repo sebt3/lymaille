@@ -6,8 +6,8 @@
 #[non_exhaustive]
 pub enum ToolsetsError {
     /// A context type is inconsistent: empty name, parameter schema that is not a JSON Schema object, a schema that does
-    /// not compile or whose serialized form is over 64 KiB, role declared twice, or an inclusion that is missing, too old
-    /// or cyclic.
+    /// not compile or whose serialized form is over 64 KiB, role declared twice, an inclusion that is missing, too old
+    /// or cyclic, an empty or blank default agent name, or a sub-agent session nature as default.
     #[error("invalid context type `{name}`: {reason}")]
     InvalidContextType {
         /// Name of the refused context type, or of the type whose inclusion failed.

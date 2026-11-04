@@ -15,6 +15,7 @@ use super::toolset_context::value_looks_like_secret;
 use super::version::semver_text;
 use super::{Bump, ToolsetsError, ToolsetsResult, TypeRequirement};
 use crate::secret::{DefaultSecretDetector, SecretDetector};
+use crate::session::SessionKind;
 
 /// A role of a context type: its name, and whether it is required or optional.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,6 +46,14 @@ pub struct ContextType {
     compiled: Arc<CompiledSchema>,
     roles: Vec<RoleSpec>,
     includes: Vec<TypeRequirement>,
+    /// Name of the main agent a session on this type starts with by default. Not part of the version, not inherited by
+    /// inclusion (`agent-sessions/toolsets#FR-21`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    default_agent: Option<String>,
+    /// Nature of the sessions on this type by default: work or configuration, never sub-agent. Not part of the version,
+    /// not inherited by inclusion (`agent-sessions/toolsets#FR-21`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    session_kind: Option<SessionKind>,
 }
 
 /// A parameter schema with its validator, compiled once when its type is built (decision of 2026-10-31, D-b): a check never
@@ -215,6 +224,8 @@ impl ContextType {
             compiled,
             roles: Vec::new(),
             includes: Vec::new(),
+            default_agent: None,
+            session_kind: None,
         })
     }
 
@@ -250,6 +261,52 @@ impl ContextType {
     pub fn with_include(mut self, requirement: TypeRequirement) -> Self {
         self.includes.push(requirement);
         self
+    }
+
+    /// Sets the main agent that sessions on this type start with by default. The name is not part of the version and is
+    /// not inherited by inclusion; the agent is resolved against a catalogue by the host, not here.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ToolsetsError::InvalidContextType`] when the name is empty or blank.
+    pub fn with_default_agent(mut self, name: String) -> ToolsetsResult<Self> {
+        if name.trim().is_empty() {
+            return Err(invalid(&self.name, "the default agent name is empty or blank"));
+        }
+        self.default_agent = Some(name);
+        Ok(self)
+    }
+
+    /// Sets the nature of the sessions on this type by default: [`SessionKind::Work`] or [`SessionKind::Config`]. The
+    /// nature is not part of the version and is not inherited by inclusion.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ToolsetsError::InvalidContextType`] when the nature is [`SessionKind::Sub`], which is bound to the session
+    /// that delegates to it.
+    pub fn with_session_kind(mut self, kind: SessionKind) -> ToolsetsResult<Self> {
+        if kind == SessionKind::Sub {
+            return Err(invalid(
+                &self.name,
+                "a sub-agent session is bound to its delegating session, not a default of a context type",
+            ));
+        }
+        self.session_kind = Some(kind);
+        Ok(self)
+    }
+
+    /// Returns the name of the main agent that sessions on this type start with by default, or `None` when the host
+    /// decides alone.
+    #[must_use]
+    pub fn default_agent(&self) -> Option<&str> {
+        self.default_agent.as_deref()
+    }
+
+    /// Returns the nature of the sessions on this type by default, or `None` when the host falls back to
+    /// [`SessionKind::Work`].
+    #[must_use]
+    pub const fn session_kind(&self) -> Option<SessionKind> {
+        self.session_kind
     }
 
     /// Flattens the type: its own parameters and roles, and those of every type it includes, transitively. `lookup`
@@ -340,6 +397,10 @@ impl<'de> Deserialize<'de> for ContextType {
             schema: Value,
             roles: Vec<RoleSpec>,
             includes: Vec<TypeRequirement>,
+            #[serde(default)]
+            default_agent: Option<String>,
+            #[serde(default)]
+            session_kind: Option<SessionKind>,
         }
         let record = Record::deserialize(deserializer)?;
         let mut built = Self::new(record.name, record.version, record.schema)
@@ -351,6 +412,16 @@ impl<'de> Deserialize<'de> for ContextType {
         }
         for requirement in record.includes {
             built = built.with_include(requirement);
+        }
+        if let Some(agent) = record.default_agent {
+            built = built
+                .with_default_agent(agent)
+                .map_err(<D::Error as serde::de::Error>::custom)?;
+        }
+        if let Some(kind) = record.session_kind {
+            built = built
+                .with_session_kind(kind)
+                .map_err(<D::Error as serde::de::Error>::custom)?;
         }
         Ok(built)
     }
@@ -579,6 +650,7 @@ mod tests {
 
     use super::{Bump, ContextType, RoleSpec};
     use crate::secret::SecretDetector;
+    use crate::session::SessionKind;
     use crate::toolsets::{
         ContextLevel, ContextTypeStore as _, InMemoryToolsets, Toolset, ToolsetContext, ToolsetsError,
         TypeRequirement, check_context,
@@ -1155,6 +1227,120 @@ mod tests {
         assert!(
             kept.is_ok(),
             "the host detector replaces the default: sk- is accepted"
+        );
+    }
+
+    // Scenario: un type porte un agent par défaut et une nature de session
+    #[test]
+    fn a_type_carries_a_default_agent_and_a_session_kind() {
+        let built = cluster_1_0()
+            .with_default_agent("ops".to_owned())
+            .and_then(|typed| typed.with_session_kind(SessionKind::Config))
+            .expect("the sample defaults must be accepted");
+        assert_eq!(
+            built.default_agent(),
+            Some("ops"),
+            "the default agent is read back"
+        );
+        assert_eq!(
+            built.session_kind(),
+            Some(SessionKind::Config),
+            "the session kind is read back"
+        );
+        let text = serde_json::to_string(&built).expect("a context type serializes");
+        let back: ContextType = serde_json::from_str(&text).expect("a context type deserializes");
+        assert_eq!(back, built, "the round trip must be identical");
+    }
+
+    // Scenario: un type sans ces champs les rend absents
+    #[test]
+    fn a_type_without_these_fields_has_them_absent() {
+        let built = cluster_1_0();
+        assert_eq!(built.default_agent(), None, "no default agent is set");
+        assert_eq!(built.session_kind(), None, "no session kind is set");
+        let text = serde_json::to_string(&built).expect("a context type serializes");
+        assert!(
+            !text.contains("default_agent") && !text.contains("session_kind"),
+            "the absent fields are not serialized: {text}"
+        );
+        let written_before = r#"{"name":"cluster","version":"1.0.0","schema":{"type":"object","properties":{"namespace":{"type":"string"}},"required":["namespace"]},"roles":[],"includes":[]}"#;
+        let read: ContextType =
+            serde_json::from_str(written_before).expect("a document written before the fields reads");
+        assert_eq!(
+            read.default_agent(),
+            None,
+            "the old document has no default agent"
+        );
+        assert_eq!(read.session_kind(), None, "the old document has no session kind");
+    }
+
+    // Scenario: un nom d'agent vide et la nature sous-agent sont refusés
+    #[test]
+    fn an_empty_agent_name_and_the_sub_kind_are_refused() {
+        for name in ["", "   ", "\t"] {
+            assert!(
+                matches!(
+                    cluster_1_0().with_default_agent(name.to_owned()),
+                    Err(ToolsetsError::InvalidContextType { .. })
+                ),
+                "the blank agent name `{name:?}` is refused"
+            );
+        }
+        assert!(
+            matches!(
+                cluster_1_0().with_session_kind(SessionKind::Sub),
+                Err(ToolsetsError::InvalidContextType { .. })
+            ),
+            "the sub-agent session kind is refused"
+        );
+    }
+
+    // Scenario: une forme stockée invalide est refusée à la lecture
+    #[test]
+    fn an_invalid_stored_form_is_refused_on_reading() {
+        let sub_kind = r#"{"name":"cluster","version":"1.0.0","schema":{"type":"object"},"roles":[],"includes":[],"session_kind":"sub"}"#;
+        let blank_agent = r#"{"name":"cluster","version":"1.0.0","schema":{"type":"object"},"roles":[],"includes":[],"default_agent":"  "}"#;
+        assert!(
+            serde_json::from_str::<ContextType>(sub_kind).is_err(),
+            "a stored sub-agent session kind is refused on reading"
+        );
+        assert!(
+            serde_json::from_str::<ContextType>(blank_agent).is_err(),
+            "a stored blank default agent is refused on reading"
+        );
+    }
+
+    // Scenario: ces champs ne changent ni la version ni l'aplatissement
+    #[test]
+    fn these_fields_change_neither_the_version_nor_the_flattening() {
+        let plain = cluster_1_0();
+        let with_agent = cluster_1_0()
+            .with_default_agent("ops".to_owned())
+            .expect("the sample agent must be accepted");
+        assert_eq!(
+            with_agent.bump_since(&plain),
+            Bump::None,
+            "adding a default agent is not a change of version"
+        );
+        assert_eq!(
+            plain.bump_since(&with_agent),
+            Bump::None,
+            "removing a default agent is not a change of version"
+        );
+        assert_ne!(with_agent, plain, "the two types differ by their default agent");
+        let includer = |included: &ContextType| {
+            ContextType::new("k8s-prod".to_owned(), semver("1.0.0"), schema(&["region"], &[]))
+                .expect("the sample type must build")
+                .with_include(
+                    TypeRequirement::parse("cluster@1.0").expect("the sample requirement must parse"),
+                )
+                .flatten(&lookup_in(vec![included.clone()]))
+                .expect("the inclusion is satisfied")
+        };
+        assert_eq!(
+            includer(&with_agent),
+            includer(&plain),
+            "the flattening does not take the default agent of the included type"
         );
     }
 }

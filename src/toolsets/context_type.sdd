@@ -14,6 +14,10 @@ Exposes:
   @FlatContextType
   @ContextType::flatten
   @ContextType::bump_since
+  @ContextType::with_default_agent
+  @ContextType::with_session_kind
+  @ContextType::default_agent
+  @ContextType::session_kind
   @FlatContextType::required_parameters
   @FlatContextType::optional_parameters
   @FlatContextType::required_roles
@@ -24,6 +28,8 @@ Accepts:
   @ContextType::new: un nom, une version, un schéma de paramètres (`serde_json::Value`, objet JSON Schema, compilé une seule fois ici, et de 64 Kio au plus une fois sérialisé) ; constructeurs chaînés : rôles (@RoleSpec : nom, obligatoire ou optionnel) et types inclus (@TypeRequirement).
   @ContextType::flatten: une fonction de recherche d'un type par nom (le trait de stockage ou une table) ; rend un @FlatContextType.
   @ContextType::bump_since: une version précédente du même type.
+  @ContextType::with_default_agent: le nom de l'agent principal par défaut (texte non vide et non blanc) ; constructeur chaîné.
+  @ContextType::with_session_kind: la nature de session par défaut des contextes de ce type, @SessionKind::Work ou @SessionKind::Config ; constructeur chaîné.
 
 Returns:
   @FlatContextType: paramètres requis (noms listés par `required` des schémas), paramètres optionnels, rôles obligatoires et optionnels, du type et de tous ceux qu'il inclut.
@@ -31,14 +37,18 @@ Returns:
   @FlatContextType::violations: la liste des @ValueViolation (nom du paramètre rendu, ou `*` s'il n'est déclaré nulle part, et règle du schéma violée) pour chaque valeur présente, contre le validateur compilé de chaque schéma du type et des types qu'il inclut ; vide si toutes les valeurs satisfont leurs schémas. Aucune erreur : la compilation a eu lieu à la construction du type (décision du 2026-10-31, D-b).
   @ContextType::bump_since: un @Bump : majeure si un champ requis ou un rôle obligatoire est ajouté, si un champ ou un rôle est retiré, ou si un champ ou un rôle optionnel devient obligatoire ; mineure si seul un champ optionnel ou un rôle optionnel est ajouté ; sinon aucune.
 
+  @ContextType::default_agent: le nom de l'agent par défaut, ou rien. @ContextType::session_kind: la nature de session par défaut, ou rien (l'hôte retombe alors sur @SessionKind::Work).
+
 Raises:
+  @ContextType::with_default_agent, @ContextType::with_session_kind: @ToolsetsError::InvalidContextType pour un nom d'agent vide ou blanc, et pour la nature @SessionKind::Sub.
   @ToolsetsError::InvalidContextType: voir ./error.sdd (nom hors de `[A-Za-z0-9_-]+`, schéma qui n'est pas un objet JSON Schema, schéma qui ne compile pas, schéma sérialisé de plus de 64 Kio, valeur par défaut de paramètre qui a l'allure d'un secret) ; un type inclus introuvable ou d'une version insuffisante est aussi refusé par @flatten.
 
 Must:
+  Un type peut porter un nom d'agent principal par défaut et une nature de session (`agent-sessions/toolsets#FR-21`), tous deux optionnels, absents de la forme sérialisée quand ils sont vides ; un document écrit avant leur ajout se relit sans eux. La résolution du nom d'agent contre un catalogue n'est pas faite ici (voir ./start.sdd). Ils ne comptent pas dans @ContextType::bump_since, ne sont pas hérités par l'inclusion et n'entrent pas dans @FlatContextType.
   Un type qui en inclut un autre exige les champs et rôles des deux (`agent-sessions/toolsets#AC-6`) ; un rôle obligatoire dans l'un et optionnel dans l'autre est obligatoire.
   L'inclusion est vérifiée contre l'exigence de version du type inclus (@TypeRequirement) et ne peut pas être cyclique.
   Le schéma n'est pas un secret : aucun paramètre ne porte de valeur par défaut contenant une référence de secret.
-  Se sérialise et se désérialise à l'identique.
+  Se sérialise et se désérialise à l'identique. Une forme stockée qui porte un nom d'agent vide ou blanc, ou la nature sous-agent, est refusée à la lecture comme à la construction.
   Le nom d'un type est son identifiant : non vide, lettres ASCII (majuscules comprises), chiffres, tirets et soulignés (`[A-Za-z0-9_-]+`, `agent-sessions/toolsets#FR-20`, `sebt3/lymaille#5`). Un hôte y porte un préfixe réservé de catalogue (`G_cluster`) ; aucun espace de noms n'existe dans la crate. La casse compte : `G_x` et `g_x` sont deux types. Aucune autre normalisation (pas d'espace, de point, de caractère non ASCII).
   La vérification structurelle est complète (`agent-sessions/toolsets#FR-4`, décision du 2026-10-30) : un schéma de paramètres est compilé comme JSON Schema à la construction, et un schéma qui ne compile pas est refusé, y compris une référence `$ref` distante ou de fichier, sans accès réseau ni fichier. À la vérification, chaque valeur présente est validée contre le schéma du type et de chaque type inclus, à toute profondeur (types, énumérations, `additionalProperties`, etc.). Les schémas ne se réduisent donc pas à `required` et `properties`.
   La présence des paramètres requis reste vérifiée à part, par les noms `required` aplatis : une règle `required` de la racine n'est pas redonnée comme écart de valeur.
@@ -61,6 +71,31 @@ Scenario: un nom à préfixe réservé est accepté
   Given les noms `G_cluster-2`, `cluster`, `A`, `x_y` et `K8s-prod`
   When chacun construit un type
   Then chacun est accepté et @ContextType le rend sous ce nom exact
+
+Scenario: un type porte un agent par défaut et une nature de session
+  Given un type `cluster` construit avec l'agent par défaut `ops` et la nature Config
+  When on lit ses accesseurs puis qu'on le sérialise et le relit
+  Then default_agent rend `ops`, session_kind rend Config, et le type relu est égal à l'original
+
+Scenario: un type sans ces champs les rend absents
+  Given un type `cluster` construit sans agent par défaut ni nature, et un JSON de type écrit avant leur ajout
+  When on lit les accesseurs et qu'on désérialise le JSON ancien
+  Then default_agent et session_kind rendent rien, et la forme sérialisée ne contient ni `default_agent` ni `session_kind`
+
+Scenario: un nom d'agent vide et la nature sous-agent sont refusés
+  Given les noms d'agent vide et blanc, et la nature Sub
+  When chacun est posé sur un type
+  Then chacun échoue avec InvalidContextType
+
+Scenario: une forme stockée invalide est refusée à la lecture
+  Given un JSON de type dont `session_kind` vaut `sub`, et un autre dont `default_agent` est blanc
+  When chacun est désérialisé
+  Then chacun est refusé, par les mêmes contrôles que les constructeurs
+
+Scenario: ces champs ne changent ni la version ni l'aplatissement
+  Given un type `cluster@1.0` et le même avec un agent par défaut, et un type `k8s-prod` qui inclut le second
+  When on compare avec bump_since et qu'on aplatit `k8s-prod`
+  Then bump_since ne rend aucune nature de changement, les deux types sont différents, et l'aplatissement ne contient aucun champ de l'agent
 
 Scenario: la casse distingue deux types
   Given un type `G_cluster` et un type `g_cluster` inscrits dans un stockage
@@ -148,6 +183,9 @@ Scenario: un détecteur de l'hôte juge les défauts d'un schéma
   Then il échoue, et @ContextType::new l'accepte (le défaut ne ressemble pas à un secret pour l'heuristique)
 
 Tasks:
+  [?] #Q8 Question ouverte non bloquante (`agent-sessions/toolsets`, Questions ouvertes) : un nom d'agent par défaut à espace de bord (`ops `) est accepté tel quel, sans normalisation ni refus ; cas limite relevé le 2026-11-04, non traité tant qu'aucun hôte ne le rencontre (approche XP). Aucun code ni test à écrire.
+  [x] #D1 Agent par défaut et nature de session optionnels (lot 0.2-D, `agent-sessions/toolsets#FR-21`, `AC-16`, `sebt3/lymaille#5` point 3) : les cinq Scenarios ci-dessus (dont « une forme stockée invalide est refusée à la lecture »), tests vus rouges puis implémentation (deux champs `Option` à `#[serde(default, skip_serializing_if = "Option::is_none")]`, deux constructeurs chaînés, deux accesseurs, `PartialEq` qui les compare). Ajouter la raison de refus aux textes de ./error.sdd (nom d'agent vide, nature sous-agent). Fichiers autorisés : ./context_type.rs, ./error.rs. Pas de dépendance nouvelle ; la surface publique ne s'élargit que de ces quatre fonctions.
+      Validé le 2026-11-04 (validator : `scripts/check` complet vert, harnais intact, 5 Scenarios couverts dont le refus à la lecture, vu rouge avant ; mutants du diff : 1 tué, 0 survivant, 3 ne compilent pas ; les lignes de désérialisation ne produisent aucun mutant avec `scripts/mutants`, le test `an_invalid_stored_form_is_refused_on_reading` en est la seule garde. Un nom d'agent à espace de bord (`ops `) est accepté tel quel, conforme à « non vide et non blanc »).
   [x] #Q6 Alphabet du nom élargi à `[A-Za-z0-9_-]+` (lot 0.2-C2, `agent-sessions/toolsets#FR-20`, `AC-15`, `sebt3/lymaille#5`) : les trois Scenarios ci-dessus, tests puis implémentation de `is_valid_name` ; le texte fixe de la raison de refus (aujourd'hui « the name must be non-empty lowercase ASCII letters, digits and hyphens ») devient « the name must be non-empty ASCII letters, digits, hyphens and underscores » et ne cite toujours pas le nom. Les noms qui ne diffèrent que par la casse sont distincts dans le stockage en mémoire de ./store.sdd (clé exacte, comme aujourd'hui) : un test le confirme. Les anciens noms valides restent valides (aucune migration).
       Validé le 2026-11-04 (validator : `scripts/check` complet vert ; les 7 mutants d'`is_valid_name` tués, aucun survivant ; les deux assertions d'ancien alphabet levées dans les tests existants, justifiées par FR-20 ; store.rs non touché, la casse distingue déjà par la clé exacte. L'alphabet lowercase des skills de ./skill.sdd est un contrat distinct, non affecté).
   [x] #1 Tests puis implémentation.
