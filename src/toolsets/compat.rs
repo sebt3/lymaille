@@ -472,7 +472,7 @@ mod tests {
 
     /// A context that satisfies `cluster`: the parameter `namespace` and the role `k8s`.
     fn complete_context() -> ToolsetContext {
-        ToolsetContext::new("prod".to_owned(), ContextLevel::Project)
+        ToolsetContext::new("prod".to_owned(), ContextLevel::Shared)
             .expect("the context builds")
             .with_parameter("namespace".to_owned(), json!("apps"))
             .expect("the parameter is added")

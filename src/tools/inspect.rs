@@ -399,7 +399,7 @@ mod tests {
             .put_agent(&agent)
             .await
             .expect("the agent is stored");
-        let context = ToolsetContext::new("prod".to_owned(), ContextLevel::Project)
+        let context = ToolsetContext::new("prod".to_owned(), ContextLevel::Shared)
             .expect("a context")
             .with_role("grafana".to_owned(), "ref".to_owned())
             .expect("the role is bound");

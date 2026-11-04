@@ -19,8 +19,9 @@ use crate::secret::{DefaultSecretDetector, SecretDetector};
 pub enum ContextLevel {
     /// The user level.
     User,
-    /// The project level.
-    Project,
+    /// The shared level. The 0.1 name of this level, `project`, is still accepted when read and never written.
+    #[serde(alias = "project")]
+    Shared,
     /// The session level.
     Session,
 }
@@ -369,7 +370,7 @@ mod tests {
     fn override_beats_context_beats_default() {
         let defaults = || vec![default_of("tool", "limit", json!(5))];
 
-        let with_all = ToolsetContext::new("ctx".to_owned(), ContextLevel::Project)
+        let with_all = ToolsetContext::new("ctx".to_owned(), ContextLevel::Shared)
             .expect("a named context builds")
             .with_parameter("limit".to_owned(), json!(7))
             .expect("a plain value is accepted")
@@ -382,7 +383,7 @@ mod tests {
             "the override wins for that toolset"
         );
 
-        let without_override = ToolsetContext::new("ctx".to_owned(), ContextLevel::Project)
+        let without_override = ToolsetContext::new("ctx".to_owned(), ContextLevel::Shared)
             .expect("a named context builds")
             .with_parameter("limit".to_owned(), json!(7))
             .expect("a plain value is accepted");
@@ -396,7 +397,7 @@ mod tests {
         );
 
         let without_either =
-            ToolsetContext::new("ctx".to_owned(), ContextLevel::Project).expect("a named context builds");
+            ToolsetContext::new("ctx".to_owned(), ContextLevel::Shared).expect("a named context builds");
         let resolved_either = without_either.resolve(defaults()).expect("the context resolves");
         assert_eq!(
             value_of(&resolved_either, "tool", "limit"),
@@ -587,7 +588,7 @@ mod tests {
 
     #[test]
     fn serialization_round_trip_is_identical() {
-        let context = ToolsetContext::new("ctx".to_owned(), ContextLevel::Project)
+        let context = ToolsetContext::new("ctx".to_owned(), ContextLevel::Shared)
             .expect("a named context builds")
             .with_parameter("region".to_owned(), json!("eu"))
             .expect("a plain value is accepted")
@@ -598,6 +599,29 @@ mod tests {
         let text = serde_json::to_string(&context).expect("a context serializes");
         let back: ToolsetContext = serde_json::from_str(&text).expect("a context deserializes");
         assert_eq!(back, context, "the round trip must be identical");
+    }
+
+    // Scenario: le niveau partagé fait l'aller-retour et l'ancien nom est relu
+    #[test]
+    fn shared_level_round_trips_and_the_old_name_is_read() {
+        let built =
+            ToolsetContext::new("ctx".to_owned(), ContextLevel::Shared).expect("a named context builds");
+        let text = serde_json::to_string(&built).expect("a context serializes");
+        assert!(
+            text.contains(r#""level":"shared""#),
+            "the shared level must be written `shared`: {text}"
+        );
+        assert!(
+            !text.contains("project"),
+            "the old 0.1 name must never be written: {text}"
+        );
+        let back: ToolsetContext = serde_json::from_str(&text).expect("a context deserializes");
+        assert_eq!(back, built, "the round trip must be identical, level included");
+        let old: ToolsetContext = serde_json::from_str(
+            r#"{"name":"ctx","level":"project","parameters":{},"roles":{},"overrides":{}}"#,
+        )
+        .expect("the 0.1 name `project` must still be read");
+        assert_eq!(old, built, "the old name must be read as Shared");
     }
 
     #[test]

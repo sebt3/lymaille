@@ -331,7 +331,7 @@ mod tests {
     }
 
     fn toolset_context() -> ToolsetContext {
-        ToolsetContext::new("site".to_owned(), ContextLevel::Project)
+        ToolsetContext::new("site".to_owned(), ContextLevel::Shared)
             .expect("a context name")
             .with_parameter("cluster".to_owned(), json!("prod"))
             .expect("a plain parameter")
@@ -820,7 +820,7 @@ mod tests {
             .expect("a plain parameter")
             .with_parameter("region".to_owned(), json!("eu"))
             .expect("a plain parameter");
-        let top_site = ToolsetContext::new("site".to_owned(), ContextLevel::Project)
+        let top_site = ToolsetContext::new("site".to_owned(), ContextLevel::Shared)
             .expect("a context name")
             .with_parameter("cluster".to_owned(), json!("staging"))
             .expect("a plain parameter");

@@ -392,7 +392,7 @@ mod tests {
     /// The resolved context of the tests: `cluster` shared, `k8s` bound to a reference, and `region` overridden for `ops`
     /// (default `eu`, override `us`).
     fn context() -> ResolvedContext {
-        ToolsetContext::new("site".to_owned(), ContextLevel::Project)
+        ToolsetContext::new("site".to_owned(), ContextLevel::Shared)
             .expect("a context name")
             .with_parameter("cluster".to_owned(), json!("prod"))
             .expect("a plain parameter")
@@ -484,7 +484,7 @@ mod tests {
 
     /// A resolved context whose shared parameter `api_token` holds the canary.
     fn canary_context() -> ResolvedContext {
-        ToolsetContext::new("site".to_owned(), ContextLevel::Project)
+        ToolsetContext::new("site".to_owned(), ContextLevel::Shared)
             .expect("a context name")
             .with_parameter("api_token".to_owned(), json!(CANARY))
             .expect("a plain parameter")
@@ -728,7 +728,7 @@ mod tests {
     async fn session_context_masks_a_secret_held_as_a_number_and_keeps_the_others() {
         let mut redactor = Redactor::new();
         redactor.add_secret("7351904").expect("the number is long enough");
-        let context = ToolsetContext::new("site".to_owned(), ContextLevel::Project)
+        let context = ToolsetContext::new("site".to_owned(), ContextLevel::Shared)
             .expect("a context name")
             .with_parameter("pin".to_owned(), json!(7_351_904))
             .expect("a plain parameter")
@@ -752,7 +752,7 @@ mod tests {
     // Scenario: un secret déclaré sous forme de clé est masqué
     #[tokio::test(flavor = "multi_thread")]
     async fn session_context_masks_a_declared_secret_used_as_a_key() {
-        let context = ToolsetContext::new("site".to_owned(), ContextLevel::Project)
+        let context = ToolsetContext::new("site".to_owned(), ContextLevel::Shared)
             .expect("a context name")
             .with_parameter(CANARY.to_owned(), json!("visible"))
             .expect("a plain parameter")
@@ -850,7 +850,7 @@ mod tests {
     // Scenario: session_context donne les paramètres résolus par toolset, défauts compris
     #[tokio::test(flavor = "multi_thread")]
     async fn session_context_gives_the_resolved_parameters_of_each_toolset() {
-        let context = ToolsetContext::new("site".to_owned(), ContextLevel::Project)
+        let context = ToolsetContext::new("site".to_owned(), ContextLevel::Shared)
             .expect("a context name")
             .with_override("ops".to_owned(), "region".to_owned(), json!("us"))
             .expect("a plain override")

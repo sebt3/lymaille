@@ -32,7 +32,7 @@ impl RoleSpec {
     }
 }
 
-/// Named, versioned context type. It is an entity of the user or project level, referred to by its name from a toolset.
+/// Named, versioned context type. It is an entity of the user or shared level, referred to by its name from a toolset.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[non_exhaustive]
 pub struct ContextType {
@@ -1001,7 +1001,7 @@ mod tests {
         .expect("the sample type must build")
         .with_include(TypeRequirement::parse("cluster@1.0").expect("the sample requirement must parse"));
         let lookup = lookup_in(vec![cluster_1_0(), k8s_prod]);
-        let context = ToolsetContext::new("ctx".to_owned(), ContextLevel::Project)
+        let context = ToolsetContext::new("ctx".to_owned(), ContextLevel::Shared)
             .expect("a named context builds")
             .with_parameter("namespace".to_owned(), json!(["valeur-fautive-42"]))
             .expect("a parameter is added")

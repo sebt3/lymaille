@@ -1183,7 +1183,7 @@ mod tests {
 
     /// A context with no parameter and no role.
     fn empty_context(name: &str) -> ToolsetContext {
-        ToolsetContext::new(name.to_owned(), ContextLevel::Project).expect("a context")
+        ToolsetContext::new(name.to_owned(), ContextLevel::Shared).expect("a context")
     }
 
     // Scenario: check signale les écarts sans exécuter

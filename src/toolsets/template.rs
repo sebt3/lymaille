@@ -203,8 +203,7 @@ mod tests {
 
     /// Resolved context with the given parameters and the given role bindings (role, reference).
     fn context(params: &[(&str, Value)], roles: &[(&str, &str)]) -> ResolvedContext {
-        let mut built =
-            ToolsetContext::new("site".to_owned(), ContextLevel::Project).expect("a context name");
+        let mut built = ToolsetContext::new("site".to_owned(), ContextLevel::Shared).expect("a context name");
         for (name, value) in params {
             built = built
                 .with_parameter((*name).to_owned(), value.clone())
@@ -426,7 +425,7 @@ mod tests {
     /// Resolved context of two toolsets, `ops` and `other`, both with the default `region = eu`. The context overrides the
     /// region to `us` for `ops` only. `other` also declares `only_other`, which `ops` does not have.
     fn per_toolset_context() -> ResolvedContext {
-        ToolsetContext::new("site".to_owned(), ContextLevel::Project)
+        ToolsetContext::new("site".to_owned(), ContextLevel::Shared)
             .expect("a context name")
             .with_override("ops".to_owned(), "region".to_owned(), json!("us"))
             .expect("a plain override")
@@ -485,7 +484,7 @@ mod tests {
 
     #[test]
     fn skill_keeps_the_shared_parameters() {
-        let shared = ToolsetContext::new("site".to_owned(), ContextLevel::Project)
+        let shared = ToolsetContext::new("site".to_owned(), ContextLevel::Shared)
             .expect("a context name")
             .with_parameter("cluster".to_owned(), json!("prod"))
             .expect("a plain parameter")

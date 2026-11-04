@@ -79,7 +79,8 @@ Scenario: un détecteur de l'hôte juge paramètres, rôles et surcharges
   Then `tok_abc` est refusé par InvalidContext dans les trois cas et `sk-abc` accepté, et check rend les mêmes verdicts sur un contexte désérialisé
 
 Tasks:
-  [ ] #7 Renommer `ContextLevel::Project` en `Shared`, alias de lecture `project` (lot 0.2-C1, `agent-sessions#Glossaire`, `sebt3/lymaille#5`) : le Scenario ci-dessus d'abord, puis le renommage, puis toutes les occurrences de la crate (tests de `native`, `template`, `config`, `compat`, `store`, `context_type` et de ../tools/inspect.sdd compris). Rupture d'API publique assumée pour la 0.2.0.
+  [x] #7 Renommer `ContextLevel::Project` en `Shared`, alias de lecture `project` (lot 0.2-C1, `agent-sessions#Glossaire`, `sebt3/lymaille#5`) : le Scenario ci-dessus d'abord, puis le renommage, puis toutes les occurrences de la crate (tests de `native`, `template`, `config`, `compat`, `store`, `context_type` et de ../tools/inspect.sdd compris). Rupture d'API publique assumée pour la 0.2.0.
+      Validé le 2026-11-04 (validation menée par l'orchestrateur après l'arrêt de la batterie du validator sur un OOM du pod : `scripts/check` complet vert, grep sans occurrence restante de ContextLevel::Project, Scenario à jour — `shared` écrit, `project` lu et jamais réécrit ; aucun mutant cible sur les lignes du diff, la production touchée étant la seule déclaration de variante ; MemoryLevel::Project intact, le TBD mémoire est exclu de la 0.2.0. Le rétablissement de Cargo.toml et Cargo.lock, modifiés hors périmètre par l'outil interrompu, est consigné dans le message du commit).
   [x] #1 Tests puis implémentation.
       Validé le 2026-10-29 (validator, mutations manuelles) sous `SKIP=deny scripts/check`.
   [x] #3 Décisions posées le 2026-10-29 (à confirmer) : les références de rôle et les valeurs par défaut passent par le même contrôle de secret que les valeurs de paramètres ; un doublon de valeur par défaut est une erreur.
