@@ -665,9 +665,8 @@ fn signature_of(name: &str, params: &[&str]) -> String {
 /// The names the suggestions may propose: the visible functions, the granted modules and the variables of the scope.
 /// Nothing else enters the set, so an ungranted element is never suggested.
 fn candidates_of(engine: &ScratchpadEngine, state: &PadState) -> CandidateSet {
-    let mut functions: Vec<(String, String)> = engine
-        .catalog()
-        .functions()
+    let catalog = engine.catalog().functions();
+    let mut functions: Vec<(String, String)> = catalog
         .iter()
         .map(|entry| (entry.path().to_owned(), entry.signature().to_owned()))
         .collect();
@@ -694,7 +693,15 @@ fn candidates_of(engine: &ScratchpadEngine, state: &PadState) -> CandidateSet {
         .iter()
         .map(|(name, _constant, _value)| name.to_owned())
         .collect();
-    CandidateSet::new(functions, modules, variables)
+    let usages = catalog
+        .iter()
+        .filter_map(|entry| {
+            entry
+                .usage()
+                .map(|usage| (entry.path().to_owned(), usage.to_owned()))
+        })
+        .collect();
+    CandidateSet::new(functions, modules, variables).with_usage(usages)
 }
 
 /// The text of a warning for a function that holds a secret.
@@ -829,7 +836,7 @@ mod tests {
     use std::task::{Context, Poll};
     use std::time::Duration;
 
-    use rhai::{EvalAltResult, ImmutableString, Module, Shared};
+    use rhai::{EvalAltResult, ImmutableString, Map, Module, Shared};
 
     use super::{PadSnapshot, RunEnv, RunOutcome, RunStatus, Scratchpad};
     use crate::clock::{ManualClock, Timestamp};
@@ -866,6 +873,20 @@ mod tests {
         let _hash = rhai::FuncRegistration::new("loki_query")
             .set_into_module(&mut module, |query: ImmutableString| format!("loki:{query}"));
         let Some(granted) = GrantedModule::new("grafana", Shared::new(module)) else {
+            panic!("a valid module name");
+        };
+        granted
+    }
+
+    /// A module `sandbox` with `read_file` taking a map, documented with a usage line (`agent-sessions/scratchpad#FR-14`).
+    fn sandbox() -> GrantedModule {
+        let mut module = Module::new();
+        let _hash = rhai::FuncRegistration::new("read_file")
+            .with_comments(["/// Usage: sandbox::read_file(#{ path: \"\u{2026}\" })"])
+            .set_into_module(&mut module, |arguments: Map| -> i64 {
+                arguments.len().try_into().unwrap_or(0)
+            });
+        let Some(granted) = GrantedModule::new("sandbox", Shared::new(module)) else {
             panic!("a valid module name");
         };
         granted
@@ -1490,6 +1511,31 @@ mod tests {
             !ungranted.text().contains("tok-123456"),
             "no secret in the ungranted error: {}",
             ungranted.text()
+        );
+    }
+
+    // Scenario de bout en bout de run.sdd #18 : un script appelle `sandbox::read_file("p")` sur un moteur dont le module
+    // `sandbox` a une fonction à table et une ligne d'usage ; l'erreur rendue contient l'appel attendu.
+    #[tokio::test]
+    async fn a_wrong_argument_to_a_map_function_shows_the_usage_line_in_the_error() {
+        let grants = Grants::new().with_module(sandbox());
+        let Some(grants) = grants else {
+            panic!("the module is accepted");
+        };
+        let pad = Scratchpad::new(engine_with(grants, ScratchpadLimits::new(), |_engine| {}));
+        let outcome = eval(&pad, "sandbox::read_file(\"p\")").await;
+        assert_eq!(
+            failed(&outcome),
+            ScriptErrorClass::NotFound,
+            "the script passes a string, the function takes a map: {}",
+            outcome.text()
+        );
+        assert!(
+            outcome
+                .text()
+                .contains("sandbox::read_file(#{ path: \"\u{2026}\" })"),
+            "the error carries the expected call read from the usage line: {}",
+            outcome.text()
         );
     }
 
