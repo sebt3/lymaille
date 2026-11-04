@@ -25,7 +25,7 @@ Returns:
 Must:
   @EventKind est `#[non_exhaustive]` et couvre : usage de tokens (prompt, complétion), todo modifiée, Memory modifiée (niveau et
     identifiant seulement, jamais le corps), script exécuté (@ScriptRecord), appel MCP (@McpRecord), ouverture d'une cible d'inspection (`TargetOpened`, avec la nature `definition` ou `session` et le nom ou l'identifiant, jamais de contenu), tentative de reconnexion MCP (`McpReconnect`, avec le rôle, le numéro de tentative et le délai en millisecondes), dépassement de délai
-    (`Overrun`, avec la durée écoulée), réponse vide écartée (`EmptyResponse`, avec un booléen `will_retry` qui dit si le modèle est relancé ; aucune valeur de session), réessai d'inférence (numéro, délai en millisecondes, classe de l'erreur), début de tour,
+    (`Overrun`, avec la durée écoulée), titre de session modifié (`TitleChanged`, avec le nouveau titre — une ligne bornée, masquée), demande de revue d'un humain (`ReviewRequested`, avec la raison bornée et masquée), réponse coupée par la limite de sortie (`ResponseTruncated`, avec deux booléens `has_text` et `has_tool_calls` ; aucune valeur de session), réponse vide écartée (`EmptyResponse`, avec un booléen `will_retry` qui dit si le modèle est relancé ; aucune valeur de session), réessai d'inférence (numéro, délai en millisecondes, classe de l'erreur), début de tour,
     fragment de texte streamé (`TextDelta`, avec le tour et le texte du fragment), fin de tour (issue de type @Outcome, réponse
     complète), fin de run, interruption d'un run de sous-agent à la restauration de la session principale (`RunInterrupted`,
     avec l'identifiant du run et celui de la session du sous-agent, `agent-sessions/delegation#FR-14`).
@@ -74,7 +74,8 @@ Scenario: un run interrompu nomme son run et sa session de sous-agent
   Then le run et la session sont des identifiants nus, et l'événement se désérialise à la même valeur
 
 Tasks:
-  [ ] #13 Variante `EmptyResponse { will_retry }` (lot 0.2-A2, `agent-sessions/session#FR-16`) : aller-retour JSON et liste exhaustive des variantes mis à jour (dix-huit ; le décompte « quatorze » du Scenario ci-dessus était périmé, la liste en compte dix-sept avant cette variante).
+  [x] #13 Variante `EmptyResponse { will_retry }` (lot 0.2-A2, `agent-sessions/session#FR-16`) : aller-retour JSON et liste exhaustive des variantes mis à jour (dix-huit ; le décompte « quatorze » du Scenario ci-dessus était périmé, la liste en compte dix-sept avant cette variante).
+      Validé le 2026-11-04 (validator : `scripts/check` complet vert ; aucun mutant cible sur les lignes du diff — ajout de variante sans opérateur, exhaustivité tenue par le match de test ; le `Must` a été complété des trois variantes préexistantes omises : `TitleChanged`, `ReviewRequested`, `ResponseTruncated`).
   [x] #1 Tests puis implémentation.
   [x] #4 Variantes et champs posés à l'implémentation : `TokenUsage{prompt, completion}`, `TodoChanged`, `MemoryChanged{level, id}`, `Script`, `McpCall`,
       `Overrun{elapsed_ms}`, `InferenceRetry{attempt, delay_ms, error_class}`, `TurnStarted{turn}`, `TurnEnded{turn, outcome, response}`, `RunEnded{run, outcome}`, `RunInterrupted{run, session}` (lot D6, tâche #10).

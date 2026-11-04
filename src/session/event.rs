@@ -119,6 +119,12 @@ pub enum EventKind {
         /// Whether the cut response holds tool calls.
         has_tool_calls: bool,
     },
+    /// An empty response was set aside, `agent-sessions/session#FR-16`. Carries whether the model is relaunched, no session
+    /// value.
+    EmptyResponse {
+        /// Whether the model is relaunched after the empty response.
+        will_retry: bool,
+    },
 }
 
 /// Event observed by the host: the session it belongs to, the instant it happened and what it reports.
@@ -205,8 +211,8 @@ mod tests {
     use crate::clock::Timestamp;
     use crate::session::{EventSink as _, Outcome, RunId, SessionId, TurnId};
 
-    /// Names of the seventeen variants of [`EventKind`], in the order of [`one_of_each_kind`].
-    const ALL_VARIANTS: [&str; 17] = [
+    /// Names of the eighteen variants of [`EventKind`], in the order of [`one_of_each_kind`].
+    const ALL_VARIANTS: [&str; 18] = [
         "TokenUsage",
         "TodoChanged",
         "MemoryChanged",
@@ -224,6 +230,7 @@ mod tests {
         "TitleChanged",
         "ReviewRequested",
         "ResponseTruncated",
+        "EmptyResponse",
     ];
 
     fn session() -> SessionId {
@@ -323,7 +330,13 @@ mod tests {
             ("TitleChanged", title_changed_sample()),
             ("ReviewRequested", review_requested_sample()),
             ("ResponseTruncated", response_truncated_sample()),
+            ("EmptyResponse", empty_response_sample()),
         ]
+    }
+
+    /// An empty response set aside, with the model relaunched.
+    fn empty_response_sample() -> EventKind {
+        EventKind::EmptyResponse { will_retry: true }
     }
 
     /// The model set the title of the session.
@@ -384,6 +397,7 @@ mod tests {
             EventKind::TitleChanged { .. } => "TitleChanged",
             EventKind::ReviewRequested { .. } => "ReviewRequested",
             EventKind::ResponseTruncated { .. } => "ResponseTruncated",
+            EventKind::EmptyResponse { .. } => "EmptyResponse",
         }
     }
 
@@ -439,7 +453,7 @@ mod tests {
         let kinds = one_of_each_kind();
         assert!(
             kinds.iter().map(|(name, _)| *name).eq(ALL_VARIANTS),
-            "the samples must cover each of the sixteen variants of EventKind, in order"
+            "the samples must cover each of the eighteen variants of EventKind, in order"
         );
         for (name, kind) in &kinds {
             assert_eq!(
