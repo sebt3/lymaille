@@ -28,6 +28,9 @@ Depends on:
   ./error.sdd
   serde
 
+Can modify:
+  ./state.rs: seulement le littéral de version du test « l'état réécrit porte le format courant », aligné sur @FormatVersion::CURRENT (aucun autre changement, contrat porté par ./state.sdd).
+
 Scenario: même version acceptée
   Given une version 1.0 enregistrée
   When elle est vérifiée
@@ -44,6 +47,7 @@ Scenario: majeure différente refusée
   Then les deux échouent avec IncompatibleFormat en nommant les deux versions
 
 Tasks:
-  [ ] #3 @FormatVersion::CURRENT passe à 1.1 (lot 0.2-A1, `agent-sessions/session#FR-16`) : un test qui lit un état en 1.0 sous la version courante (accepté) et un état en 1.1 portant un message écarté qui revient égal ; les tests qui supposent « 1.0 courante » sont mis à jour.
+  [x] #3 @FormatVersion::CURRENT passe à 1.1 (lot 0.2-A1, `agent-sessions/session#FR-16`) : un test qui lit un état en 1.0 sous la version courante (accepté) et un état en 1.1 portant un message écarté qui revient égal ; les tests qui supposent « 1.0 courante » sont mis à jour.
+      Validé le 2026-11-04 (validator, mutants sans survivant ; le Scenario rattaché de ./state.sdd a été aligné sur 1.1 et un `Can modify` limité au littéral de test a régularisé ./state.rs).
   [x] #1 Tests puis implémentation.
   [x] #2 Décidé le 2026-10-27 : refus sec entre majeures, sans point d'extension de migration ; à rouvrir à la première majeure.

@@ -299,7 +299,8 @@ fn build_request(request: &InferenceRequest) -> Result<CompletionRequest, Infere
     Ok(rig_request)
 }
 
-/// Converts one message of the history. A boundary, or an assistant message with nothing to send, gives nothing.
+/// Converts one message of the history. A boundary, a discarded message, or an assistant message with nothing to
+/// send, gives nothing.
 fn convert_message(
     message: &Message,
     reasoning: Option<&Reasoning>,
@@ -321,7 +322,7 @@ fn convert_message(
             tool_name(tool)?,
             content.as_str(),
         )),
-        Message::Boundary { .. } => None,
+        Message::Boundary { .. } | Message::Discarded { .. } => None,
     })
 }
 
@@ -541,12 +542,12 @@ mod tests {
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
     use tokio::net::{TcpListener, TcpStream};
 
-    use super::{RigConfig, RigProvider, detect_models};
+    use super::{RigConfig, RigProvider, convert_message, detect_models};
     use crate::agents::{
         DetectedModel, ErrorClass, FinishReason, InferenceError, InferenceProvider as _, InferenceRequest,
         ModelProfile, ResolvedProfile, SamplingParams,
     };
-    use crate::session::{Message, Reasoning};
+    use crate::session::{BoundaryKind, DiscardCause, Message, Reasoning};
 
     /// What the fake server answers to every request.
     enum Reply {
@@ -1439,5 +1440,25 @@ mod tests {
                 "the Debug output leaks the configuration: {shown}"
             );
         }
+    }
+
+    // Test de non-régression (../session/history.sdd #4, ./rig.sdd #R4) : un message écarté ne donne aucun message
+    // `rig`, comme une frontière.
+    #[test]
+    fn a_discarded_message_converts_to_no_rig_message() {
+        let reasoning = Reasoning::new("qwen-test", "a thought kept for the audit");
+        let discarded = Message::discarded(DiscardCause::Truncated, Some(reasoning.clone()));
+        assert!(
+            convert_message(&discarded, Some(&reasoning), "qwen-test")
+                .expect("converting a discarded message cannot fail")
+                .is_none(),
+            "a discarded message must convert to nothing, whatever the reasoning given"
+        );
+        assert!(
+            convert_message(&Message::boundary(BoundaryKind::Compaction), None, "qwen-test")
+                .expect("converting a boundary cannot fail")
+                .is_none(),
+            "the boundary converts to nothing, the reference behaviour"
+        );
     }
 }

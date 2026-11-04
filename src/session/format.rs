@@ -17,8 +17,10 @@ pub struct FormatVersion {
 }
 
 impl FormatVersion {
-    /// The format version this library reads and writes.
-    pub const CURRENT: Self = Self { major: 1, minor: 0 };
+    /// The format version this library reads and writes. The minor number moved from 0 to 1 in 0.2.0 because the
+    /// history gained the `Discarded` variant (`agent-sessions/session#FR-16`): a state saved in 1.0 reads unchanged,
+    /// and a state holding a discarded message is simply unreadable by 0.1.0, whose serde refuses the unknown variant.
+    pub const CURRENT: Self = Self { major: 1, minor: 1 };
 
     /// Builds a format version from its major and minor numbers.
     #[must_use]
@@ -65,18 +67,60 @@ impl fmt::Display for FormatVersion {
 #[cfg(test)]
 mod tests {
     use super::FormatVersion;
-    use crate::session::SessionError;
+    use crate::session::{DiscardCause, History, Message, Reasoning, SessionError};
 
     #[test]
     fn same_version_accepted() {
         assert_eq!(
             FormatVersion::CURRENT,
-            FormatVersion::new(1, 0),
-            "the current format version must be 1.0 for the first milestone"
+            FormatVersion::new(1, 1),
+            "the current format version must be 1.1 since 0.2.0, the discarded message being the minor's change"
         );
         assert!(
             FormatVersion::CURRENT.check().is_ok(),
             "a saved version equal to the current one must be accepted"
+        );
+    }
+
+    // Tâche #3 : un état enregistré en 1.0 se relit sans changement sous la version courante.
+    #[test]
+    fn a_state_saved_in_1_0_reloads_under_the_current_version() {
+        assert!(
+            FormatVersion::new(1, 0).check().is_ok(),
+            "an older minor with the same major must be accepted"
+        );
+        let saved = r#"[{"role":"user","content":"question"},{"role":"assistant","content":"answer","reasoning":null,"tool_calls":[]}]"#;
+        let history: History =
+            serde_json::from_str(saved).expect("a history saved in 1.0 must read under the current version");
+        let mut expected = History::new();
+        expected.push(Message::user("question"));
+        expected.push(Message::assistant("answer", None, Vec::new()));
+        assert_eq!(
+            history, expected,
+            "a 1.0 state, which holds no discarded message, must reload unchanged"
+        );
+    }
+
+    // Tâche #3 : un état 1.1 portant un message écarté revient égal.
+    #[test]
+    fn a_state_in_1_1_with_a_discarded_message_round_trips() {
+        let saved = r#"[{"role":"discarded","cause":"truncated","reasoning":{"emitter":"model-x","text":"a cut thought"}}]"#;
+        let history: History = serde_json::from_str(saved)
+            .expect("a 1.1 state holding a discarded message must read under the current version");
+        let mut expected = History::new();
+        expected.push(Message::discarded(
+            DiscardCause::Truncated,
+            Some(Reasoning::new("model-x", "a cut thought")),
+        ));
+        assert_eq!(
+            history, expected,
+            "the discarded message must come back equal with its cause and its reasoning"
+        );
+        let json = serde_json::to_string(&history).expect("the state re-serializes");
+        let back: History = serde_json::from_str(&json).expect("the re-serialized state reads back");
+        assert_eq!(
+            back, expected,
+            "the 1.1 state must be identical after a round trip"
         );
     }
 

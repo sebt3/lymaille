@@ -266,7 +266,8 @@ fn emit_whole<F: FnMut(&str)>(response: &InferenceResponse, fragments: &mut F) {
         Message::System { .. }
         | Message::User { .. }
         | Message::ToolResult { .. }
-        | Message::Boundary { .. } => "",
+        | Message::Boundary { .. }
+        | Message::Discarded { .. } => "",
     };
     if !text.is_empty() {
         fragments(text);
@@ -400,7 +401,7 @@ mod tests {
         InferenceResponse, ReportedUsage, ScriptedProvider, classify_status,
     };
     use crate::agents::{ModelProfile, ResolvedProfile};
-    use crate::session::{Message, Reasoning};
+    use crate::session::{DiscardCause, Message, Reasoning};
 
     fn profile() -> ResolvedProfile {
         ModelProfile::new(
@@ -763,6 +764,52 @@ mod tests {
         assert!(
             received.is_empty(),
             "an empty answer must emit no fragment, got {received:?}"
+        );
+    }
+
+    /// A provider whose `complete` answers a discarded message, to test the default streaming method on a message that
+    /// is not an assistant message.
+    #[derive(Debug)]
+    struct CompleteDiscarded;
+
+    impl super::InferenceProvider for CompleteDiscarded {
+        fn complete(
+            &self,
+            _request: InferenceRequest,
+        ) -> impl Future<Output = Result<InferenceResponse, InferenceError>> + Send {
+            std::future::ready(Ok(InferenceResponse::new(
+                Message::discarded(
+                    DiscardCause::Empty,
+                    Some(Reasoning::new("vllm-strix", "a thought never sent as text")),
+                ),
+                None,
+            )))
+        }
+    }
+
+    // Test de non-régression (../session/history.sdd #4, ./inference.sdd #14) : `emit_whole` traite le message
+    // écarté comme les autres variantes sans texte.
+    #[tokio::test]
+    async fn default_stream_discarded_message_emits_no_fragment() {
+        let provider = CompleteDiscarded;
+        let mut received: Vec<String> = Vec::new();
+        let response = provider
+            .stream(request("discarded-default"), |fragment: &str| {
+                received.push(fragment.to_owned());
+            })
+            .await
+            .expect("a discarded message is a successful answer");
+        assert_eq!(
+            response.message(),
+            &Message::discarded(
+                DiscardCause::Empty,
+                Some(Reasoning::new("vllm-strix", "a thought never sent as text")),
+            ),
+            "the response of the stream must be the one complete returns"
+        );
+        assert!(
+            received.is_empty(),
+            "a message that is not an assistant message must emit no fragment, got {received:?}"
         );
     }
 

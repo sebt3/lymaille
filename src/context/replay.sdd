@@ -53,7 +53,8 @@ Scenario: le texte du mode fait l'aller-retour
   Then le même mode revient, le JSON est le texte entre guillemets et `other` est refusé
 
 Tasks:
-  [ ] #5 Message `Discarded` : place vide dans la liste parallèle, quel que soit le mode (lot 0.2-A1) ; un test par mode.
+  [x] #5 Message `Discarded` : place vide dans la liste parallèle, quel que soit le mode (lot 0.2-A1) ; un test par mode.
+      Validé le 2026-11-04 (validator, mutants sans survivant).
   [x] #1 Tests puis implémentation.
   [x] #4 Test manquant : @ReplayMode::IntraTurn sans aucun message utilisateur (voir #3).
   [x] #3 Posé à l'implémentation : en mode `IntraTurn` sans aucun message utilisateur, tous les messages de l'assistant sont du tour courant ; un émetteur vide vaut « pas d'émetteur ».

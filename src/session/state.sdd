@@ -108,7 +108,7 @@ Scenario: mineure plus récente avec champ inconnu
 Scenario: l'état réécrit porte le format courant
   Given un document JSON de format 1.9 portant un champ inconnu
   When il est lu puis sauvegardé à nouveau
-  Then le document sauvegardé a le format 1.0, la version courante, et aucun champ inconnu
+  Then le document sauvegardé a le format courant, 1.1 depuis la 0.2.0, et aucun champ inconnu
 
 Scenario: la date de création absente vaut l'époque Unix
   Given un document JSON minimal de format 1.0 sans date de création

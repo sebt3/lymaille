@@ -1,6 +1,7 @@
 //! Persisted history of a session: each message as the model received or produced it, with its reasoning and its
-//! emitter, the tool calls, the outputs of `rhai_pad` and `skill` as capped, and the segment boundaries
-//! (`agent-sessions/session#FR-12`, `agent-sessions/session#FR-14`).
+//! emitter, the tool calls, the outputs of `rhai_pad` and `skill` as capped, the segment boundaries, and the reasoning of
+//! discarded responses (`agent-sessions/session#FR-12`, `agent-sessions/session#FR-14`,
+//! `agent-sessions/session#FR-16`).
 
 use serde::{Deserialize, Serialize};
 
@@ -76,6 +77,18 @@ impl ToolCall {
     }
 }
 
+/// Why a response was discarded by the turn loop (`agent-sessions/session#FR-16`). Serializes as `empty` and
+/// `truncated`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum DiscardCause {
+    /// The response had neither text nor tool call.
+    Empty,
+    /// The response was cut by the output limit before any text or tool call.
+    Truncated,
+}
+
 /// One message of the history. Contents are kept as received or produced, never rewritten.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "role", rename_all = "snake_case")]
@@ -115,6 +128,15 @@ pub enum Message {
     Boundary {
         /// Why the segment starts.
         kind: BoundaryKind,
+    },
+    /// A response the turn loop discarded, kept for audit and diagnosis only
+    /// (`agent-sessions/session#FR-16`). Never part of the conversation the model produced: it carries
+    /// neither text nor tool call, and neither creates a pending call nor removes one.
+    Discarded {
+        /// Why the response was discarded.
+        cause: DiscardCause,
+        /// The reasoning produced until the response was discarded, when there is one.
+        reasoning: Option<Reasoning>,
     },
 }
 
@@ -171,6 +193,13 @@ impl Message {
     pub const fn boundary(kind: BoundaryKind) -> Self {
         Self::Boundary { kind }
     }
+
+    /// Builds a discarded message from its cause and the reasoning it produced, when there is one
+    /// (`agent-sessions/session#FR-16`).
+    #[must_use]
+    pub const fn discarded(cause: DiscardCause, reasoning: Option<Reasoning>) -> Self {
+        Self::Discarded { cause, reasoning }
+    }
 }
 
 /// Append-only history of one session. Pending tool calls are derived from the messages, never stored.
@@ -221,7 +250,10 @@ impl History {
             match message {
                 Message::Assistant { tool_calls, .. } => pending.extend(tool_calls.iter().map(ToolCall::id)),
                 Message::ToolResult { call_id, .. } => pending.retain(|id| *id != call_id.as_str()),
-                Message::System { .. } | Message::User { .. } | Message::Boundary { .. } => {}
+                Message::System { .. }
+                | Message::User { .. }
+                | Message::Boundary { .. }
+                | Message::Discarded { .. } => {}
             }
         }
         pending
@@ -232,7 +264,7 @@ impl History {
 mod tests {
     use serde_json::json;
 
-    use super::{History, Message, Reasoning, ToolCall};
+    use super::{DiscardCause, History, Message, Reasoning, ToolCall};
     use crate::session::{SessionError, SessionResult};
 
     fn read_file_call(id: &str) -> ToolCall {
@@ -373,6 +405,60 @@ mod tests {
             history.pending_tool_calls(),
             vec!["c1"],
             "the unknown result must not remove the pending call c1"
+        );
+    }
+
+    // Scenario: un message écarté garde son raisonnement et reste neutre
+    #[test]
+    fn a_discarded_message_keeps_its_reasoning_and_stays_neutral() {
+        let mut history = History::new();
+        history.push(Message::assistant("", None, vec![read_file_call("call-1")]));
+        history.push(Message::discarded(
+            DiscardCause::Truncated,
+            Some(Reasoning::new("model-x/replay", "a thought cut by the limit")),
+        ));
+
+        assert_eq!(
+            history.pending_tool_calls(),
+            vec!["call-1"],
+            "a discarded message must neither create a pending call nor remove one"
+        );
+
+        let json = serde_json::to_string(&history).expect("a history serializes");
+        let back: History = serde_json::from_str(&json).expect("a serialized history deserializes");
+        assert_eq!(back, history, "the history must be identical after a round trip");
+        assert_eq!(
+            back.pending_tool_calls(),
+            vec!["call-1"],
+            "the call must still be pending after the round trip"
+        );
+        let last = back.messages().last();
+        let Some(Message::Discarded {
+            cause,
+            reasoning: Some(reasoning),
+        }) = last
+        else {
+            panic!("the discarded message must come back with its cause and its reasoning");
+        };
+        assert_eq!(
+            cause,
+            &DiscardCause::Truncated,
+            "the round trip must keep the cause of the discarded message"
+        );
+        assert_eq!(
+            reasoning.text(),
+            "a thought cut by the limit",
+            "the round trip must keep the reasoning of the discarded message"
+        );
+        assert_eq!(
+            serde_json::to_string(&DiscardCause::Empty).expect("a cause serializes"),
+            "\"empty\"",
+            "the empty cause must serialize as empty"
+        );
+        assert_eq!(
+            serde_json::to_string(&DiscardCause::Truncated).expect("a cause serializes"),
+            "\"truncated\"",
+            "the truncated cause must serialize as truncated"
         );
     }
 

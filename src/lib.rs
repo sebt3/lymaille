@@ -62,9 +62,9 @@ pub use scratchpad::{
 };
 pub use secret::{DefaultSecretDetector, SecretDetector};
 pub use session::{
-    AgentRef, Backoff, BoundaryKind, CancelHandle, Event, EventKind, EventSink, FormatVersion, History,
-    InMemoryStore, InspectionTargetRef, Label, LabelAuthor, LabelTarget, Labels, McpInput, McpRecord,
-    Message, ModelSnapshot, NativeTool, NullSink, Outcome, PendingEdits, Provenance, Reasoning,
+    AgentRef, Backoff, BoundaryKind, CancelHandle, DiscardCause, Event, EventKind, EventSink, FormatVersion,
+    History, InMemoryStore, InspectionTargetRef, Label, LabelAuthor, LabelTarget, Labels, McpInput,
+    McpRecord, Message, ModelSnapshot, NativeTool, NullSink, Outcome, PendingEdits, Provenance, Reasoning,
     RecordingSink, Redactor, ReviewState, RunId, RunSignals, ScriptInput, ScriptRecord, Segment,
     SegmentContext, SessionEdits, SessionError, SessionId, SessionKind, SessionResult, SessionState,
     SessionStore, SleepOutcome, TaggedValue, TokenCounters, ToolCall, TurnGate, TurnId, TurnPermit,

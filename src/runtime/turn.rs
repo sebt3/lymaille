@@ -422,7 +422,7 @@ fn message_chars(message: &Message) -> u64 {
                 .saturating_add(chars_of(call.name()))
                 .saturating_add(chars_of(&call.arguments().to_string()))
         }),
-        Message::Boundary { .. } => 0,
+        Message::Boundary { .. } | Message::Discarded { .. } => 0,
     }
 }
 
@@ -900,7 +900,8 @@ impl<P: InferenceProvider, C: CompactionStrategy, S: SessionStore> TurnRunner<P,
             Message::System { .. }
             | Message::User { .. }
             | Message::ToolResult { .. }
-            | Message::Boundary { .. } => (0, 0),
+            | Message::Boundary { .. }
+            | Message::Discarded { .. } => (0, 0),
         };
         let (prompt, completion) = response.usage().map_or_else(
             || (estimated_prompt, self.tokens.estimate(answer)),
@@ -1093,6 +1094,7 @@ mod tests {
     use tokio::sync::Notify;
 
     use super::{Masker, RHAI_PAD_TOOL, TurnConfig, TurnOutput, TurnRunner, UserInbox};
+    use super::{message_chars, messages_chars};
     use crate::agents::{
         ErrorClass, FinishReason, InferenceError, InferenceProvider, InferenceRequest, InferenceResponse,
         ModelProfile, ReportedUsage, ScriptedProvider,
@@ -1103,10 +1105,10 @@ mod tests {
     };
     use crate::scratchpad::{Grants, Scratchpad, ScratchpadEngine, ScratchpadLimits};
     use crate::session::{
-        AgentRef, BoundaryKind, CancelHandle, EventKind, InMemoryStore, LabelAuthor, Message, ModelSnapshot,
-        NativeTool, Outcome, Reasoning, RecordingSink, Redactor, ReviewState, Segment, SegmentContext,
-        SessionEdits, SessionError, SessionId, SessionResult, SessionState, SessionStore, TaggedValue,
-        ToolCall, TurnId, review_state,
+        AgentRef, BoundaryKind, CancelHandle, DiscardCause, EventKind, InMemoryStore, LabelAuthor, Message,
+        ModelSnapshot, NativeTool, Outcome, Reasoning, RecordingSink, Redactor, ReviewState, Segment,
+        SegmentContext, SessionEdits, SessionError, SessionId, SessionResult, SessionState, SessionStore,
+        TaggedValue, ToolCall, TurnId, review_state,
     };
 
     // --- doubles -------------------------------------------------------------------------------------------------
@@ -2710,6 +2712,59 @@ mod tests {
             roles(&runner),
             [Message::user("go")],
             "the invalid response is not kept"
+        );
+    }
+
+    // Test de non-régression (../session/history.sdd #4) : la branche `Discarded` des match de caractères compte zéro.
+    #[test]
+    fn a_discarded_message_counts_zero_characters() {
+        let discarded = Message::discarded(
+            DiscardCause::Truncated,
+            Some(Reasoning::new("model", "a thought of forty thousand characters")),
+        );
+        assert_eq!(
+            message_chars(&discarded),
+            0,
+            "a discarded message adds no character to the fallback estimate"
+        );
+        assert_eq!(
+            messages_chars(&[discarded, Message::user("x")]),
+            1,
+            "only the neighbour message must count in the estimate"
+        );
+    }
+
+    // Test de non-régression (../session/history.sdd #4) : le décompte d'usage compte zéro pour `Discarded`, raisonnement et complétion.
+    #[tokio::test]
+    async fn a_discarded_response_counts_zero_in_the_usage() {
+        let provider = Arc::new(ScriptedProvider::new(vec![Ok(InferenceResponse::new(
+            Message::discarded(
+                DiscardCause::Empty,
+                Some(Reasoning::new("model", "a thought never sent to the model")),
+            ),
+            None,
+        ))]));
+        let (mut runner, _parts) = assemble(Arc::clone(&provider), Options::named("t-discarded-zero"));
+        let output = run(&mut runner, "go").await;
+        assert_eq!(
+            output.outcome(),
+            Outcome::Failed,
+            "a discarded message is not an assistant answer: as for any non-assistant response, the turn fails"
+        );
+        assert_eq!(
+            roles(&runner),
+            [Message::user("go")],
+            "the discarded response must not be kept in the history"
+        );
+        assert_eq!(
+            runner.state().tokens().reasoning(),
+            0,
+            "the reasoning carried by a discarded message must count zero in the usage"
+        );
+        assert_eq!(
+            runner.state().tokens().completion(),
+            0,
+            "a discarded message must feed the completion estimate with zero characters when the usage is not reported"
         );
     }
 

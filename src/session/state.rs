@@ -782,7 +782,7 @@ mod tests {
             serde_json::from_str(&saved).expect("the saved text must be valid JSON");
         assert_eq!(
             document["format"],
-            json!({"major": 1, "minor": 0}),
+            json!({"major": 1, "minor": 1}),
             "the saved document must carry the current format version"
         );
         assert!(

@@ -93,7 +93,8 @@ Scenario: un résultat pour un appel inconnu ne change rien
   Then il est ajouté et `c1` reste en attente
 
 Tasks:
-  [ ] #4 Variante `Discarded` et type @DiscardCause (lot 0.2-A1, `agent-sessions/session#FR-16`) : tests puis implémentation. Une variante ajoutée à une énumération `#[non_exhaustive]` de la crate oblige les `match` internes à la traiter : ils sont listés dans les specs de ../runtime/turn.sdd, ../context/strategy.sdd, ../context/replay.sdd, ../agents/inference.sdd et ../agents/rig.sdd.
+  [x] #4 Variante `Discarded` et type @DiscardCause (lot 0.2-A1, `agent-sessions/session#FR-16`) : tests puis implémentation. Une variante ajoutée à une énumération `#[non_exhaustive]` de la crate oblige les `match` internes à la traiter : ils sont listés dans les specs de ../runtime/turn.sdd, ../context/strategy.sdd, ../context/replay.sdd, ../agents/inference.sdd et ../agents/rig.sdd.
+      Validé le 2026-11-04 (validator : `scripts/check` complet vert, `specdd lint` vert ; mutants complets sans survivant sur les six fichiers ; turn.rs en mutants ciblés sur les lignes du diff — le mutant du compteur de complétion a fait durcir le test `a_discarded_response_counts_zero_in_the_usage`).
   [x] #3 Test du Scenario « unknown call » ci-dessus (comportement déjà en place).
   [x] #2 Posé à l'implémentation : @Message est une énumération à champs nommés sérialisée avec une étiquette `role` ; la taille d'origine d'une sortie
       tronquée s'exprime en caractères ; @History::push_user_during_turn prend un texte ; un résultat retire toutes les occurrences de son identifiant.

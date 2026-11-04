@@ -41,10 +41,13 @@ const SUMMARY_PREAMBLE: &str = "The earlier part of this conversation was compac
 fn render_transcript(messages: &[Message], replayed: &[Option<&Reasoning>]) -> String {
     let mut lines: Vec<String> = Vec::new();
     for (message, reasoning) in messages.iter().zip(replayed) {
+        let Some(line) = render_message(message) else {
+            continue;
+        };
         if let Some(reasoning) = reasoning {
             lines.push(format!("reasoning: {}", reasoning.text()));
         }
-        lines.push(render_message(message));
+        lines.push(line);
         if let Message::Assistant { tool_calls, .. } = message {
             lines.extend(tool_calls.iter().map(render_tool_call));
         }
@@ -52,15 +55,18 @@ fn render_transcript(messages: &[Message], replayed: &[Option<&Reasoning>]) -> S
     lines.join("\n")
 }
 
-/// Renders one message as `role: content`. A tool result carries the name of its tool: `tool <name>: content`.
-fn render_message(message: &Message) -> String {
-    match message {
+/// Renders one message as `role: content`. A tool result carries the name of its tool: `tool <name>: content`. A
+/// discarded message renders nothing: it is not part of the conversation the summarizer reads
+/// (`agent-sessions/session#FR-16`).
+fn render_message(message: &Message) -> Option<String> {
+    Some(match message {
         Message::System { content } => format!("system: {content}"),
         Message::User { content } => format!("user: {content}"),
         Message::Assistant { content, .. } => format!("assistant: {content}"),
         Message::ToolResult { tool, content, .. } => format!("tool {tool}: {content}"),
         Message::Boundary { kind } => format!("boundary: {}", boundary_text(*kind)),
-    }
+        Message::Discarded { .. } => return None,
+    })
 }
 
 /// Renders one tool call of an assistant message, on the line after that message: `assistant tool call <name>: <args>`.
@@ -189,7 +195,7 @@ mod tests {
         CompactionStrategy as _, DEFAULT_SUMMARY_PROMPT, DefaultStrategy, Digest, Summarizer, summary_prompt,
     };
     use crate::context::{ContextError, ContextResult, ReplayMode};
-    use crate::session::{BoundaryKind, History, Message, Reasoning, ToolCall};
+    use crate::session::{BoundaryKind, DiscardCause, History, Message, Reasoning, ToolCall};
 
     /// One call received by the recording summarizer: the transcript and the digest.
     type Call = (String, Option<Digest>);
@@ -324,6 +330,33 @@ mod tests {
         assert!(
             !without_replay.summarizer.first_transcript().contains("thinking"),
             "the reasoning is absent from the transcript with None"
+        );
+    }
+
+    // Test de non-régression (../session/history.sdd #4, ../context/strategy.sdd #P6) : rien n'est rendu au
+    // résumeur pour un message écarté, les voisins gardent leur ordre.
+    #[tokio::test]
+    async fn a_discarded_message_renders_nothing_and_neighbours_keep_their_order() {
+        let mut history = History::new();
+        history.push(Message::user("before"));
+        history.push(Message::discarded(
+            DiscardCause::Truncated,
+            Some(Reasoning::new("provider-a", "hidden thought")),
+        ));
+        history.push(Message::assistant("after", None, Vec::new()));
+        let strategy = DefaultStrategy::new(
+            RecordingSummarizer::answering("the summary"),
+            ReplayMode::AllTurns,
+        );
+        let compacted = strategy.compact(&history, None).await;
+        assert!(
+            compacted.is_ok(),
+            "compaction succeeds over a discarded message, got {compacted:?}"
+        );
+        assert_eq!(
+            strategy.summarizer.first_transcript(),
+            "user: before\nassistant: after",
+            "the discarded message gives neither line nor reasoning, and its neighbours stay adjacent and ordered"
         );
     }
 

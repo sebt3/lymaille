@@ -27,7 +27,8 @@ pub fn replayed_reasoning(messages: &[Message], mode: ReplayMode) -> Vec<Option<
                 Message::System { .. }
                 | Message::User { .. }
                 | Message::ToolResult { .. }
-                | Message::Boundary { .. } => None,
+                | Message::Boundary { .. }
+                | Message::Discarded { .. } => None,
             };
             let in_scope = match mode {
                 ReplayMode::None => false,
@@ -42,7 +43,24 @@ pub fn replayed_reasoning(messages: &[Message], mode: ReplayMode) -> Vec<Option<
 #[cfg(test)]
 mod tests {
     use super::{ReplayMode, replayed_reasoning};
-    use crate::session::{History, Message, Reasoning};
+    use crate::session::{DiscardCause, History, Message, Reasoning};
+
+    /// A history where a `Discarded` message follows the assistant message of the current turn, both carrying reasoning
+    /// with an emitter.
+    fn history_with_a_discarded_message() -> History {
+        let mut history = History::new();
+        history.push(Message::user("question"));
+        history.push(Message::assistant(
+            "answer",
+            Some(Reasoning::new("provider-a", "kept")),
+            Vec::new(),
+        ));
+        history.push(Message::discarded(
+            DiscardCause::Empty,
+            Some(Reasoning::new("provider-a", "never replayed")),
+        ));
+        history
+    }
 
     fn texts<'text>(replayed: &[Option<&'text Reasoning>]) -> Vec<&'text str> {
         replayed
@@ -160,6 +178,65 @@ mod tests {
         assert!(
             replayed.iter().all(Option::is_none),
             "reasoning without an emitter is never replayed"
+        );
+    }
+
+    // Test de non-régression (../session/history.sdd #4, ../context/replay.sdd #5) : le message écarté garde une
+    // place vide dans la liste parallèle, quel que soit le mode.
+    #[test]
+    fn discarded_message_has_an_empty_slot_in_none_mode() {
+        let history = history_with_a_discarded_message();
+        let replayed = replayed_reasoning(history.messages(), ReplayMode::None);
+        assert_eq!(
+            replayed.len(),
+            history.messages().len(),
+            "the result is parallel to the messages"
+        );
+        assert!(
+            replayed.iter().all(Option::is_none),
+            "mode none replays no reasoning, including that of a discarded message"
+        );
+        assert!(
+            matches!(
+                history.messages().last(),
+                Some(Message::Discarded {
+                    reasoning: Some(_),
+                    ..
+                })
+            ),
+            "the history must still hold the reasoning of the discarded message"
+        );
+    }
+
+    #[test]
+    fn discarded_message_has_an_empty_slot_in_intra_turn_mode() {
+        let history = history_with_a_discarded_message();
+        let replayed = replayed_reasoning(history.messages(), ReplayMode::IntraTurn);
+        assert_eq!(
+            replayed.len(),
+            history.messages().len(),
+            "the result is parallel to the messages"
+        );
+        assert_eq!(
+            texts(&replayed),
+            vec!["kept"],
+            "in the current turn the assistant reasoning is replayed but the discarded message stays an empty slot"
+        );
+    }
+
+    #[test]
+    fn discarded_message_has_an_empty_slot_in_all_turns_mode() {
+        let history = history_with_a_discarded_message();
+        let replayed = replayed_reasoning(history.messages(), ReplayMode::AllTurns);
+        assert_eq!(
+            replayed.len(),
+            history.messages().len(),
+            "the result is parallel to the messages"
+        );
+        assert_eq!(
+            texts(&replayed),
+            vec!["kept"],
+            "even replayed by every turn, the reasoning of a discarded message is never returned"
         );
     }
 

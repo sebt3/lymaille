@@ -30,7 +30,7 @@ pub use edits::{PendingEdits, SessionEdits};
 pub use error::{SessionError, SessionResult};
 pub use event::{Event, EventKind, EventSink, NullSink, RecordingSink};
 pub use format::FormatVersion;
-pub use history::{History, Message, Reasoning, ToolCall};
+pub use history::{DiscardCause, History, Message, Reasoning, ToolCall};
 pub use id::{RunId, SessionId, TurnId};
 pub use label::{Label, LabelAuthor, LabelTarget, Labels, ReviewState, review_state};
 pub use native_tool::NativeTool;
