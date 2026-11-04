@@ -19,9 +19,10 @@ use crate::clock::{Clock, Timestamp};
 use crate::context::{Budget, CompactionStrategy, UsageTracker, estimate_tokens, replayed_reasoning};
 use crate::scratchpad::{RunEnv, RunStatus, Scratchpad, truncate_middle};
 use crate::session::{
-    Backoff, BoundaryKind, CancelHandle, Event, EventKind, EventSink, History, Message, NativeTool, Outcome,
-    Reasoning, Redactor, RunSignals, Segment, SegmentContext, SessionEdits, SessionError, SessionResult,
-    SessionState, SessionStore, SleepOutcome, TokenCounters, ToolCall, TurnGate, TurnId,
+    Backoff, BoundaryKind, CancelHandle, DiscardCause, Event, EventKind, EventSink, History, Message,
+    NativeTool, Outcome, Reasoning, Redactor, RunSignals, Segment, SegmentContext, SessionEdits,
+    SessionError, SessionResult, SessionState, SessionStore, SleepOutcome, TokenCounters, ToolCall, TurnGate,
+    TurnId,
 };
 
 /// Name of the native tool that runs a script in the scratchpad of the session.
@@ -38,6 +39,13 @@ const MAX_STEPS_MESSAGE: &str = "The turn was stopped: the maximum number of mod
 
 /// Final message of a turn whose response the output limit cut before any text or tool call.
 const CUT_MESSAGE: &str = "the response was cut by the output limit before any text or tool call";
+
+/// Final message of a turn whose response stayed empty after the reminder (`agent-sessions/session#FR-16`).
+const EMPTY_MESSAGE: &str = "the response was empty (no text and no tool call), even after a reminder";
+
+/// Fixed text of the user message that corrects an empty response (`agent-sessions/session#FR-16`,
+/// `sebt3/lymaille#1`). It carries no session data and is never masked.
+const EMPTY_REMINDER: &str = "Your previous response was empty: it had no text and no tool call. A tool call written inside your reasoning is not executed. Reply with your answer in text, or make the tool call you intended.";
 
 /// Result given to the model for a tool call that did not run because the turn was cancelled.
 const CANCELLED_RESULT: &str = "tool call cancelled";
@@ -274,6 +282,9 @@ struct TurnRun {
     steps: u32,
     calls: u32,
     rhai_errors: u32,
+    /// Whether the retry reminder of `agent-sessions/session#FR-16` was already sent since the last
+    /// non-empty response.
+    empty_retry: bool,
     backoff: Backoff,
 }
 
@@ -637,6 +648,7 @@ impl<P: InferenceProvider, C: CompactionStrategy, S: SessionStore> TurnRunner<P,
             steps: 0,
             calls: 0,
             rhai_errors: 0,
+            empty_retry: false,
             backoff: Backoff::new(),
         };
         self.emitter.emit(EventKind::TurnStarted { turn });
@@ -783,23 +795,28 @@ impl<P: InferenceProvider, C: CompactionStrategy, S: SessionStore> TurnRunner<P,
     }
 
     /// The request for the model: the segment context, the messages of the segment and the replayed reasoning, with the
-    /// estimate of its size in tokens.
+    /// estimate of its size in tokens. Discarded messages never enter the request, and their reasoning is never
+    /// replayed (`agent-sessions/session#FR-16`).
     fn build_request(&self) -> (InferenceRequest, u64) {
         let context = self
             .state
             .segments()
             .last()
             .map_or(&self.context, Segment::context);
-        let messages = segment_messages(self.state.history());
-        let reasoning = replayed_reasoning(messages, self.profile.replay())
+        let messages: Vec<Message> = segment_messages(self.state.history())
+            .iter()
+            .filter(|message| !matches!(message, Message::Discarded { .. }))
+            .cloned()
+            .collect();
+        let reasoning = replayed_reasoning(&messages, self.profile.replay())
             .into_iter()
             .map(Option::<&Reasoning>::cloned)
             .collect();
-        let chars = context_chars(context).saturating_add(messages_chars(messages));
+        let chars = context_chars(context).saturating_add(messages_chars(&messages));
         let request = InferenceRequest::new(
             self.profile.clone(),
             context.system_prompt().to_owned(),
-            messages.to_vec(),
+            messages,
             context.tool_definitions().to_vec(),
             reasoning,
         );
@@ -936,6 +953,14 @@ impl<P: InferenceProvider, C: CompactionStrategy, S: SessionStore> TurnRunner<P,
         )
     }
 
+    /// Appends a discarded message carrying the masked reasoning, with its emitter, of a response the loop set aside
+    /// (`agent-sessions/session#FR-16`). It stays out of the requests to the model.
+    fn push_discarded(&mut self, cause: DiscardCause, reasoning: Option<&Reasoning>) {
+        let masked = reasoning
+            .map(|thought| Reasoning::new(thought.emitter(), self.config.redactor.redact(thought.text())));
+        self.state.push_message(Message::discarded(cause, masked));
+    }
+
     /// Appends the response to the history, then runs its tool calls. `Some` when the turn ends.
     async fn handle_response(
         &mut self,
@@ -951,18 +976,35 @@ impl<P: InferenceProvider, C: CompactionStrategy, S: SessionStore> TurnRunner<P,
             return Ok(Some(Finish::failed()));
         };
         if response.finish_reason() == Some(FinishReason::Length) {
-            let (has_text, has_tool_calls) = (!content.is_empty(), !tool_calls.is_empty());
+            let (has_text, has_tool_calls) = (!content.trim().is_empty(), !tool_calls.is_empty());
             self.emitter.emit(EventKind::ResponseTruncated {
                 has_text,
                 has_tool_calls,
             });
             if !has_text && !has_tool_calls {
+                self.push_discarded(DiscardCause::Truncated, reasoning.as_ref());
                 return Ok(Some(Finish {
                     outcome: Outcome::Failed,
                     response: CUT_MESSAGE.to_owned(),
                 }));
             }
+        } else if content.trim().is_empty() && tool_calls.is_empty() {
+            self.push_discarded(DiscardCause::Empty, reasoning.as_ref());
+            let will_retry = !run.empty_retry;
+            self.emitter.emit(EventKind::EmptyResponse { will_retry });
+            if will_retry {
+                run.empty_retry = true;
+                let reminder = self.tokens.estimate(chars_of(EMPTY_REMINDER));
+                self.state.push_message(Message::user(EMPTY_REMINDER));
+                self.tokens.added(reminder);
+                return Ok(None);
+            }
+            return Ok(Some(Finish {
+                outcome: Outcome::Failed,
+                response: EMPTY_MESSAGE.to_owned(),
+            }));
         }
+        run.empty_retry = false;
         let message = self.mask_message(content, reasoning.as_ref(), tool_calls);
         self.tokens.added(self.tokens.estimate(message_chars(&message)));
         let masked_content = self.config.redactor.redact(content);
@@ -1093,7 +1135,9 @@ mod tests {
     use serde_json::{Value, json};
     use tokio::sync::Notify;
 
-    use super::{Masker, RHAI_PAD_TOOL, TurnConfig, TurnOutput, TurnRunner, UserInbox};
+    use super::{
+        EMPTY_MESSAGE, EMPTY_REMINDER, Masker, RHAI_PAD_TOOL, TurnConfig, TurnOutput, TurnRunner, UserInbox,
+    };
     use super::{message_chars, messages_chars};
     use crate::agents::{
         ErrorClass, FinishReason, InferenceError, InferenceProvider, InferenceRequest, InferenceResponse,
@@ -1380,6 +1424,13 @@ mod tests {
             return None;
         };
         Some(*delay_ms)
+    }
+
+    fn empty_will_retry(kind: &EventKind) -> Option<bool> {
+        let EventKind::EmptyResponse { will_retry } = kind else {
+            return None;
+        };
+        Some(*will_retry)
     }
 
     fn overrun_elapsed(kind: &EventKind) -> Option<u64> {
@@ -2794,8 +2845,11 @@ mod tests {
         assert_eq!(output.calls(), 1, "no further call to the model");
         assert_eq!(
             roles(&runner),
-            [Message::user("go")],
-            "no empty assistant message and no error text in the history"
+            [
+                Message::user("go"),
+                Message::discarded(DiscardCause::Truncated, Some(Reasoning::new("model", "thinking"))),
+            ],
+            "no empty assistant message and no error text in the history, only the discarded response with its reasoning"
         );
         let events = kinds(&parts);
         assert!(
@@ -2819,6 +2873,64 @@ mod tests {
             runner.state().tokens().reasoning(),
             12,
             "the reported reasoning tokens are counted"
+        );
+    }
+
+    // Contract: turn.sdd « Réponse tronquée » / « Réponse vide » (agent-sessions/session#FR-16) — a Length response
+    // whose text holds only blanks has no text: it is an empty response cut by the output limit, failing without a
+    // retry. The trim in the Length branch is what makes blanks and empty text the same case here, mirroring
+    // `whitespace_text_counts_as_an_empty_response` on the Stop side.
+    #[tokio::test]
+    async fn a_whitespace_only_response_cut_by_the_output_limit_fails_as_empty() {
+        let cut = InferenceResponse::new(
+            Message::assistant(" \n ", Some(Reasoning::new("m1", "partial thought")), Vec::new()),
+            None,
+        )
+        .with_finish_reason(FinishReason::Length);
+        let provider = Arc::new(ScriptedProvider::new(vec![Ok(cut), say("never asked")]));
+        let (mut runner, parts) = assemble(Arc::clone(&provider), Options::named("t-cut-blank"));
+        let output = run(&mut runner, "go").await;
+        assert_eq!(
+            output.outcome(),
+            Outcome::Failed,
+            "a blank response cut by the limit fails the turn, not a valid empty one"
+        );
+        assert_eq!(
+            output.response(),
+            CUT_MESSAGE,
+            "the fixed cut message is the response"
+        );
+        assert_eq!(provider.requests().len(), 1, "no retry after a cut response");
+        assert_eq!(output.calls(), 1, "a single model call");
+        assert!(
+            kinds(&parts).contains(&EventKind::ResponseTruncated {
+                has_text: false,
+                has_tool_calls: false
+            }),
+            "blanks do not make has_text true"
+        );
+        let history = roles(&runner);
+        assert_eq!(
+            history.first(),
+            Some(&Message::user("go")),
+            "the input message is kept"
+        );
+        let Some(Message::Discarded {
+            cause,
+            reasoning: Some(reasoning),
+        }) = history.last()
+        else {
+            panic!("the history must end with the discarded message, got {history:?}");
+        };
+        assert_eq!(
+            *cause,
+            DiscardCause::Truncated,
+            "the discarded message carries the truncated cause"
+        );
+        assert_eq!(
+            (reasoning.emitter(), reasoning.text()),
+            ("m1", "partial thought"),
+            "the partial reasoning is kept with its emitter"
         );
     }
 
@@ -2945,6 +3057,290 @@ mod tests {
             counted.first(),
             counted.get(1),
             "a usage without reasoning tokens falls back on the estimate"
+        );
+    }
+
+    // Scenario: le raisonnement d'une réponse coupée est conservé
+    #[tokio::test]
+    async fn the_reasoning_of_a_cut_response_is_kept() {
+        let mut redactor = Redactor::new();
+        redactor.add_secret("s3cr3t").expect("a secret can be declared");
+        let options = Options {
+            redactor,
+            ..Options::named("t-cut-reasoning")
+        };
+        let cut = InferenceResponse::new(
+            Message::assistant(
+                "",
+                Some(Reasoning::new("m1", "penser longtemps s3cr3t")),
+                Vec::new(),
+            ),
+            None,
+        )
+        .with_finish_reason(FinishReason::Length);
+        let provider = Arc::new(ScriptedProvider::new(vec![Ok(cut), say("never asked")]));
+        let (mut runner, _parts) = assemble(Arc::clone(&provider), options);
+        let output = run(&mut runner, "go").await;
+        assert_eq!(
+            output.outcome(),
+            Outcome::Failed,
+            "a cut empty response fails the turn"
+        );
+        assert_eq!(
+            output.response(),
+            CUT_MESSAGE,
+            "the fixed failure message is unchanged"
+        );
+        assert_eq!(provider.requests().len(), 1, "no second request is made");
+        let history = roles(&runner);
+        let Some(Message::Discarded {
+            cause,
+            reasoning: Some(reasoning),
+        }) = history.last()
+        else {
+            panic!("the history must end with the discarded message, got {history:?}");
+        };
+        assert_eq!(
+            *cause,
+            DiscardCause::Truncated,
+            "the cause of the discarded message is truncated"
+        );
+        assert_eq!(reasoning.emitter(), "m1", "the emitter of the reasoning is kept");
+        assert_eq!(
+            reasoning.text(),
+            "penser longtemps *redacted secret*",
+            "the reasoning enters the history masked"
+        );
+    }
+
+    // Scenario: une réponse vide après un résultat d'outil est relancée avec un message correctif
+    #[tokio::test]
+    async fn an_empty_response_after_a_tool_result_is_retried_with_a_reminder() {
+        let empty = InferenceResponse::new(
+            Message::assistant("", Some(Reasoning::new("model", "an empty thought")), Vec::new()),
+            None,
+        )
+        .with_finish_reason(FinishReason::Stop);
+        let provider = Arc::new(ScriptedProvider::new(vec![
+            run_script("c1", "1 + 1"),
+            Ok(empty),
+            say("fait"),
+        ]));
+        let (mut runner, parts) = assemble(Arc::clone(&provider), Options::named("t-empty-retry"));
+        let output = run(&mut runner, "go").await;
+        assert_eq!(
+            output.outcome(),
+            Outcome::Valid,
+            "the answer after the reminder makes a valid turn"
+        );
+        assert_eq!(
+            output.response(),
+            "fait",
+            "the answer after the reminder is the response"
+        );
+        assert_eq!(
+            output.calls(),
+            3,
+            "the request of the reminder counts as a model call"
+        );
+        assert!(
+            kinds(&parts).contains(&EventKind::EmptyResponse { will_retry: true }),
+            "the empty response emits EmptyResponse with will_retry"
+        );
+        let history = roles(&runner);
+        assert!(
+            history.contains(&Message::discarded(
+                DiscardCause::Empty,
+                Some(Reasoning::new("model", "an empty thought"))
+            )),
+            "the discarded empty response keeps its reasoning in the history, got {history:?}"
+        );
+        assert!(
+            !history.iter().any(|message| matches!(
+                message,
+                Message::Assistant { content, tool_calls, .. } if content.is_empty() && tool_calls.is_empty()
+            )),
+            "the empty response is not kept as an assistant message"
+        );
+        let requests = provider.requests();
+        let third = requests.get(2).expect("the reminder triggers a third request");
+        assert_eq!(
+            third.messages().last(),
+            Some(&Message::user(EMPTY_REMINDER)),
+            "the third request ends with the corrective user message of fixed text"
+        );
+    }
+
+    // Scenario: le raisonnement d'une réponse vide est gardé mais jamais renvoyé
+    #[tokio::test]
+    async fn the_reasoning_of_an_empty_response_is_kept_but_never_replayed() {
+        let options = Options {
+            replay: ReplayMode::AllTurns,
+            ..Options::named("t-empty-replay")
+        };
+        let empty = InferenceResponse::new(
+            Message::assistant(
+                "",
+                Some(Reasoning::new("prov/model", "a discarded thought")),
+                Vec::new(),
+            ),
+            None,
+        )
+        .with_finish_reason(FinishReason::Stop);
+        let provider = Arc::new(ScriptedProvider::new(vec![
+            run_script("c1", "1 + 1"),
+            Ok(empty),
+            say("fait"),
+        ]));
+        let (mut runner, _parts) = assemble(Arc::clone(&provider), options);
+        let output = run(&mut runner, "go").await;
+        assert_eq!(
+            output.outcome(),
+            Outcome::Valid,
+            "the turn completes after the reminder"
+        );
+        assert!(
+            roles(&runner).contains(&Message::discarded(
+                DiscardCause::Empty,
+                Some(Reasoning::new("prov/model", "a discarded thought"))
+            )),
+            "the history keeps the discarded response with its reasoning"
+        );
+        for request in provider.requests() {
+            assert!(
+                !request
+                    .messages()
+                    .iter()
+                    .any(|message| matches!(message, Message::Discarded { .. })),
+                "a request to the model must never carry a discarded message"
+            );
+            assert!(
+                !request
+                    .reasoning()
+                    .iter()
+                    .flatten()
+                    .any(|thought| thought.emitter() == "prov/model"
+                        && thought.text() == "a discarded thought"),
+                "the reasoning of a discarded response is never replayed"
+            );
+            assert!(
+                !serde_json::to_string(request.messages())
+                    .expect("messages serialize")
+                    .contains("a discarded thought"),
+                "the reasoning of a discarded response never reaches the request in any form"
+            );
+        }
+    }
+
+    // Scenario: une relance vide échoue
+    #[tokio::test]
+    async fn an_empty_response_after_the_reminder_fails_the_turn() {
+        let empty = |thought: &str| {
+            Ok(InferenceResponse::new(
+                Message::assistant("", Some(Reasoning::new("model", thought)), Vec::new()),
+                None,
+            ))
+        };
+        let provider = Arc::new(ScriptedProvider::new(vec![empty("first"), empty("second")]));
+        let (mut runner, parts) = assemble(Arc::clone(&provider), Options::named("t-empty-fail"));
+        let output = run(&mut runner, "go").await;
+        assert_eq!(
+            output.outcome(),
+            Outcome::Failed,
+            "an empty response after the reminder fails the turn"
+        );
+        assert_eq!(
+            output.response(),
+            EMPTY_MESSAGE,
+            "the fixed empty-response message is the failure message"
+        );
+        assert_eq!(
+            output.calls(),
+            2,
+            "only the first response and the retry are asked"
+        );
+        let retried: Vec<bool> = kinds(&parts).iter().filter_map(empty_will_retry).collect();
+        assert_eq!(
+            retried,
+            [true, false],
+            "EmptyResponse is emitted twice, will_retry true then false"
+        );
+        assert_eq!(
+            roles(&runner),
+            [
+                Message::user("go"),
+                Message::discarded(DiscardCause::Empty, Some(Reasoning::new("model", "first"))),
+                Message::user(EMPTY_REMINDER),
+                Message::discarded(DiscardCause::Empty, Some(Reasoning::new("model", "second"))),
+            ],
+            "the history stays valid and ends with the reminder then the second discarded response"
+        );
+    }
+
+    // Scenario: un texte fait de blancs est une réponse vide
+    #[tokio::test]
+    async fn whitespace_text_counts_as_an_empty_response() {
+        let blank = InferenceResponse::new(Message::assistant("\n  ", None, Vec::new()), None)
+            .with_finish_reason(FinishReason::Stop);
+        let provider = Arc::new(ScriptedProvider::new(vec![Ok(blank), say("reprise")]));
+        let (mut runner, parts) = assemble(Arc::clone(&provider), Options::named("t-blank"));
+        let output = run(&mut runner, "go").await;
+        assert_eq!(
+            output.outcome(),
+            Outcome::Valid,
+            "the answer after the reminder of a blank response makes a valid turn"
+        );
+        assert_eq!(
+            output.response(),
+            "reprise",
+            "the answer after the reminder is the response"
+        );
+        assert!(
+            kinds(&parts).contains(&EventKind::EmptyResponse { will_retry: true }),
+            "a blank response is treated as an empty one"
+        );
+        assert!(
+            roles(&runner).contains(&Message::discarded(DiscardCause::Empty, None)),
+            "the blank response is discarded, without reasoning"
+        );
+    }
+
+    // Scenario: deux réponses vides séparées par une réponse utile reçoivent chacune un rappel
+    #[tokio::test]
+    async fn two_empty_responses_around_a_useful_answer_each_get_a_reminder() {
+        let empty = || {
+            Ok(InferenceResponse::new(
+                Message::assistant("", None, Vec::new()),
+                None,
+            ))
+        };
+        let provider = Arc::new(ScriptedProvider::new(vec![
+            empty(),
+            run_script("c1", "1 + 1"),
+            empty(),
+            say("fini"),
+        ]));
+        let (mut runner, parts) = assemble(Arc::clone(&provider), Options::named("t-two-empties"));
+        let output = run(&mut runner, "go").await;
+        assert_eq!(
+            output.outcome(),
+            Outcome::Valid,
+            "the answer after the second reminder makes a valid turn"
+        );
+        assert_eq!(output.response(), "fini", "the final answer is the response");
+        let retried: Vec<bool> = kinds(&parts).iter().filter_map(empty_will_retry).collect();
+        assert_eq!(
+            retried,
+            [true, true],
+            "each of the two empty responses gets its own retry"
+        );
+        let reminders = roles(&runner)
+            .iter()
+            .filter(|message| **message == Message::user(EMPTY_REMINDER))
+            .count();
+        assert_eq!(
+            reminders, 2,
+            "the useful answer in between resets the retry counter: two reminders are in the history"
         );
     }
 
