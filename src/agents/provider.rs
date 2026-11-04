@@ -18,8 +18,9 @@ pub enum ProviderLevel {
     /// The user level, the default.
     #[default]
     User,
-    /// The project level.
-    Project,
+    /// The shared level. The 0.1 name of this level, `project`, is still accepted when read and never written.
+    #[serde(alias = "project")]
+    Shared,
 }
 
 /// Named inference provider. It holds references only, never an address in clear with credentials nor a secret.
@@ -179,6 +180,44 @@ mod tests {
         )
     }
 
+    // Scenario: le niveau partagé fait l'aller-retour et l'ancien nom est relu
+    #[test]
+    fn shared_level_round_trips_and_the_old_name_is_read() {
+        let built = Provider::new(
+            "strix".to_owned(),
+            "openai".to_owned(),
+            "vllm-strix".to_owned(),
+            None,
+            ProviderLevel::Shared,
+        )
+        .expect("plain names are accepted");
+        let text = serde_json::to_string(&built).expect("a provider serializes");
+        assert!(
+            text.contains(r#""level":"shared""#),
+            "the shared level must be written `shared`: {text}"
+        );
+        assert!(
+            !text.contains("project"),
+            "the old 0.1 name must never be written: {text}"
+        );
+        let back: Provider = serde_json::from_str(&text).expect("a provider deserializes");
+        assert_eq!(back, built, "the round trip must be identical");
+        assert_eq!(
+            back.level(),
+            ProviderLevel::Shared,
+            "the level must come back shared"
+        );
+        let old: Provider = serde_json::from_str(
+            r#"{"name":"strix","kind":"openai","address":"vllm-strix","auth":null,"level":"project"}"#,
+        )
+        .expect("the 0.1 name `project` must still be read");
+        assert_eq!(
+            old.level(),
+            ProviderLevel::Shared,
+            "the old name must be read as Shared"
+        );
+    }
+
     #[test]
     fn references_are_names() {
         let built = provider("vllm-strix", Some("vllm-key")).expect("plain names are accepted");
@@ -237,7 +276,7 @@ mod tests {
             "openai".to_owned(),
             "addr-ref-1".to_owned(),
             Some("key-ref-1".to_owned()),
-            ProviderLevel::Project,
+            ProviderLevel::Shared,
         )
         .expect("plain names are accepted");
         let text = format!("{built:?}");

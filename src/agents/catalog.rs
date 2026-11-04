@@ -177,7 +177,7 @@ impl ProviderStore for InMemoryCatalog {
 
 /// Cascade of two storage layers.
 ///
-/// `top` is the nearer level (the project) and overrides `base` (the user level). Every `get_*` asks `top` first and falls
+/// `top` is the nearer level (the shared level) and overrides `base` (the user level). Every `get_*` asks `top` first and falls
 /// back to `base` when `top` gives nothing; every `put_*` writes to `top` only. Layers nest, so `Layered<Layered<A, B>, C>`
 /// is a stack of three levels. It performs no I/O and is used through generic parameters only, never as a trait object.
 #[derive(Debug)]
@@ -421,14 +421,14 @@ mod tests {
         );
     }
 
-    /// A project-level provider named `vllm-strix`, with other references than [`provider`].
-    fn project_provider() -> Provider {
+    /// A shared-level provider named `vllm-strix`, with other references than [`provider`].
+    fn shared_provider() -> Provider {
         Provider::new(
             "vllm-strix".to_owned(),
             "openai".to_owned(),
-            "project-addr".to_owned(),
+            "shared-addr".to_owned(),
             None,
-            ProviderLevel::Project,
+            ProviderLevel::Shared,
         )
         .expect("plain references make a provider")
     }
@@ -731,7 +731,7 @@ mod tests {
             "the provider of the deepest layer must be found through the stack"
         );
         stack
-            .put_provider(&project_provider())
+            .put_provider(&shared_provider())
             .await
             .expect("the put must reach the outermost top layer");
         assert_eq!(
@@ -741,7 +741,7 @@ mod tests {
                 .get_provider("vllm-strix")
                 .await
                 .expect("the lookup must succeed"),
-            Some(project_provider()),
+            Some(shared_provider()),
             "the put must land in the outermost top layer"
         );
         assert_eq!(
@@ -769,7 +769,7 @@ mod tests {
     #[tokio::test]
     async fn layers_are_readable() {
         let top = InMemoryCatalog::new();
-        top.put_provider(&project_provider())
+        top.put_provider(&shared_provider())
             .await
             .expect("the provider must be stored in the top layer");
         let base = InMemoryCatalog::new();
@@ -783,7 +783,7 @@ mod tests {
                 .get_provider("vllm-strix")
                 .await
                 .expect("the lookup must succeed"),
-            Some(project_provider()),
+            Some(shared_provider()),
             "top() must give the top layer that was given"
         );
         assert_eq!(

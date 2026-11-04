@@ -72,7 +72,8 @@ Scenario: un détecteur de l'hôte juge les références
   Then la première est refusée (None) et la seconde acceptée, et Provider::check rend les mêmes verdicts sur un fournisseur chargé
 
 Tasks:
-  [ ] #5 Renommer `ProviderLevel::Project` en `Shared`, alias de lecture `project` (lot 0.2-C1, `agent-sessions#Glossaire`, `sebt3/lymaille#5`) : le Scenario ci-dessus d'abord, puis le renommage, puis toutes les occurrences de la crate (tests de ./catalog.sdd compris). Rupture d'API publique assumée pour la 0.2.0.
+  [x] #5 Renommer `ProviderLevel::Project` en `Shared`, alias de lecture `project` (lot 0.2-C1, `agent-sessions#Glossaire`, `sebt3/lymaille#5`) : le Scenario ci-dessus d'abord, puis le renommage, puis toutes les occurrences de la crate (tests de ./catalog.sdd compris). Rupture d'API publique assumée pour la 0.2.0.
+      Validé le 2026-11-04 (validator : `scripts/check` complet vert ; le rouge d'un renommage est une erreur de compilation, signalé ; aucun mutant possible sur les lignes du diff — attribut serde seul ; le renommage nominal des helpers de catalog.rs est couvert par « toutes les occurrences de la crate » de la tâche. MemoryLevel::Project hors périmètre : le TBD mémoire exclut memory_project de la 0.2.0).
   [x] #4 Tests manquants : préfixe `sk-` (dont `SK-`), blanc dans une référence, nom et type blancs, désérialisation JSON d'une référence en clair (refus). Rendre `sk-` insensible à la casse.
   [x] #1 Tests puis implémentation.
   [x] #3 Posé à l'implémentation : une référence est refusée si elle est vide, contient un blanc, un `://` suivi d'un `@`, ou commence par `sk-` ou `Bearer` (casse indifférente pour les deux, décidé) ; une URL sans identifiants est acceptée ; `kind` et `name` ne sont testés que sur le vide.
