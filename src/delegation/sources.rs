@@ -1204,7 +1204,7 @@ mod tests {
         let converted = workspace_notification(&session_event(
             7,
             EventKind::MemoryChanged {
-                level: "project".to_owned(),
+                level: "shared".to_owned(),
                 id: "deploy-notes".to_owned(),
             },
         ))
@@ -1213,7 +1213,7 @@ mod tests {
         assert_eq!(converted.name(), "memory_changed", "the event name is stable");
         assert_eq!(
             converted.data(),
-            &json!({"level": "project", "id": "deploy-notes"}),
+            &json!({"level": "shared", "id": "deploy-notes"}),
             "the data names the Memory and nothing else"
         );
         assert_eq!(converted.at(), at(7), "the instant of the session event is kept");

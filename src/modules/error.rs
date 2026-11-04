@@ -12,7 +12,7 @@ pub enum ModulesError {
     /// chosen by the caller; it never carries the body.
     #[error("invalid memory `{id}`{}: {reason}", level_note(.level))]
     InvalidMemory {
-        /// Level of the Memory: user, project or session. Empty when the refusal happens before a level is known.
+        /// Level of the Memory: user, shared or session. Empty when the refusal happens before a level is known.
         level: String,
         /// Identifier of the Memory within its level.
         id: String,
@@ -59,13 +59,13 @@ mod tests {
     #[test]
     fn memory_error_names_level_and_identifier_only() {
         let error = ModulesError::InvalidMemory {
-            level: "project".to_owned(),
+            level: "shared".to_owned(),
             id: "notes-1".to_owned(),
             reason: "unknown identifier".to_owned(),
         };
         assert_eq!(
             error.to_string(),
-            "invalid memory `notes-1` at level project: unknown identifier"
+            "invalid memory `notes-1` at level shared: unknown identifier"
         );
     }
 

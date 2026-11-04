@@ -1,4 +1,4 @@
-//! Memory of the session: a Memory (identifier, title, body) kept at one of three levels, user, project or session, and the
+//! Memory of the session: a Memory (identifier, title, body) kept at one of three levels, user, shared or session, and the
 //! storage trait that the host implements, with an in-memory store for tests and demonstration hosts. The library performs
 //! no I/O (`agent-sessions/modules#FR-2`, `agent-sessions/modules#FR-3`, `agent-sessions#DEC-6`, `agent-sessions#CON-1`).
 
@@ -11,25 +11,25 @@ use serde::{Deserialize, Serialize};
 use super::{ModulesError, ModulesResult};
 use crate::session::SessionId;
 
-/// Level of a Memory: user, project or session.
+/// Level of a Memory: user, shared or session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum MemoryLevel {
     /// Memory of the user, scoped by the reference that the host provides.
     User,
-    /// Memory of the project, scoped by the reference that the host provides.
-    Project,
+    /// Memory of the shared level, scoped by the reference that the host provides.
+    Shared,
     /// Memory of one session, scoped by the identifier of the session.
     Session,
 }
 
 impl MemoryLevel {
-    /// Returns the text of the level: `user`, `project` or `session`.
+    /// Returns the text of the level: `user`, `shared` or `session`.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::User => "user",
-            Self::Project => "project",
+            Self::Shared => "shared",
             Self::Session => "session",
         }
     }
@@ -171,7 +171,7 @@ impl From<&Memory> for MemorySummary {
     }
 }
 
-/// The scope of a Memory: its level and the reference of the level (the user or the project as the host names it, or the
+/// The scope of a Memory: its level and the reference of the level (the user or the shared level as the host names it, or the
 /// identifier of the session).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[non_exhaustive]
@@ -190,11 +190,11 @@ impl MemoryScope {
         }
     }
 
-    /// Scope of the project, with the reference the host provides.
+    /// Scope of the shared level, with the reference the host provides.
     #[must_use]
-    pub fn project(reference: &str) -> Self {
+    pub fn shared(reference: &str) -> Self {
         Self {
-            level: MemoryLevel::Project,
+            level: MemoryLevel::Shared,
             reference: reference.to_owned(),
         }
     }
@@ -363,34 +363,34 @@ mod tests {
     async fn same_identifier_in_two_scopes_stays_independent() {
         let store = InMemoryMemoryStore::new();
         let user = MemoryScope::user("alice");
-        let project = MemoryScope::project("alpha");
+        let shared = MemoryScope::shared("alpha");
         store
             .put(&user, &memory("note", "user note", "user body"))
             .await
             .expect("putting in the user scope succeeds");
         store
-            .put(&project, &memory("note", "project note", "project body"))
+            .put(&shared, &memory("note", "shared note", "shared body"))
             .await
-            .expect("putting in the project scope succeeds");
+            .expect("putting in the shared scope succeeds");
         let from_user = store
             .get(&user, "note")
             .await
             .expect("reading the user scope succeeds")
             .expect("the user note exists");
-        let from_project = store
-            .get(&project, "note")
+        let from_shared = store
+            .get(&shared, "note")
             .await
-            .expect("reading the project scope succeeds")
-            .expect("the project note exists");
+            .expect("reading the shared scope succeeds")
+            .expect("the shared note exists");
         assert_eq!(
             from_user.title(),
             "user note",
             "the user scope keeps its own memory"
         );
         assert_eq!(
-            from_project.title(),
-            "project note",
-            "the project scope keeps its own memory"
+            from_shared.title(),
+            "shared note",
+            "the shared scope keeps its own memory"
         );
     }
 
@@ -398,7 +398,7 @@ mod tests {
     #[tokio::test]
     async fn list_returns_summaries_sorted_without_body() {
         let store = InMemoryMemoryStore::new();
-        let scope = MemoryScope::project("alpha");
+        let scope = MemoryScope::shared("alpha");
         store
             .put(&scope, &memory("beta", "second", "secret body two"))
             .await
@@ -431,7 +431,7 @@ mod tests {
             .await
             .expect("putting succeeds");
         store
-            .put(&MemoryScope::project("x"), &memory("only-project", "p", "b"))
+            .put(&MemoryScope::shared("x"), &memory("only-shared", "p", "b"))
             .await
             .expect("putting succeeds");
         let users = store
@@ -442,7 +442,7 @@ mod tests {
         assert_eq!(
             ids,
             vec!["only-user"],
-            "the project level must not leak into the user level"
+            "the shared level must not leak into the user level"
         );
     }
 
@@ -665,7 +665,7 @@ mod tests {
     #[test]
     fn level_has_its_text() {
         assert_eq!(MemoryLevel::User.as_str(), "user");
-        assert_eq!(MemoryLevel::Project.as_str(), "project");
+        assert_eq!(MemoryLevel::Shared.as_str(), "shared");
         assert_eq!(MemoryLevel::Session.as_str(), "session");
     }
 
@@ -674,7 +674,7 @@ mod tests {
         let scope = MemoryScope::session(&session("s-9"));
         assert_eq!(scope.level(), MemoryLevel::Session);
         assert_eq!(scope.reference(), "s-9");
-        assert_eq!(MemoryScope::project("alpha").level(), MemoryLevel::Project);
+        assert_eq!(MemoryScope::shared("alpha").level(), MemoryLevel::Shared);
     }
 
     #[test]

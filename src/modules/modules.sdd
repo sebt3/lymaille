@@ -9,7 +9,7 @@ Structure:
   ./error.rs: erreur du module
   ./todo.rs: liste de tâches de la session et module Rhai `todo`
   ./memory.rs: Memory, niveaux, trait de stockage et stockage mémoire
-  ./memory_module.rs: modules Rhai `memory_user`, `memory_project` et `memory_session`
+  ./memory_module.rs: modules Rhai `memory_user`, `memory_shared` et `memory_session`
   ./mcp_name.rs: nom d'une fonction Rhai dérivé du nom d'un tool MCP
   ./mcp.rs: trait du connecteur MCP, tools, erreurs de connexion et connecteur scripté
   ./mcp_client.rs: connecteur MCP réel (HTTP streamable, `rmcp`), derrière la feature `mcp-http`
@@ -43,6 +43,8 @@ Must:
   Aucun événement, aucune erreur ni aucun enregistrement ne porte un secret ni le corps d'une Memory (`agent-sessions#CON-3`).
 
 Tasks:
+  [x] #E3 Les noms de modules de Memory sont `memory_user`, `memory_shared`, `memory_session` (lot 0.2-E, remplace la décision de #3 pour le niveau intermédiaire, `sebt3/lymaille#5` point 2, user instruction du 2026-11-04). La ligne #3 ci-dessous garde l'historique de la décision d'origine.
+      Validé le 2026-11-04 (validator : `scripts/check` complet vert, harnais intact ; renommage pur, aucun test supprimé (memory.rs 20/20, memory_module.rs 14/14, error.rs 5/5, event.rs 5/5, sources.rs 30/30), aucune assertion affaiblie, plus aucune occurrence de l'ancien nom dans le code ; aucun mutant ne tombe sur une ligne modifiée (le diff n'ajoute ni opérateur, ni constante, ni `return`, ni affectation), donc aucune mutation lancée ; `alias = "project"` de provider.rs et toolset_context.rs hors périmètre, voulus).
   [x] #1 Déclarer les sous-modules dans ./mod.rs au fil des specs enfants livrées.
   [x] #2 Déclarer le module dans ../lib.sdd et ../lib.rs (`mod modules` et ré-exports) au fil des specs enfants.
   [x] #3 Noms des modules de Memory : posé `memory_user`, `memory_project`, `memory_session` (`agent-sessions/modules#FR-4` ne fixe que « trois modules, un par niveau »). À confirmer. Décidé le 2026-10-30 par le développeur principal.

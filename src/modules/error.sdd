@@ -25,7 +25,7 @@ Depends on:
   thiserror
 
 Scenario: les messages ne portent pas le corps
-  Given une erreur de Memory pour un identifiant inconnu au niveau projet
+  Given une erreur de Memory pour un identifiant inconnu au niveau partagé
   When elle est formatée
   Then le message nomme le niveau et l'identifiant et jamais un corps
 

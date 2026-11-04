@@ -1,7 +1,7 @@
 Spec: memory
 
 Purpose:
-  Memory (identifiant, titre, corps), niveaux utilisateur, projet et session, trait de stockage que l'hôte implémente et stockage en mémoire pour les tests
+  Memory (identifiant, titre, corps), niveaux utilisateur, partagé et session, trait de stockage que l'hôte implémente et stockage en mémoire pour les tests
     (`agent-sessions/modules#FR-2`, `agent-sessions/modules#FR-3`, `agent-sessions#DEC-6`, `agent-sessions#CON-1`).
 
 Owns:
@@ -20,13 +20,13 @@ Exposes:
 
 Accepts:
   @Memory::new: un identifiant, un titre et un corps ; rend `ModulesResult<Self>` et refuse un identifiant ou un titre vide ou blanc, ou un identifiant qui contient un blanc au sens de `char::is_whitespace` (@ModulesError::InvalidMemory, dont le niveau est vide car @Memory::new ne le connaît pas ; le message l'omet). Un corps vide est accepté.
-  @MemoryScope::user: la référence de l'utilisateur (texte fourni par l'hôte). @MemoryScope::project: la référence du projet. @MemoryScope::session: un @SessionId. Chacun rend la portée de son niveau.
+  @MemoryScope::user: la référence de l'utilisateur (texte fourni par l'hôte). @MemoryScope::shared: la référence du niveau partagé. @MemoryScope::session: un @SessionId. Chacun rend la portée de son niveau.
   Accesseurs en lecture : @Memory::id, @Memory::title, @Memory::body, @MemorySummary::id, @MemorySummary::title, @MemoryScope::level, @MemoryScope::reference ; `From<&Memory>` pour @MemorySummary ; `Default` pour @InMemoryMemoryStore (qu'un hôte qui implémente le trait utilise pour lire et fabriquer ces valeurs).
   @MemoryStore::list: une @MemoryScope. @MemoryStore::get: une @MemoryScope et un identifiant. @MemoryStore::put: une @MemoryScope et une @Memory (remplace celle de même identifiant). @MemoryStore::delete: une @MemoryScope et un identifiant.
 
 Returns:
   @MemoryStore::list: les @MemorySummary (identifiant et titre, jamais le corps) de la portée, triés par identifiant. @MemoryStore::get: la @Memory ou rien. @MemoryStore::put: rien. @MemoryStore::delete: vrai si elle existait.
-  @MemoryLevel: `User`, `Project`, `Session` ; `as_str` rend `user`, `project`, `session`. @MemoryScope: niveau et référence de portée.
+  @MemoryLevel: `User`, `Shared`, `Session` ; `as_str` rend `user`, `shared`, `session`. @MemoryScope: niveau et référence de portée.
 
 Raises:
   @ModulesError::InvalidMemory: voir @Memory::new.
@@ -46,7 +46,7 @@ Depends on:
   serde_json
 
 Scenario: même identifiant, portées indépendantes
-  Given une Memory `note` au niveau utilisateur et une autre `note` au niveau projet
+  Given une Memory `note` au niveau utilisateur et une autre `note` au niveau partagé
   When chacune est lue dans sa portée
   Then chaque lecture rend sa propre Memory
 
@@ -86,6 +86,8 @@ Scenario: le stockage garde la forme sérialisée
   Then la lecture rend l'état enregistré
 
 Tasks:
+  [x] #E1 Le niveau intermédiaire de la Memory devient `Shared`, sans alias (lot 0.2-E, `agent-sessions/modules#FR-2`, `FR-4`, `AC-2`, `sebt3/lymaille#5` point 2) : `MemoryLevel::Project` devient `Shared` (`as_str` rend `shared`), `MemoryScope::project` devient `MemoryScope::shared`, la documentation et les tests de ./memory.rs suivent. Les Scenarios existants changent de mot, aucun nouveau : un test qui cite l'ancien nom est renommé, pas supprimé. Rupture d'API publique assumée pour la 0.2.0, sans alias (aucun hôte livré). Fichier autorisé : ./memory.rs.
+      Validé le 2026-11-04 (validator : `scripts/check` complet vert, harnais intact ; renommage pur, aucun test supprimé (memory.rs 20/20, memory_module.rs 14/14, error.rs 5/5, event.rs 5/5, sources.rs 30/30), aucune assertion affaiblie, plus aucune occurrence de l'ancien nom dans le code ; aucun mutant ne tombe sur une ligne modifiée (le diff n'ajoute ni opérateur, ni constante, ni `return`, ni affectation), donc aucune mutation lancée ; `alias = "project"` de provider.rs et toolset_context.rs hors périmètre, voulus).
   [x] #1 Tests puis implémentation.
       Validé le 2026-10-30 (validator, mutations manuelles) sous `scripts/check` complet.
   [x] #2 Posé : la portée utilisateur et la portée projet sont des textes que l'hôte fournit à la construction des modules (`agent-sessions/modules#FR-2` donne « niveau et identifiant » comme clé sans dire ce qui qualifie l'utilisateur et le projet). À confirmer.

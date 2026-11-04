@@ -1,4 +1,4 @@
-//! Rhai modules of Memory, one per level: `memory_user`, `memory_project` and `memory_session`
+//! Rhai modules of Memory, one per level: `memory_user`, `memory_shared` and `memory_session`
 //! (`agent-sessions/modules#FR-4`, `agent-sessions/modules#FR-5`, `agent-sessions/modules#AC-2`). Each function is synchronous
 //! and calls the asynchronous store through `vynil_core::rt::block_on`. A successful `create`, `update` or `delete` emits one
 //! `MemoryChanged` event that carries the level and the identifier, never the body; reading emits nothing.
@@ -12,23 +12,23 @@ use super::{Memory, MemoryLevel, MemoryScope, MemoryStore, MemorySummary, Module
 use crate::clock::Clock;
 use crate::session::{Event, EventKind, EventSink, SessionId};
 
-/// The scopes of the three levels of a session: the user and the project as the host names them, and the session.
+/// The scopes of the three levels of a session: the user and the shared level as the host names them, and the session.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct MemoryScopes {
     user: MemoryScope,
-    project: MemoryScope,
+    shared: MemoryScope,
     session: MemoryScope,
     session_id: SessionId,
 }
 
 impl MemoryScopes {
-    /// Builds the scopes of a session from the user reference, the project reference and the session identifier.
+    /// Builds the scopes of a session from the user reference, the shared reference and the session identifier.
     #[must_use]
-    pub fn new(user: &str, project: &str, session: &SessionId) -> Self {
+    pub fn new(user: &str, shared: &str, session: &SessionId) -> Self {
         Self {
             user: MemoryScope::user(user),
-            project: MemoryScope::project(project),
+            shared: MemoryScope::shared(shared),
             session: MemoryScope::session(session),
             session_id: session.clone(),
         }
@@ -38,19 +38,19 @@ impl MemoryScopes {
     fn into_scope(self, level: MemoryLevel) -> (MemoryScope, SessionId) {
         let scope = match level {
             MemoryLevel::User => self.user,
-            MemoryLevel::Project => self.project,
+            MemoryLevel::Shared => self.shared,
             MemoryLevel::Session => self.session,
         };
         (scope, self.session_id)
     }
 }
 
-/// Returns the name of the Rhai module of a level: `memory_user`, `memory_project` or `memory_session`.
+/// Returns the name of the Rhai module of a level: `memory_user`, `memory_shared` or `memory_session`.
 #[must_use]
 pub const fn memory_module_name(level: MemoryLevel) -> &'static str {
     match level {
         MemoryLevel::User => "memory_user",
-        MemoryLevel::Project => "memory_project",
+        MemoryLevel::Shared => "memory_shared",
         MemoryLevel::Session => "memory_session",
     }
 }
@@ -307,7 +307,7 @@ mod tests {
             self.engine_for("s-1", levels)
         }
 
-        /// A Rhai engine with the module of each given level, for the given session. The user is `alice` and the project
+        /// A Rhai engine with the module of each given level, for the given session. The user is `alice` and the shared reference
         /// is `alpha`.
         fn engine_for(&self, session: &str, levels: &[MemoryLevel]) -> RhaiEngine {
             let session_id = SessionId::new(session).expect("a non-empty identifier");
@@ -357,12 +357,12 @@ mod tests {
         let host = Host::new();
         let engine = host.engine_for(
             "s-9",
-            &[MemoryLevel::User, MemoryLevel::Project, MemoryLevel::Session],
+            &[MemoryLevel::User, MemoryLevel::Shared, MemoryLevel::Session],
         );
         engine
             .eval::<()>(
                 r#"memory_user::create("u", "t", "b");
-                   memory_project::create("p", "t", "b");
+                   memory_shared::create("p", "t", "b");
                    memory_session::create("s", "t", "b");"#,
             )
             .expect("the scripts succeed");
@@ -370,7 +370,7 @@ mod tests {
             memory_changes(&host.sink),
             vec![
                 ("user".to_owned(), "u".to_owned()),
-                ("project".to_owned(), "p".to_owned()),
+                ("shared".to_owned(), "p".to_owned()),
                 ("session".to_owned(), "s".to_owned()),
             ],
             "each event names the level of its module"
@@ -448,25 +448,25 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn each_level_reads_its_own_memory() {
         let host = Host::new();
-        let engine = host.engine(&[MemoryLevel::User, MemoryLevel::Project]);
+        let engine = host.engine(&[MemoryLevel::User, MemoryLevel::Shared]);
         let both = engine
             .eval::<String>(
-                r#"memory_user::create("note", "user", "u"); memory_project::create("note", "project", "p"); memory_user::read("note").title + "/" + memory_project::read("note").title"#,
+                r#"memory_user::create("note", "user", "u"); memory_shared::create("note", "shared", "p"); memory_user::read("note").title + "/" + memory_shared::read("note").title"#,
             )
             .expect("the scripts succeed");
-        assert_eq!(both, "user/project", "each module reads its own memory");
+        assert_eq!(both, "user/shared", "each module reads its own memory");
     }
 
     // Scenario: la liste ne rend que l'identifiant et le titre
     #[tokio::test(flavor = "multi_thread")]
     async fn list_gives_identifier_and_title_only() {
         let host = Host::new();
-        let engine = host.engine(&[MemoryLevel::Project]);
+        let engine = host.engine(&[MemoryLevel::Shared]);
         engine
-            .eval::<()>(r#"memory_project::create("beta", "second", "secret body two"); memory_project::create("alpha", "first", "secret body one")"#)
+            .eval::<()>(r#"memory_shared::create("beta", "second", "secret body two"); memory_shared::create("alpha", "first", "secret body one")"#)
             .expect("the memories are created");
         let items = engine
-            .eval::<Array>("memory_project::list()")
+            .eval::<Array>("memory_shared::list()")
             .expect("list succeeds");
         assert_eq!(items.len(), 2, "both memories are listed");
         for item in items {
@@ -645,10 +645,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn create_with_blank_title_names_level_and_identifier() {
         let host = Host::new();
-        let engine = host.engine(&[MemoryLevel::Project]);
-        let message = error_text(engine.eval::<()>(r#"memory_project::create("k", "   ", "c")"#));
+        let engine = host.engine(&[MemoryLevel::Shared]);
+        let message = error_text(engine.eval::<()>(r#"memory_shared::create("k", "   ", "c")"#));
         assert!(
-            message.contains("project") && message.contains("`k`"),
+            message.contains("shared") && message.contains("`k`"),
             "the refusal names the level and the identifier: {message}"
         );
         assert!(
@@ -687,9 +687,9 @@ mod tests {
             "the user module"
         );
         assert_eq!(
-            memory_module_name(MemoryLevel::Project),
-            "memory_project",
-            "the project module"
+            memory_module_name(MemoryLevel::Shared),
+            "memory_shared",
+            "the shared module"
         );
         assert_eq!(
             memory_module_name(MemoryLevel::Session),

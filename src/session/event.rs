@@ -24,7 +24,7 @@ pub enum EventKind {
     TodoChanged,
     /// A Memory changed. Only its level and identifier are reported, never its body.
     MemoryChanged {
-        /// Level of the Memory: user, project or session.
+        /// Level of the Memory: user, shared or session.
         level: String,
         /// Identifier of the Memory within its level.
         id: String,
@@ -268,7 +268,7 @@ mod tests {
             (
                 "MemoryChanged",
                 EventKind::MemoryChanged {
-                    level: "project".to_owned(),
+                    level: "shared".to_owned(),
                     id: "deploy-notes".to_owned(),
                 },
             ),
