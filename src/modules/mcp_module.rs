@@ -3,6 +3,7 @@
 //! possible). Arguments are checked against the JSON Schema of the tool before any call, a lost connection is retried with a
 //! short backoff, and every call leaves a record (`agent-sessions/modules#FR-6`, `FR-9`, `FR-10`, `FR-11`, `AC-3` to `AC-7`).
 
+use std::fmt::Write as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -135,7 +136,7 @@ where
             original: tool.name().to_owned(),
             validator,
         });
-        let comments: Vec<String> = documentation(&tool)
+        let comments: Vec<String> = documentation(role, &function, &tool)
             .lines()
             .map(|line| format!("/// {line}"))
             .collect();
@@ -171,7 +172,7 @@ where
         descriptor = descriptor.with_function(FunctionDescriptor::new(
             &function,
             &["arguments"],
-            Some(&documentation(&tool)),
+            Some(&documentation(role, &function, &tool)),
         ));
     }
     Ok(descriptor)
@@ -203,14 +204,126 @@ async fn list_named<L: McpLister>(role: &str, lister: &L) -> ModulesResult<Vec<(
         .collect())
 }
 
-/// The documentation of a function: the description of the tool, its original MCP name and its input schema.
-fn documentation(tool: &McpTool) -> String {
+/// The documentation of a function: the description of the tool, its original MCP name, its usage line, the names of its
+/// optional fields and its input schema (`agent-sessions/modules#FR-12`).
+fn documentation(role: &str, function: &str, tool: &McpTool) -> String {
     format!(
-        "{}\nMCP tool: {}\nInput schema: {}",
+        "{}\nMCP tool: {}\n{}\nInput schema: {}",
         tool.description().replace('\n', " "),
         tool.name(),
+        usage_block(role, function, tool.input_schema()),
         tool.input_schema()
     )
+}
+
+/// Fields named by the usage line or the optional fields line, at most.
+const MAX_USAGE_FIELDS: usize = 12;
+
+/// Characters of the usage line, at most.
+const MAX_USAGE_LINE: usize = 400;
+
+/// The usage line of `role::function` and, when the schema has optional properties, the `Optional fields: ` line that
+/// follows it. Neither a default, nor an enumeration, nor a description of the schema enters these lines
+/// (`agent-sessions#CON-3`).
+fn usage_block(role: &str, function: &str, schema: &Value) -> String {
+    let required = required_fields(schema);
+    let entries: Vec<String> = required.iter().map(|field| usage_entry(field, schema)).collect();
+    let mut shown = entries.len().min(MAX_USAGE_FIELDS);
+    let mut cut = entries.len() > shown;
+    while shown > 0 && usage_line(role, function, &entries, shown, cut).chars().count() > MAX_USAGE_LINE {
+        shown = shown.saturating_sub(1);
+        cut = true;
+    }
+    let mut block = usage_line(role, function, &entries, shown, cut);
+    let (optional, more) = optional_fields(schema, &required);
+    if !optional.is_empty() {
+        let joined = optional.join(", ");
+        let names = if more {
+            format!("{joined}, \u{2026}")
+        } else {
+            joined
+        };
+        let _written = write!(block, "\nOptional fields: {names}");
+    }
+    block
+}
+
+/// One usage line: `Usage: {role}::{function}(#{ fields })`, the prefix read by the introspection
+/// (../scratchpad/introspect.rs), for the first `shown` entries. When fields were cut, the line closes after the last
+/// whole one with `, …`.
+fn usage_line(role: &str, function: &str, entries: &[String], shown: usize, cut: bool) -> String {
+    let mut body = entries
+        .iter()
+        .take(shown)
+        .map(String::as_str)
+        .collect::<Vec<&str>>()
+        .join(", ");
+    if cut {
+        body = if body.is_empty() {
+            "\u{2026}".to_owned()
+        } else {
+            format!("{body}, \u{2026}")
+        };
+    }
+    let map = if body.is_empty() {
+        "#{}".to_owned()
+    } else {
+        format!("#{{ {body} }}")
+    };
+    format!("Usage: {role}::{function}({map})")
+}
+
+/// The required properties of a schema, in the order of its `required` array; non-string entries are left out.
+fn required_fields(schema: &Value) -> Vec<&str> {
+    schema
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|list| list.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default()
+}
+
+/// The names of the properties that are not required, sorted, twelve at most; plus whether names were left out,
+/// which the caller signals with the same `, \u{2026}` as the usage line.
+fn optional_fields(schema: &Value, required: &[&str]) -> (Vec<String>, bool) {
+    let mut optional: Vec<String> = schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .map(|properties| {
+            properties
+                .keys()
+                .filter(|key| !required.iter().any(|field| field == *key))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+    optional.sort();
+    let more = optional.len() > MAX_USAGE_FIELDS;
+    optional.truncate(MAX_USAGE_FIELDS);
+    (optional, more)
+}
+
+/// One `field: example` entry: the name quoted when it is not a Rhai identifier, the example given by the declared type.
+fn usage_entry(field: &str, schema: &Value) -> String {
+    let name = if rhai::is_valid_function_name(field) {
+        field.to_owned()
+    } else {
+        format!("\"{field}\"")
+    };
+    let example = match schema
+        .get("properties")
+        .and_then(|properties| properties.get(field))
+        .and_then(|property| property.get("type"))
+        .and_then(Value::as_str)
+    {
+        Some("string") => "\"\u{2026}\"",
+        Some("integer") => "0",
+        Some("number") => "0.0",
+        Some("boolean") => "false",
+        Some("array") => "[]",
+        Some("object") => "#{}",
+        _ => "()",
+    };
+    format!("{name}: {example}")
 }
 
 /// Why a schema does not compile, without any value of an instance: its kind and the place in the schema.
@@ -676,6 +789,352 @@ mod tests {
         let doc = joined(&docs(&module), "loki_query");
         assert!(doc.contains("query") && doc.contains("LogQL expression"), "{doc}");
         assert!(doc.contains("\"properties\""), "the serialized schema: {doc}");
+    }
+
+    /// The documentation of `function` in `module`, with the `///` markers stripped, as the introspection reads it.
+    fn doc_text(module: &Module, function: &str) -> String {
+        joined(&docs(module), function)
+            .lines()
+            .map(|line| line.trim_start_matches('/').trim().to_owned())
+            .collect::<Vec<String>>()
+            .join("\n")
+    }
+
+    /// Builds the module of `role` over a single `tool` and returns the documentation of its function, markers stripped.
+    async fn doc_of_tool(role: &str, function: &str, tool: McpTool) -> String {
+        let connector = Arc::new(ScriptedConnector::new(vec![tool]));
+        let sink = Arc::new(RecordingSink::new());
+        let module = mcp_module(role, connector, env(&sink, quick()))
+            .await
+            .expect("the module builds");
+        doc_text(&module, function)
+    }
+
+    /// The first line of `doc` that starts with the `Usage: ` prefix, as introspection reads it.
+    fn usage_line_of(doc: &str) -> String {
+        doc.lines()
+            .find(|line| line.starts_with("Usage: "))
+            .unwrap_or_else(|| panic!("the documentation must carry a usage line: {doc}"))
+            .to_owned()
+    }
+
+    /// The number of `field: example` entries a usage line names.
+    fn named_fields(line: &str) -> usize {
+        line.split(", ").filter(|entry| entry.contains(": ")).count()
+    }
+
+    /// A field name of exactly `width` characters and a valid Rhai identifier, to land a line on an exact bound.
+    fn padded_name(index: usize, width: usize) -> String {
+        let head = format!("f{index:02}");
+        format!(
+            "{}{}",
+            head,
+            "0".repeat(width.saturating_sub(head.chars().count()))
+        )
+    }
+
+    /// The tool `probe` whose required string fields are `names`, in that order.
+    fn probe_with_fields(names: &[String]) -> McpTool {
+        let mut properties = serde_json::Map::new();
+        for name in names {
+            let _inserted = properties.insert(name.clone(), json!({"type": "string"}));
+        }
+        McpTool::new(
+            "probe",
+            "Bounded probe.",
+            json!({"type": "object", "properties": properties, "required": names}),
+        )
+    }
+
+    /// The tool of the role `sandbox`: required string `path`, optional integer `limit`.
+    fn read_file_tool() -> McpTool {
+        McpTool::new(
+            "read_file",
+            "Reads a file.",
+            json!({
+                "type": "object",
+                "properties": {"path": {"type": "string"}, "limit": {"type": "integer"}},
+                "required": ["path"]
+            }),
+        )
+    }
+
+    // Scenario: la documentation porte la ligne d'usage
+    #[tokio::test(flavor = "multi_thread")]
+    async fn documentation_carries_the_usage_line() {
+        let doc = doc_of_tool("sandbox", "read_file", read_file_tool()).await;
+        let lines: Vec<&str> = doc.lines().collect();
+        let at = lines
+            .iter()
+            .position(|line| *line == "Usage: sandbox::read_file(#{ path: \"\u{2026}\" })")
+            .unwrap_or_else(|| panic!("the exact usage line must appear: {doc}"));
+        assert_eq!(
+            lines.get(at + 1).copied(),
+            Some("Optional fields: limit"),
+            "the optional fields line follows the usage line: {doc}"
+        );
+    }
+
+    // Scenario: les exemples suivent le type de chaque champ obligatoire
+    #[tokio::test(flavor = "multi_thread")]
+    async fn usage_examples_follow_the_type_of_each_required_field() {
+        let tool = McpTool::new(
+            "probe",
+            "Typed probe.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "s": {"type": "string"},
+                    "i": {"type": "integer"},
+                    "n": {"type": "number"},
+                    "b": {"type": "boolean"},
+                    "a": {"type": "array"},
+                    "o": {"type": "object"},
+                    "u": {"description": "no type"}
+                },
+                "required": ["s", "i", "n", "b", "a", "o", "u"]
+            }),
+        );
+        let doc = doc_of_tool("grafana", "probe", tool).await;
+        assert_eq!(
+            usage_line_of(&doc),
+            "Usage: grafana::probe(#{ s: \"\u{2026}\", i: 0, n: 0.0, b: false, a: [], o: #{}, u: () })"
+        );
+    }
+
+    // Scenario: un nom de champ qui n'est pas un identifiant est entre guillemets
+    #[tokio::test(flavor = "multi_thread")]
+    async fn non_identifier_field_name_is_quoted_in_the_usage_line() {
+        let tool = McpTool::new(
+            "probe",
+            "Dashed field.",
+            json!({
+                "type": "object",
+                "properties": {"my-field": {"type": "string"}},
+                "required": ["my-field"]
+            }),
+        );
+        let doc = doc_of_tool("grafana", "probe", tool).await;
+        assert_eq!(
+            usage_line_of(&doc),
+            "Usage: grafana::probe(#{ \"my-field\": \"\u{2026}\" })"
+        );
+    }
+
+    // Scenario: sans champ obligatoire
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tool_without_required_field_has_an_empty_map_usage() {
+        let tool = McpTool::new("tool", "Takes nothing.", json!({"type": "object"}));
+        let doc = doc_of_tool("sandbox", "tool", tool).await;
+        assert_eq!(usage_line_of(&doc), "Usage: sandbox::tool(#{})");
+    }
+
+    /// The default value the schema of one field leaks, and the schema property of one field of the bounded tool: one
+    /// carries a default, another an enumeration (`agent-sessions#CON-3` must keep both out of the usage line).
+    const LEAKY_DEFAULT: &str = "d\u{e9}faut-secret-x";
+
+    /// The schema property of field number `index` of the bounded tool: a string, one with a leaking default, one with a
+    /// leaking enumeration.
+    fn leaky_property(index: u32) -> Value {
+        match index {
+            3 => json!({"type": "string", "default": LEAKY_DEFAULT}),
+            5 => json!({"type": "string", "enum": ["valeur-enum-x"]}),
+            _ => json!({"type": "string"}),
+        }
+    }
+
+    // Scenario: la ligne d'usage est bornée et ne divulgue ni défaut ni énumération
+    #[tokio::test(flavor = "multi_thread")]
+    async fn usage_line_is_bounded_and_leaks_neither_default_nor_enum() {
+        let mut properties = serde_json::Map::new();
+        let mut required: Vec<String> = Vec::new();
+        for index in 0..30 {
+            let name = format!("champ_obligatoire_de_sandbox_tres_long_{index:02}");
+            let _inserted = properties.insert(name.clone(), leaky_property(index));
+            required.push(name);
+        }
+        let tool = McpTool::new(
+            "probe",
+            "Many fields.",
+            json!({"type": "object", "properties": properties, "required": required}),
+        );
+        let doc = doc_of_tool("grafana", "probe", tool).await;
+        let line = usage_line_of(&doc);
+        assert!(line.starts_with("Usage: "), "{line}");
+        assert!(
+            line.chars().count() <= 400,
+            "the line holds at most 400 characters: {}",
+            line.chars().count()
+        );
+        let named = line.split(", ").filter(|entry| entry.contains(": ")).count();
+        assert!(named <= 12, "at most twelve fields are named: {named}");
+        assert!(named < 30, "the line was cut: {named} fields");
+        assert!(line.ends_with(", \u{2026} })"), "the cut is marked: {line}");
+        assert!(!line.contains(LEAKY_DEFAULT), "{line}");
+        assert!(!line.contains("valeur-enum-x"), "{line}");
+    }
+
+    // Scenario: la ligne d'usage est bornée (une ligne qui tient exactement à 400 caracteres n'est jamais coupee)
+    #[tokio::test(flavor = "multi_thread")]
+    async fn usage_line_of_exactly_400_characters_is_not_cut() {
+        let filler = padded_name(12, 257);
+        let mut names: Vec<String> = (1..=11).map(|index| format!("n{index:02}")).collect();
+        names.push(filler.clone());
+        let doc = doc_of_tool("grafana", "probe", probe_with_fields(&names)).await;
+        let line = usage_line_of(&doc);
+        // Fixed shape ("Usage: grafana::probe(#" and " })") plus 12 names, 12 * 5 examples (": " and "\"\u{2026}\"")
+        // and 11 separators: 28 + 33 + 257 + 12 * 5 + 11 * 2 = 400 characters exactly.
+        assert_eq!(
+            line.chars().count(),
+            400,
+            "the line must land on the bound: {line}"
+        );
+        assert_eq!(
+            named_fields(&line),
+            12,
+            "a line that fits shows every field: {line}"
+        );
+        assert!(
+            !line.contains(", \u{2026}"),
+            "nothing is omitted, nothing is signaled: {line}"
+        );
+        assert!(line.contains(&filler), "the twelfth field is named: {line}");
+    }
+
+    // Scenario: la ligne d'usage est bornée (une ligne qui deborde se coupe apres le dernier champ entier qui tient)
+    #[tokio::test(flavor = "multi_thread")]
+    async fn usage_line_over_400_characters_cuts_after_the_last_whole_field() {
+        let filler = padded_name(12, 258);
+        let mut names: Vec<String> = (1..=11).map(|index| format!("n{index:02}")).collect();
+        names.push(filler.clone());
+        let doc = doc_of_tool("grafana", "probe", probe_with_fields(&names)).await;
+        let line = usage_line_of(&doc);
+        // One character more than the bound above: the whole line would take 401 characters, the eleven short
+        // fields plus ", \u{2026}" take 139. Maximality: adding the filler back would overflow past 400.
+        assert!(
+            line.ends_with(", \u{2026} })"),
+            "the omission is signaled: {line}"
+        );
+        assert_eq!(
+            named_fields(&line),
+            11,
+            "the cut keeps the most fields that still fit: {line}"
+        );
+        assert!(
+            !line.contains(&filler),
+            "the next field would not have fitted: {line}"
+        );
+        assert!(
+            line.chars().count() <= 400,
+            "{} characters, at most 400",
+            line.chars().count()
+        );
+    }
+
+    // Scenario: la ligne d'usage est bornée (plafond de douze champs obligatoires)
+    #[tokio::test(flavor = "multi_thread")]
+    async fn usage_line_names_twelve_required_fields_at_most() {
+        for total in [13usize, 14] {
+            let names: Vec<String> = (1..=total).map(|index| format!("q{index:02}")).collect();
+            let doc = doc_of_tool("grafana", "probe", probe_with_fields(&names)).await;
+            let line = usage_line_of(&doc);
+            assert_eq!(
+                named_fields(&line),
+                12,
+                "twelve fields at most, whether there are 13 or 14: {line}"
+            );
+            assert!(
+                line.ends_with(", \u{2026} })"),
+                "the omission is signaled: {line}"
+            );
+            assert!(!line.contains("q13"), "the thirteenth field is left out: {line}");
+            assert!(
+                line.chars().count() < 400,
+                "twelve short names fit well under 400: the cap cut, not the bound: {line}"
+            );
+        }
+    }
+
+    // Scenario: la documentation porte la ligne d'usage (plafond de douze noms facultatifs, meme signal)
+    #[tokio::test(flavor = "multi_thread")]
+    async fn optional_fields_line_names_twelve_at_most() {
+        let mut properties = serde_json::Map::new();
+        let _first_inserted = properties.insert("req".to_owned(), json!({"type": "string"}));
+        for index in 1..=13 {
+            let _inserted = properties.insert(format!("opt_{index:02}"), json!({"type": "integer"}));
+        }
+        let tool = McpTool::new(
+            "probe",
+            "Optional probe.",
+            json!({"type": "object", "properties": properties, "required": ["req"]}),
+        );
+        let doc = doc_of_tool("grafana", "probe", tool).await;
+        let line = doc
+            .lines()
+            .find(|line| line.starts_with("Optional fields: "))
+            .unwrap_or_else(|| panic!("the optional fields line must appear: {doc}"));
+        let shown: Vec<String> = (1..=12).map(|index| format!("opt_{index:02}")).collect();
+        assert_eq!(
+            line,
+            format!("Optional fields: {}, \u{2026}", shown.join(", ")),
+            "alphabetical, twelve at most, the omission signaled"
+        );
+        assert!(!line.contains("opt_13"), "{line}");
+    }
+
+    // Scenario: la documentation porte la ligne d'usage (douze noms facultatifs exactement, ligne complete sans signal)
+    #[tokio::test(flavor = "multi_thread")]
+    async fn optional_fields_line_of_exactly_twelve_names_is_complete() {
+        let mut properties = serde_json::Map::new();
+        let _req_inserted = properties.insert("req".to_owned(), json!({"type": "string"}));
+        let expected: Vec<String> = (1..=12).map(|index| format!("opt_{index:02}")).collect();
+        for name in &expected {
+            let _inserted = properties.insert(name.clone(), json!({"type": "integer"}));
+        }
+        let tool = McpTool::new(
+            "probe",
+            "Optional probe.",
+            json!({"type": "object", "properties": properties, "required": ["req"]}),
+        );
+        let doc = doc_of_tool("grafana", "probe", tool).await;
+        let line = doc
+            .lines()
+            .find(|line| line.starts_with("Optional fields: "))
+            .unwrap_or_else(|| panic!("the optional fields line must appear: {doc}"));
+        assert_eq!(
+            line,
+            format!("Optional fields: {}", expected.join(", ")),
+            "twelve names are none left out: alphabetical, whole, no signal"
+        );
+        assert!(
+            !line.contains('\u{2026}'),
+            "nothing is omitted, nothing is signaled: {line}"
+        );
+    }
+
+    // Scenario: la coquille porte la même ligne d'usage
+    #[tokio::test(flavor = "multi_thread")]
+    async fn shell_carries_the_same_usage_line() {
+        let connector = Arc::new(ScriptedConnector::new(vec![read_file_tool()]));
+        let sink = Arc::new(RecordingSink::new());
+        let real = mcp_module("sandbox", Arc::clone(&connector), env(&sink, quick()))
+            .await
+            .expect("the module builds");
+        let descriptor = mcp_shell_descriptor("sandbox", &*connector)
+            .await
+            .expect("the descriptor builds");
+        let shell = shell_module(&descriptor);
+        let real_doc = doc_text(&real, "read_file");
+        let shell_doc = doc_text(&shell, "read_file");
+        assert_eq!(
+            usage_line_of(&shell_doc),
+            usage_line_of(&real_doc),
+            "the shell declares the same call"
+        );
+        assert!(
+            shell_doc.lines().any(|line| line == "Optional fields: limit"),
+            "the shell names the optional fields too: {shell_doc}"
+        );
     }
 
     // Scenario: appel réussi

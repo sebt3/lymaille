@@ -167,7 +167,8 @@ Scenario: find cherche dans la description d'un toolset
   Then le toolset `grafana` de genre `toolset` figure parmi les résultats
 
 Tasks:
-  [ ] #12 @FunctionEntry::usage et la ligne `Usage: ` (lot 0.2-B1, `agent-sessions/scratchpad#FR-14`, `sebt3/lymaille#3`) : trois Scenarios ci-dessus, tests puis implémentation. L'accesseur est public (la crate est publiée) et documenté ; le champ s'ajoute à la structure, dont le constructeur `pub(crate)` ne change pas de visibilité.
+  [x] #12 @FunctionEntry::usage et la ligne `Usage: ` (lot 0.2-B1, `agent-sessions/scratchpad#FR-14`, `sebt3/lymaille#3`) : trois Scenarios ci-dessus, tests puis implémentation. L'accesseur est public (la crate est publiée) et documenté ; le champ s'ajoute à la structure, dont le constructeur `pub(crate)` ne change pas de visibilité.
+      Validé le 2026-11-04 (validator : `scripts/check` complet vert ; mutants ciblés : aucun des 41 mutants du fichier ne tombe sur une ligne du diff — chaînes de méthodes sans opérateur ; force des tests par les asserts des trois Scenarios et le test de branche direct. Le constructeur n'est plus `const`, la dérivaison du champ exigeant un scan de chaîne).
   [x] #1 Tests puis implémentation : @Catalog (filtrage et attribution) d'abord, puis les fonctions Rhai.
   [x] #2 Les noms des fonctions d'introspection (`vars`, `modules`, `functions`, `toolsets`, `skills`, `find`, `rules`) sont posés ; seul `find` est nommé par le DSD (`agent-sessions/scratchpad#AC-2`). Ils sont à confirmer avec l'auteur du skill intégré (`agent-sessions/toolsets#FR-18`) : le skill enseigne ces noms, ils sont un contrat avec les modèles.
       Décidé le 2026-10-29 par le développeur principal : noms validés.
