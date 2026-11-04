@@ -121,8 +121,8 @@ Scenario: les exemples du skill intégré s'exécutent
   Then le second voit la variable et la `fn` du premier, et chaque résultat annoncé par le texte se vérifie
 
 Tasks:
-  [ ] #5 Les quatre pièges de Rhai dans le corps du skill intégré `rhai-pad` (lot 0.2-B3, `agent-sessions/scratchpad#FR-9`, `AC-14`, `sebt3/lymaille#3`) : le Scenario « les pièges de Rhai … sont vrais » d'abord (rouge faute du texte), puis le texte, dans l'ordre fixé par `Must`. Le texte reste en anglais et chaque affirmation s'exécute (`built_in_claims_hold_in_the_scratchpad` est étendu ou doublé d'un test voisin). Le gabarit du skill ne change pas de forme.
-  [x] #1 Tests puis implémentation, vérifié le 2026-10-30.
+  [x] #5 Les quatre pièges de Rhai dans le corps du skill intégré `rhai-pad` (lot 0.2-B3, `agent-sessions/scratchpad#FR-9`, `AC-14`, `sebt3/lymaille#3`) : le Scenario « les pièges de Rhai … sont vrais » d'abord (rouge faute du texte), puis le texte, dans l'ordre fixé par `Must`. Le texte reste en anglais et chaque affirmation s'exécute (`built_in_claims_hold_in_the_scratchpad` est étendu ou doublé d'un test voisin). Le gabarit du skill ne change pas de forme.
+      Validé le 2026-11-04 (validator, après un FAIL d'abord : la demie-affirmation « backtick ordinaire entre guillemets » est exécutée à son tour et discriminante ; ordre du Must respecté, les quatre pièges exécutés avec le verdict annoncé, mutants sans survivant).  [x] #1 Tests puis implémentation, vérifié le 2026-10-30.
       Livré le 2026-10-30 (implémentation, à valider par le développeur principal). Écarts et choix posés, à relire :
       - le skill intégré s'appelle `rhai-pad` : un nom de skill n'admet pas `_` (./skill.sdd) ; l'outil reste `rhai_pad` dans son texte ;
       - `session_context()` rend les clés `params` (paramètres partagés), `toolsets` et `roles` : `shared` est un mot réservé de Rhai ;

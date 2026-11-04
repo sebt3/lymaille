@@ -54,6 +54,12 @@ Rhai in brief (`functions()` and `find(\"words\")` tell the rest):
 - Errors: `try { } catch (e) { }` is a statement, not a value: assign inside it (`msg = e;`) and read the variable after.
 - `()` is the empty value.
 
+Pitfalls, where a model that knows Rust miswrites Rhai:
+- A raw string holding `\"#` is written with double hashes: `##\"a\"#b\"##` gives `a\"#b`. The Rust form `r#\"...\"#` does not exist in Rhai.
+- A string between backticks cannot hold a backtick; between `\"` quotes a backtick is an ordinary character.
+- A `fn` cannot see the variables of the scope: pass what it needs as arguments (`session_context()` works inside it).
+- Every function of an MCP module takes a single map: call `module::tool(#{ key: 1 })`, never a bare string. The `Usage:` line of its documentation gives the expected map.
+
 ";
 
 /// First example call of the built-in skill: a variable and a `fn`.
@@ -918,6 +924,65 @@ mod tests {
                 "the claim that this call fails holds: {script}"
             );
         }
+    }
+
+    /// The test module of the pitfalls Scenario: `read_value` takes a single map, and its `Usage:` line says so, as every
+    /// function generated from an MCP module does (`agent-sessions/scratchpad#FR-14`).
+    fn sandbox_toolset() -> Toolset {
+        toolset(
+            "sandbox",
+            "/// Reads the value behind the key `k`.\n/// Usage: read_value(#{ k: ... }).\nfn read_value(args) { \
+             args[\"k\"] }\n",
+        )
+    }
+
+    // Scenario: les pièges de Rhai énoncés par le skill intégré sont vrais
+    #[tokio::test(flavor = "multi_thread")]
+    async fn built_in_rhai_pitfalls_hold_in_the_scratchpad() {
+        let body = builtin().body().to_owned();
+        for expected in [
+            "`##\"a\"#b\"##`",
+            "`r#\"...\"#`",
+            "cannot hold a backtick",
+            "`fn` cannot see the variables of the scope",
+            "takes a single map",
+            "Usage:",
+        ] {
+            assert!(
+                body.contains(expected),
+                "the skill states the pitfall `{expected}`: {body}"
+            );
+        }
+        let pad = pad(&[sandbox_toolset()], &context());
+        let raw = run(&pad, "##\"a\"#b\"##").await;
+        assert_eq!(
+            raw.status(),
+            RunStatus::Ok,
+            "the double-hash raw string runs: {}",
+            raw.text()
+        );
+        assert_eq!(
+            raw.text().trim(),
+            "a\"#b",
+            "the raw string gives the text the skill announces"
+        );
+        for refused in ["r#\"x\"#", "`a`b`", "sandbox::read_value(\"text\")"] {
+            let outcome = run(&pad, refused).await;
+            assert_ne!(
+                outcome.status(),
+                RunStatus::Ok,
+                "this call is refused as the skill announces: {refused}: {}",
+                outcome.text()
+            );
+        }
+        assert!(
+            holds(&pad, "sandbox::read_value(#{ k: 1 }) == 1").await,
+            "the single map is the call form the skill announces"
+        );
+        assert!(
+            holds(&pad, "\"a`b\".len() == 3").await,
+            "between quotes a backtick is an ordinary character, as the skill announces"
+        );
     }
 
     // Scenario: le texte du skill intégré décrit l'origine, le genre et la recherche
