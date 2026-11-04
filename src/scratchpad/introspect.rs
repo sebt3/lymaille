@@ -19,6 +19,8 @@ use super::render::render_value;
 const PREVIEW_CHARS: usize = 60;
 /// Most results returned by `find`.
 const MAX_FIND_RESULTS: usize = 50;
+/// Prefix of the documentation line that declares the expected call of a function (`agent-sessions/scratchpad#FR-14`).
+const USAGE_PREFIX: &str = "Usage: ";
 
 /// Where a function of the catalog comes from.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,7 +62,8 @@ impl Origin {
     }
 }
 
-/// A function of the catalog: its call path, its signature, its documentation when it has one, and its origin.
+/// A function of the catalog: its call path, its signature, its documentation when it has one, the usage line its
+/// documentation declares when it has one, and its origin.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct FunctionEntry {
@@ -68,24 +71,28 @@ pub struct FunctionEntry {
     signature: String,
     arity: usize,
     doc: Option<String>,
+    usage: Option<String>,
     origin: Origin,
 }
 
 impl FunctionEntry {
     /// Builds an entry from its call path, its signature, its number of parameters, its documentation and its origin.
+    /// The usage line is read from the documentation at construction.
     #[must_use]
-    pub(crate) const fn new(
+    pub(crate) fn new(
         path: String,
         signature: String,
         arity: usize,
         doc: Option<String>,
         origin: Origin,
     ) -> Self {
+        let usage = doc.as_deref().and_then(usage_of).map(str::to_owned);
         Self {
             path,
             signature,
             arity,
             doc,
+            usage,
             origin,
         }
     }
@@ -112,6 +119,14 @@ impl FunctionEntry {
     #[must_use]
     pub fn doc(&self) -> Option<&str> {
         self.doc.as_deref()
+    }
+
+    /// Usage line declared in the documentation: the expected call that follows the `Usage: ` prefix of the first such
+    /// line, when the function declares one. The line itself stays in the documentation that `functions()` and `find`
+    /// render.
+    #[must_use]
+    pub fn usage(&self) -> Option<&str> {
+        self.usage.as_deref()
     }
 
     /// Where the function comes from.
@@ -214,6 +229,16 @@ fn doc_of(comments: &[String]) -> Option<String> {
     } else {
         Some(lines.join("\n"))
     }
+}
+
+/// Usage line of a documentation: the text after the prefix of the first line that starts with it, without trailing
+/// whitespace. Nothing when no line starts with the prefix, or when the text is empty; one line per function, the first
+/// one wins.
+fn usage_of(doc: &str) -> Option<&str> {
+    doc.lines()
+        .find_map(|line| line.strip_prefix(USAGE_PREFIX))
+        .map(str::trim_end)
+        .filter(|text| !text.is_empty())
 }
 
 /// A function of the metadata of an engine, as Rhai describes it.
@@ -762,7 +787,7 @@ pub(in crate::scratchpad) fn register_introspection(engine: &mut Engine, source:
 mod tests {
     use super::{
         Catalog, FunctionEntry, IntrospectionSource, Origin, ScriptFunction, VariableInfo, limits_notice,
-        register_introspection, registration_step,
+        register_introspection, registration_step, usage_of,
     };
     use crate::scratchpad::{
         GrantedModule, GrantedSkill, GrantedToolset, Grants, ScratchpadLimits, register_format_functions,
@@ -1193,6 +1218,110 @@ mod tests {
             Some("First line.\nSecond line."),
             "one line per comment, joined by a newline"
         );
+    }
+
+    // Scenario: une ligne d'usage est lue dans la documentation
+    #[test]
+    fn usage_line_is_read_from_the_documentation() {
+        let mut engine = Engine::new();
+        let mut module = Module::new();
+        let _hash = FuncRegistration::new("loki_query")
+            .with_comments([
+                "/// Runs a Loki query.",
+                "/// Usage: grafana::loki_query(#{ query: \"\u{2026}\" })",
+                "/// Returns the matching log lines.",
+            ])
+            .set_into_module(&mut module, || 0i64);
+        let _registered = engine.register_static_module("grafana", Shared::new(module));
+        let grants = Grants::new()
+            .with_module(GrantedModule::new("grafana", Shared::new(Module::new())).expect("valid name"))
+            .expect("the module is granted");
+        let catalog = Catalog::build(&engine, &grants, &[]).expect("the catalog builds");
+        let entry = catalog
+            .functions()
+            .iter()
+            .find(|entry| entry.path() == "grafana::loki_query")
+            .expect("the entry exists");
+        assert_eq!(
+            entry.usage(),
+            Some("grafana::loki_query(#{ query: \"\u{2026}\" })"),
+            "the text after the prefix of the second line"
+        );
+        let source = Arc::new(IntrospectionSource::new(grants, catalog, ScratchpadLimits::new()));
+        register_introspection(&mut engine, &source);
+        let found = rows(&engine, "functions(\"grafana\")");
+        let row = found.first().expect("the function is listed");
+        assert_eq!(
+            field(row, "doc"),
+            "Runs a Loki query.\nUsage: grafana::loki_query(#{ query: \"\u{2026}\" })\nReturns the matching log lines.",
+            "functions() still renders the three lines, the usage line included"
+        );
+    }
+
+    // Scenario: sans ligne d'usage, rien
+    #[test]
+    fn usage_is_absent_without_a_usage_line() {
+        let mut engine = Engine::new();
+        let mut module = Module::new();
+        let _plain = FuncRegistration::new("plain")
+            .with_comments(["/// Runs a Loki query."])
+            .set_into_module(&mut module, || 0i64);
+        let _bare = FuncRegistration::new("bare")
+            .with_comments(["/// Usage: "])
+            .set_into_module(&mut module, || 1i64);
+        let _registered = engine.register_static_module("usage_test", Shared::new(module));
+        let grants = Grants::new()
+            .with_module(GrantedModule::new("usage_test", Shared::new(Module::new())).expect("valid name"))
+            .expect("the module is granted");
+        let catalog = Catalog::build(&engine, &grants, &[]).expect("the catalog builds");
+        for path in ["usage_test::plain", "usage_test::bare"] {
+            let entry = catalog.functions().iter().find(|entry| entry.path() == path);
+            assert_eq!(
+                entry.and_then(FunctionEntry::usage),
+                None,
+                "`{path}` declares no usage line"
+            );
+        }
+    }
+
+    // Scenario: la première ligne d'usage gagne
+    #[test]
+    fn the_first_usage_line_wins() {
+        let mut engine = Engine::new();
+        let mut module = Module::new();
+        let _hash = FuncRegistration::new("twice")
+            .with_comments(["/// Usage: first(a)", "/// Middle.", "/// Usage: second(b)"])
+            .set_into_module(&mut module, || 0i64);
+        let _registered = engine.register_static_module("usage_test", Shared::new(module));
+        let grants = Grants::new()
+            .with_module(GrantedModule::new("usage_test", Shared::new(Module::new())).expect("valid name"))
+            .expect("the module is granted");
+        let catalog = Catalog::build(&engine, &grants, &[]).expect("the catalog builds");
+        let entry = catalog
+            .functions()
+            .iter()
+            .find(|entry| entry.path() == "usage_test::twice")
+            .expect("the entry exists");
+        assert_eq!(entry.usage(), Some("first(a)"), "the text of the first line");
+        assert_eq!(
+            entry.doc(),
+            Some("Usage: first(a)\nMiddle.\nUsage: second(b)"),
+            "both lines stay in the documentation"
+        );
+    }
+
+    // La branche « texte vide » du Must : `doc_of` tronque chaque ligne, la branche est injoignable par le pipeline,
+    // elle se vérifie sur `usage_of` directement.
+    #[test]
+    fn an_empty_usage_line_gives_nothing() {
+        assert_eq!(usage_of("Usage: "), None, "a line that is only the prefix");
+        assert_eq!(
+            usage_of("First.\nUsage: call(a)  \nLast."),
+            Some("call(a)"),
+            "trailing whitespace dropped"
+        );
+        assert_eq!(usage_of("use: call(a)"), None, "the prefix is case-sensitive");
+        assert_eq!(usage_of(" Usage: call(a)"), None, "no leading whitespace");
     }
 
     // Scenario: find cherche dans la description d'un toolset
