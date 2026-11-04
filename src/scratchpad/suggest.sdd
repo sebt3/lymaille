@@ -144,7 +144,8 @@ Scenario: les modules des fonctions visibles sont nommés une seule fois chacun
   Then `grafana` est suggéré une seule fois
 
 Tasks:
-  [ ] #6 @CandidateSet::with_usage et le rendu `call it as:` à distance zéro (lot 0.2-B2, `agent-sessions/scratchpad#FR-14`, `sebt3/lymaille#3`) : trois Scenarios ci-dessus, tests puis implémentation. Dépend de ./introspect.sdd #12.
+  [x] #6 @CandidateSet::with_usage et le rendu `call it as:` à distance zéro (lot 0.2-B2, `agent-sessions/scratchpad#FR-14`, `sebt3/lymaille#3`) : trois Scenarios ci-dessus, tests puis implémentation. Dépend de ./introspect.sdd #12.
+      Validé le 2026-11-04 (validator : `scripts/check` complet vert ; les 5 mutants des lignes du diff tués ; le test « l'usage d'une fonction proche n'est pas montré » est un garde-fou vert d'emblée mais porteur — il tue le mutant de distance ; le filtrage à la construction s'observe par comparaison structurelle, seule observation possible, et il tue son mutant). API posée, non branchée : l'appel vient dans ./run.sdd #18. Deux mutants équivalents préexistants de `levenshtein` (`unwrap_or` inatteignable) consignés, hors diff, non régressifs.
   [x] #1 Tests puis implémentation, vérifié le 2026-10-30.
   [x] #2 Posé : seuil, plafond de trois suggestions et distance de Levenshtein. Réglages à ajuster à la mesure sur le jeu de tâches de référence (`agent-sessions#Risques`) ; ils n'affectent aucune règle de sécurité (le périmètre des candidats ne change pas).
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).

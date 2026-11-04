@@ -13,12 +13,15 @@ const MAX_NAME_CHARS: usize = 128;
 
 /// Elements a not-found name can be compared with: the visible functions with their signatures, the granted module names
 /// and the variables of the scope.
+///
+/// Usage lines can be attached on top of the function candidates with [`CandidateSet::with_usage`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct CandidateSet {
     functions: Vec<(String, String)>,
     modules: Vec<String>,
     variables: Vec<String>,
+    usage: Vec<(String, String)>,
 }
 
 impl CandidateSet {
@@ -30,7 +33,20 @@ impl CandidateSet {
             functions,
             modules,
             variables,
+            usage: Vec::new(),
         }
+    }
+
+    /// Attaches the usage lines of the visible functions: call paths paired with the usage text read from
+    /// `super::introspect::FunctionEntry::usage`. A path that is not a function candidate of the set is dropped, so that no
+    /// usage text can smuggle an ungranted path into a suggestion. Chainable; without this call the set carries no usage.
+    #[must_use]
+    pub fn with_usage(mut self, usages: Vec<(String, String)>) -> Self {
+        self.usage = usages
+            .into_iter()
+            .filter(|(path, _)| self.functions.iter().any(|(candidate, _)| candidate == path))
+            .collect();
+        self
     }
 }
 
@@ -77,14 +93,14 @@ fn suggestions_for(kind: NotFoundKind, name: &str, candidates: &CandidateSet) ->
 }
 
 /// Functions near `name`. A candidate at distance zero is shown with its signature, so that the LLM sees the parameters it
-/// has to pass.
+/// has to pass, followed by its usage line when the set carries one.
 fn function_suggestions(name: &str, candidates: &CandidateSet) -> Vec<String> {
     ranked(name, candidates.functions.iter().map(|(path, _)| path.as_str()))
         .into_iter()
         .take(MAX_SUGGESTIONS)
         .map(|(distance, path)| {
             if distance == 0 {
-                signature_of(path, candidates)
+                call_form(path, candidates)
             } else {
                 path.to_owned()
             }
@@ -92,13 +108,23 @@ fn function_suggestions(name: &str, candidates: &CandidateSet) -> Vec<String> {
         .collect()
 }
 
-/// Signature of the visible function at `path`, or its path when the set holds no signature for it.
-fn signature_of(path: &str, candidates: &CandidateSet) -> String {
-    candidates
+/// How a function at distance zero is rendered: the signature of the visible function at `path`, or its path when the set
+/// holds no signature for it, extended with `; call it as: {usage}` when the set carries a usage line for it.
+fn call_form(path: &str, candidates: &CandidateSet) -> String {
+    let signature = candidates
         .functions
         .iter()
         .find(|(candidate, _)| candidate.as_str() == path)
-        .map_or_else(|| path.to_owned(), |(_, signature)| signature.clone())
+        .map_or_else(|| path.to_owned(), |(_, signature)| signature.clone());
+    match candidates
+        .usage
+        .iter()
+        .find(|(candidate, _)| candidate.as_str() == path)
+        .map(|(_, usage)| usage.as_str())
+    {
+        Some(usage) => format!("{signature}; call it as: {usage}"),
+        None => signature,
+    }
 }
 
 /// Modules near `name`, among the granted names; when none is near, among the modules of the visible function paths.
@@ -540,6 +566,90 @@ mod tests {
             levenshtein(&ab, &abc),
             1,
             "inserting one character costs one, as deleting does"
+        );
+    }
+
+    /// A set with one map-taking function and its usage line, for the `call it as:` scenarios.
+    fn sandbox_with_usage() -> CandidateSet {
+        CandidateSet::new(
+            vec![(
+                "sandbox::read_file".to_owned(),
+                "sandbox::read_file(arguments: Map)".to_owned(),
+            )],
+            vec!["sandbox".to_owned()],
+            Vec::new(),
+        )
+        .with_usage(vec![(
+            "sandbox::read_file".to_owned(),
+            "sandbox::read_file(#{ path: \"\u{2026}\" })".to_owned(),
+        )])
+    }
+
+    // Scenario: un nombre d'arguments incorrect sur une fonction à table montre l'appel attendu
+    #[test]
+    fn a_wrong_arity_on_a_map_function_shows_the_expected_call() {
+        let error = suggest_for(
+            not_found(NotFoundKind::Function, "sandbox::read_file", None),
+            &sandbox_with_usage(),
+        );
+        assert_eq!(
+            suggestions(error),
+            vec![
+                "sandbox::read_file(arguments: Map); call it as: sandbox::read_file(#{ path: \"\u{2026}\" })"
+                    .to_owned()
+            ],
+            "the signature and the expected call at distance zero"
+        );
+    }
+
+    // Scenario: l'usage d'une fonction proche n'est pas montré
+    #[test]
+    fn the_usage_of_a_near_function_is_not_shown() {
+        let error = suggest_for(
+            not_found(NotFoundKind::Function, "sandbox::read_fil", None),
+            &sandbox_with_usage(),
+        );
+        assert_eq!(
+            suggestions(error),
+            vec!["sandbox::read_file".to_owned()],
+            "the bare path at a nonzero distance, no signature and no usage"
+        );
+    }
+
+    // Scenario: un usage donné pour un chemin inconnu est ignoré
+    #[test]
+    fn a_usage_given_for_an_unknown_path_is_ignored() {
+        let candidates = CandidateSet::new(
+            vec![(
+                "sandbox::read_file".to_owned(),
+                "sandbox::read_file(arguments: Map)".to_owned(),
+            )],
+            vec!["sandbox".to_owned()],
+            Vec::new(),
+        )
+        .with_usage(vec![(
+            "other::secret".to_owned(),
+            "other::secret(#{ token: \"\u{2026}\" })".to_owned(),
+        )]);
+        let without_usage = CandidateSet::new(
+            vec![(
+                "sandbox::read_file".to_owned(),
+                "sandbox::read_file(arguments: Map)".to_owned(),
+            )],
+            vec!["sandbox".to_owned()],
+            Vec::new(),
+        );
+        assert_eq!(
+            candidates, without_usage,
+            "a path that is not a function candidate is dropped"
+        );
+        let error = suggest_for(
+            not_found(NotFoundKind::Function, "sandbox::read_fil", None),
+            &candidates,
+        );
+        assert!(
+            !format!("{error}").contains("other::secret"),
+            "the unknown path is nowhere in the message: {error}"
         );
     }
 }
