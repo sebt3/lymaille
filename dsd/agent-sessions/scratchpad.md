@@ -278,3 +278,5 @@ Specs créées dans `src/scratchpad/` (une par fichier source prévu, spec de r�
 - `run.sdd` : le pad et l'exécution d'un appel de `rhai_pad` (FR-1, FR-5, FR-7, FR-10, DEC-3, AC-1, AC-4, AC-8, AC-9).
 
 État au 2026-10-31 : toutes ces specs sont implémentées et couvertes par des tests de comportement et de mutation (`scripts/mutants`). Une annulation n'est pas rattrapable par `try/catch` d'un script (vérifié sur la version de Rhai épinglée), et l'absence de limite de durée est vérifiée par un test long `#[ignore]` de deux minutes réelles. Le tool `rhai_pad` est appelé par la boucle de tour (`src/runtime/turn.rs`).
+
+État au 2026-11-04 (lot 0.2.0) : livré, `FR-14` (l'erreur d'appel montre l'appel attendu, à distance zéro pour les suggestions) et `FR-9`/`AC-14` (pièges de Rhai dans le skill intégré `rhai-pad`).

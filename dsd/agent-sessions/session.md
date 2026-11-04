@@ -204,3 +204,5 @@ Specs dans `src/session/` (une par fichier source, spec de répertoire `session.
 - `notice.sdd` : messages système signalant au LLM ce qui a changé à la restauration.
 
 État au 2026-11-01 : tout est livré, y compris la **boucle de tour** (FR-4 à FR-7, FR-14, AC-3, AC-8 à AC-11), réalisée dans `src/runtime/` (`turn.sdd`), avec le masquage des secrets coupés entre deux fragments de streaming (`event.sdd` #5 à #7). Le format est relu puis réécrit en version courante (`state.sdd` #5) ; le diff de provenance utilise `vynil_core::Semver` (`notice.sdd` #3). La **restauration complète** (FR-3, AC-2, `session.sdd` #3) est livrée par `restore_session` dans `src/runtime/` (`runtime/restore.sdd`, lot S1, validé le 2026-11-01) ; le domaine `session` reste sans dépendance sur `scratchpad` (décision du 2026-10-31).
+
+État au 2026-11-04 (lot 0.2.0) : livré, `FR-16` (réponse vide non valide et relancée une fois, raisonnement d'une réponse écartée conservé : `Message::Discarded`, `DiscardCause`, format 1.1, événement `EmptyResponse`).

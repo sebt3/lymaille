@@ -39,8 +39,8 @@ fournit l'abstraction des fournisseurs.
 - **FR-5 - MUST:** Une session démarre sur un contexte de travail (un ToolsetContext, `agent-sessions#BR-9`) : l'agent principal
   (de travail ou de configuration) en découle, et la session sait ainsi quel environnement elle pilote. L'hôte désigne à la
   librairie l'agent et le ToolsetContext ; l'utilisateur ne choisit pas d'agent, et la librairie ne demande aucune approbation en
-  cours de session pour élargir ce que le contexte a fixé avant son début. La résolution du contexte vers l'agent par défaut
-  relève de l'hôte.
+  cours de session pour élargir ce que le contexte a fixé avant son début. Le type du contexte peut porter le nom de l'agent par
+  défaut et la nature de session (`agent-sessions/toolsets#FR-21`) ; la librairie résout ce nom contre le catalogue et refuse un agent inconnu, un sous-agent ou une nature contradictoire (`FR-21` de `toolsets`) ; l'hôte décide seul quand le type ne porte rien.
     - **Source:** agent-sessions#BO-3 ; reformulé, `sebt3/lymaille#4` et `#5`, 2026-11-03 : le texte d'origine disait que
       l'utilisateur choisit un agent principal au démarrage
     - **Verified by:** `AC-1`
@@ -71,8 +71,7 @@ et ce que l'agent consomme.
 - **Résolu (2026-11-01):** détection des modèles : `rig` ne reporte pas `max_model_len` dans `context_length` (mesuré, `spikes/rig-probe`) ; `detect_models` de l'adaptateur (`rig.sdd`) lit `GET <base>/models` lui-même (vLLM : `max_model_len` 262144 pour `qwen3.8-flash-next`, `spikes/rig-e2e`). La passerelle annonce 8192 à tort (`kydah/kydah-ai-proxy#113`) : la surcharge du profil est nécessaire. Texte d'origine : détection des modèles (à vérifier : report de `max_model_len` par `rig`). `list_models` existe dans `rig` 0.43 sur les clients OpenAI, Anthropic, Ollama, Copilot et
   Gemini (Observed in: rig-core 0.43.0, `src/client`), et `ModelInfo` porte `context_length` et `max_output_tokens`
   optionnels. vLLM annonce `max_model_len` dans `/v1/models` (262 144 pour `qwen3.8-flash-next`, Observed in:
-  spikes/inference-probe) ; que `rig` le reporte dans `context_length` reste à vérifier, sinon le profil de modèle le
-  surcharge (FR-7). Décidé (user instruction, 2026-10-27) : un modèle référencé mais non détecté se résout si son profil porte
+  spikes/inference-probe) ; `rig` ne le reporte pas dans `context_length` (mesuré le 2026-11-01), si bien que le profil de modèle le surcharge (FR-7). Décidé (user instruction, 2026-10-27) : un modèle référencé mais non détecté se résout si son profil porte
   une taille de contexte, sinon la résolution échoue avec une erreur explicite. La réponse maximale par défaut d'un profil
   est le contexte divisé par 8.
   Une passerelle de l'écosystème annonce `context_length: 8192` pour presque tous ses modèles, dont `qwen3.8-flash-next` que
@@ -100,3 +99,5 @@ Specs dans `src/agents/`, implémentées (des tâches de durcissement restent li
 - `error.sdd` : erreur typée du module.
 
 État au 2026-11-01 : tout est livré. La **sérialisation frontmatter + corps** d'une définition (FR-3, `agents.sdd` #5, `definition.sdd` #18 et #19, `yaml_serde`) ; le **manifeste de projet** (FR-4, `agents.sdd` #3, `manifest.sdd`, lot M1) ; l'**adaptateur `rig`** (`rig.sdd`, lots R0 à R3, derrière la feature Cargo `rig`) : clients OpenAI compatibles, `list_models` et détection des modèles, décodage et rejeu du raisonnement. Le TBD de détection des modèles est levé par les mesures de `spikes/rig-probe` et `spikes/rig-e2e`.
+
+État au 2026-11-04 (lot 0.2.0) : livré, `FR-5` (le contexte de travail, non l'agent, sélectionne la session) et le niveau `Shared` des fournisseurs et profils (alias de lecture `project`).

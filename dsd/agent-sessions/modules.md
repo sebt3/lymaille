@@ -18,17 +18,18 @@ d'extension pour les modules fournis par l'hôte.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-1`
 
-- **FR-2 - MUST:** Un module Memory crée, lit, modifie, supprime et liste des Memory sur les niveaux utilisateur, projet et
+- **FR-2 - MUST:** Un module Memory crée, lit, modifie, supprime et liste des Memory sur les niveaux utilisateur, partagé et
   session ; une Memory a un identifiant, un titre et un corps ; la clé est le niveau et l'identifiant. Les trois niveaux
   passent par le même trait de stockage, le niveau session étant qualifié par l'identifiant de la session : l'état
   persisté de la session ne contient pas de Memory.
-    - **Source:** user instruction, 2026-10-24 ; stockage unique, user instruction, 2026-10-25
+    - **Source:** user instruction, 2026-10-24 ; stockage unique, user instruction, 2026-10-25 ; niveau partagé (`Shared`) à la place de
+      projet, sans alias, `sebt3/lymaille#5` point 2, user instruction, 2026-11-04
     - **Verified by:** `AC-2`
 
 - **FR-3 - MUST:** La liste des Memory ne rend que l'identifiant et le titre ; le corps se lit à la demande.
     - **Source:** user instruction, 2026-10-24
 
-- **FR-4 - MUST:** La Memory est exposée par trois modules, un par niveau (utilisateur, projet, session). L'accès d'un
+- **FR-4 - MUST:** La Memory est exposée par trois modules, un par niveau (utilisateur, partagé, session ; `memory_user`, `memory_shared`, `memory_session`). L'accès d'un
   agent à un niveau, y compris la lecture seule, se décide par les toolsets de sa définition (`agent-sessions#BR-2`) : la
   définition d'agent ne porte aucun droit de Memory, et toute vérification passe par un toolset.
     - **Source:** agent-sessions#BR-2 ; user instruction, 2026-10-27
@@ -95,7 +96,7 @@ Source: user instruction, 2026-10-24
 ## Acceptation
 
 - **AC-1:** Un changement d'état de tâche fait émettre un événement à l'hôte et survit à une restauration.
-- **AC-2:** Une Memory de même identifiant créée aux niveaux utilisateur et projet est lue indépendamment ; un agent en
+- **AC-2:** Une Memory de même identifiant créée aux niveaux utilisateur et partagé est lue indépendamment ; un agent en
   lecture seule sur le niveau utilisateur (toolset qui n'expose que les fonctions de lecture) ne peut pas la modifier.
 - **AC-3:** Avec un serveur MCP simulé exposant deux tools, la session voit un module à deux fonctions documentées par les
   descriptions MCP.
@@ -118,8 +119,10 @@ Specs dans `src/modules/`, implémentées (des tâches de durcissement restent l
 - `modules.sdd` : spec de répertoire.
 - `error.sdd` : erreur typée du module.
 - `todo.sdd` : liste de tâches et module Rhai `todo` (FR-1, AC-1).
-- `memory.sdd`, `memory_module.sdd` : Memory par niveau, trait de stockage, modules `memory_user`, `memory_project`, `memory_session` (FR-2 à FR-5, AC-2).
+- `memory.sdd`, `memory_module.sdd` : Memory par niveau, trait de stockage, modules `memory_user`, `memory_shared`, `memory_session` (FR-2 à FR-5, AC-2).
 - `mcp_name.sdd`, `mcp.sdd`, `mcp_module.sdd` : nommage des fonctions, traits de connecteur, génération du module en mode réel et coquille, validation JSON Schema, reconnexion, ligne d'usage (FR-6, FR-9 à FR-12, AC-3 à AC-8).
 - `mcp_client.sdd` : connecteur MCP réel HTTP streamable sur `rmcp`, derrière la feature `mcp-http` (FR-6, CON-5).
 
 État au 2026-11-01 : tout est livré, y compris `FR-7` (notifications MCP vers les watchers) : le connecteur MCP appelle `notify` sur la source `mcp` (`delegation/sources.sdd` #2, confirmé par le validateur le 2026-11-01 ; tests de notifications et d'annulation ajoutés). FR-8 (modules de l'hôte) ne demande aucun code : un module construit par l'hôte entre dans `Grants`.
+
+État au 2026-11-04 (lot 0.2.0) : livré, `FR-12` (ligne d'usage des fonctions MCP) et le niveau `Shared` de la Memory (`FR-2`, `FR-4`, `AC-2` : `MemoryLevel::Shared`, module `memory_shared`, sans alias).

@@ -149,7 +149,20 @@ uniquement) s'appliquent.
       2026-11-03 ; absence d'espace de noms, user instruction, 2026-11-03
     - **Verified by:** `AC-15`
 
+- **FR-21 - MUST:** Un ContextType peut porter, en option, le nom de l'agent principal par défaut des sessions ouvertes sur un contexte de
+  ce type, et la nature de ces sessions (travail ou configuration ; jamais sous-agent, qui est lié à la session qui le délègue). Absents,
+  l'hôte décide seul. La librairie fournit l'aide qui résout ce choix contre un catalogue d'agents (`resolve_start`) : elle rend l'agent et la nature
+  de la session, ou refuse un agent absent du catalogue, un sous-agent, ou une nature qui ne correspond pas au genre de l'agent
+  (`agent-sessions/agents#FR-5`) ; quand le type ne porte pas d'agent, elle ne rend rien et l'hôte décide seul. Ils ne sont pas hérités par inclusion (le type qui
+  inclut un autre garde les siens) et ne comptent pas dans la version du type : en changer n'est ni mineur ni majeur
+  (`bump_since` ne regarde que les champs et les rôles).
+    - **Source:** `sebt3/lymaille#4` et `#5` point 3, user instruction, 2026-11-04
+    - **Verified by:** `AC-16`
+
 ## Questions ouvertes
+
+- **Question (non bloquante):** un nom d'agent par défaut à espace de bord (`ops `) est accepté tel quel par le ContextType (seuls le vide et le blanc sont refusés, FR-21) ; la résolution contre le catalogue échoue alors avec une erreur explicite (agent absent). Faut-il le normaliser ou le refuser plus tôt ? Cas limite relevé à la validation du 2026-11-04, volontairement non traité : aucun hôte ne l'a rencontré (approche XP). À reprendre en issue si un hôte le rencontre ; ne bloque pas la livraison.
+    - **Source:** validation de `context_type.sdd` #D1, 2026-11-04 ; user instruction, 2026-11-04
 
 
 ## Acceptation
@@ -185,20 +198,30 @@ uniquement) s'appliquent.
 - **AC-15:** Un ContextType nommé `G_cluster-2` est accepté et retrouvé par ce nom exact, `g_cluster-2` en est un autre ; un nom vide ou
   qui contient une espace, un point ou un caractère non ASCII est refusé.
 
+- **AC-16:** Un ContextType construit avec l'agent par défaut `ops` et la nature `config` les rend ; sans eux il rend rien ; un nom
+  d'agent vide ou blanc et la nature sous-agent sont refusés ; le type se sérialise et se relit à l'identique, et un type enregistré
+  avant l'ajout des champs se relit sans eux ; deux types qui ne diffèrent que par ces champs sont différents mais `bump_since` rend aucune
+  nature de changement ; l'aplatissement d'un type qui en inclut un autre ne reprend pas les champs de l'inclus. La résolution contre un
+  catalogue rend l'agent et la nature (celle du type, sinon celle du genre de l'agent) ; elle refuse un agent absent du catalogue, un
+  sous-agent et une nature contradictoire avec le genre de l'agent, et ne lit pas le catalogue quand le type ne porte pas d'agent.
+
 ## Réalisation SpecDD
 
 Specs dans `src/toolsets/`, implémentées sauf mention contraire (des tâches de durcissement restent listées dans les `Tasks` de certaines specs) :
 
 - `toolsets.sdd` : spec de répertoire.
 - `version.sdd`, `contract.sdd` : exigences de version et contrat de sortie extrait de l'AST, nature d'un changement (FR-10, FR-13, FR-14).
-- `context_type.sdd`, `toolset_context.sdd` : types de contexte versionnés et inclusion, ToolsetContext sans secret, valeurs résolues (FR-3, FR-4, FR-9).
+- `context_type.sdd`, `toolset_context.sdd` : types de contexte versionnés et inclusion, ToolsetContext sans secret, valeurs résolues (FR-3, FR-4, FR-9, FR-20, FR-21).
 - `skill.sdd`, `toolset.sdd` : skills `SKILL.md` et déclaration d'un toolset (FR-1, FR-7, FR-15).
 - `template.sdd` : rendu Handlebars du prompt et des skills (FR-6).
 - `store.sdd` : traits de stockage, stockage mémoire, cascade (FR-8, FR-16).
 - `compat.sdd` : compatibilité structurelle, sous-agents retirés signalés par `Delegation`, règle du module de création (FR-4, FR-8, AC-3, AC-4, AC-8).
 - `assemble.sdd` : construction des modules, toolsets et skills accordés, dépendances privées (FR-2, AC-1).
+- `start.sdd` : résolution de l'agent par défaut et de la nature de session d'un type de contexte contre le catalogue d'agents (FR-21, AC-16).
 - `config.sdd` : modules de l'agent de configuration `contexts`, `inspect`, `sessions` et événement `TargetOpened` (FR-19, BR-8).
 - `native.sdd` : tool `skill` et fonction `session_context()` (FR-17, FR-18, AC-10, AC-11).
 - `error.sdd` : erreur typée du module.
 
 État au 2026-11-01 : tout est livré. Le tool `skill` et `session_context()` (`native.sdd`), la validation JSON Schema complète des valeurs du contexte (`toolsets.sdd` #3, FR-4, `jsonschema` admis le 2026-10-30) et l'analyseur de frontmatter des skills (`Skill::parse`, `yaml_serde` admis le 2026-10-31) ; les entrées sont bornées (texte de skill ou de définition d'agent : 256 Kio ; schéma de type de contexte : 64 Kio, compilé une seule fois) et `session_context()` comme le rendu des skills masquent les secrets déclarés par le `Redactor` de la session. Le skill intégré sur `rhai_pad` est revérifié contre le vrai pad puis réécrit (`native.sdd` #2 et #4, lot P2) ; le tool `skill` est branché dans la boucle de tour (`runtime/turn.sdd` #6, `session/native_tool.sdd`, lot P1). Le module de création de toolsets (FR-8) est un module de l'hôte ou du domaine `modules`, hors de la librairie (décision du 2026-10-31, `compat.sdd` #2) ; la librairie en tient la règle d'accord (`compat.sdd`, `../agents/definition.sdd`) et le nom réservé (`../agents/definition.sdd` #13).
+
+État au 2026-11-04 (lot 0.2.0) : livré, `FR-20` (alphabet des noms de ContextType) et `FR-21` (agent par défaut et nature de session portés par le ContextType, aide `resolve_start` dans `start.sdd`, `AC-15` et `AC-16`) ; le niveau `Shared` des ToolsetContext.

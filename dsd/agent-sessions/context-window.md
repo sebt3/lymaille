@@ -81,7 +81,7 @@ raison d'être de `agent-sessions#BO-4`.
 
 - **Décidé:** la librairie fournit un prompt de résumé par défaut, surchargeable par l'agent ou l'hôte, qui impose au résumeur de
   citer textuellement les demandes de l'utilisateur, seule donnée non régénérable ; le résumeur reçoit du texte et non des
-  messages structurés. Le contenu exact du prompt reste à rédiger avec le code.
+  messages structurés. Le prompt par défaut est livré (`DEFAULT_SUMMARY_PROMPT`, `context/strategy.rs`).
     - **Source:** user instruction, 2026-10-27
 - **Mesuré (2026-11-01, `spikes/rig-e2e/README.md`):** sur le vLLM du DGX (`qwen3.8-flash-next`, champ `reasoning`), le rejeu avec `preserve_thinking` passé par la table libre du profil est accepté et améliore la réponse sur une question qui dépend de la pensée précédente (sans rejeu, le modèle consomme le budget en raisonnement et rend un texte vide). Sur la passerelle `smart` (Qwen3.6, `reasoning_content`) le rejeu est accepté et arrive dans le prompt côté serveur (601 jetons contre 124), mais son bénéfice n'est pas démontré (scénario non discriminant). Reste ouvert : le démontrer sur Qwen3.6 avec un budget de sortie assez grand — clos par la décision du 2026-11-01 ci-dessous.
 - **Décidé:** pour la 0.1.0, les essais déjà exécutés suffisent : le rejeu du raisonnement est accepté par les deux dorsaux et son bénéfice est démontré sur le vLLM du DGX ; la démonstration discriminante sur Qwen3.6 n'est pas un obstacle à la publication et reste à faire après. Le TBD de l'AC-5 est clos.
@@ -125,3 +125,5 @@ Specs dans `src/context/`, implémentées (des tâches de durcissement restent l
 - `error.sdd` : erreur typée du module.
 
 État au 2026-11-01 : tout est livré. L'**intégration à la boucle de tour** (`context.sdd` #2) est réalisée par `src/runtime/turn.rs` (refus d'un message trop gros avant tout appel, compaction décidée avant chaque requête) ; le **prompt de résumé par défaut** est livré (`context.sdd` #3, `strategy.sdd` #7, texte validé le 2026-10-31) ; l'**essai de bout en bout du rejeu du raisonnement** (AC-5) est clos par la décision ci-dessus, sur les mesures de `spikes/rig-e2e`.
+
+État au 2026-11-04 (lot 0.2.0) : livré, rejeu et stratégie de compaction alignés sur `Message::Discarded` (`replay.sdd` #5, `strategy.sdd` #P6).
