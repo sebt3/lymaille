@@ -181,10 +181,10 @@ impl ContextType {
     ///
     /// # Errors
     ///
-    /// Returns [`ToolsetsError::InvalidContextType`] when the name is empty or not made of lowercase ASCII letters,
-    /// digits and hyphens, when the schema is not a JSON Schema object, when its serialized form is over 64 KiB, when a
-    /// parameter default looks like a secret, or when the schema does not compile (a reference to another document
-    /// included). The reason never quotes the schema.
+    /// Returns [`ToolsetsError::InvalidContextType`] when the name is empty or not made of ASCII letters, digits,
+    /// hyphens and underscores (`[A-Za-z0-9_-]+`, case significant), when the schema is not a JSON Schema object, when
+    /// its serialized form is over 64 KiB, when a parameter default looks like a secret, or when the schema does not
+    /// compile (a reference to another document included). The reason never quotes the schema.
     pub fn new(name: String, version: Semver, schema: Value) -> ToolsetsResult<Self> {
         Self::new_with_detector(name, version, schema, &DefaultSecretDetector)
     }
@@ -204,7 +204,7 @@ impl ContextType {
         if !is_valid_name(&name) {
             return Err(invalid(
                 &name,
-                "the name must be non-empty lowercase ASCII letters, digits and hyphens",
+                "the name must be non-empty ASCII letters, digits, hyphens and underscores",
             ));
         }
         let compiled = Arc::new(compile_schema(&name, schema, detector)?);
@@ -391,12 +391,16 @@ fn invalid(name: &str, reason: &'static str) -> ToolsetsError {
     }
 }
 
-/// Tells whether `name` is a valid type name: non-empty, lowercase ASCII letters, digits and hyphens.
+/// Tells whether `name` is a valid type name: non-empty ASCII letters (uppercase included), digits, hyphens and
+/// underscores (`[A-Za-z0-9_-]+`). Case is significant: `G_x` and `g_x` are two types (`agent-sessions/toolsets#FR-20`).
 fn is_valid_name(name: &str) -> bool {
     !name.is_empty()
-        && name
-            .chars()
-            .all(|character| character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-')
+        && name.chars().all(|character| {
+            character.is_ascii_alphabetic()
+                || character.is_ascii_digit()
+                || character == '-'
+                || character == '_'
+        })
 }
 
 /// Largest serialized size of a parameter schema, in bytes: 64 KiB (decision of 2026-10-31, D-b).
@@ -576,7 +580,8 @@ mod tests {
     use super::{Bump, ContextType, RoleSpec};
     use crate::secret::SecretDetector;
     use crate::toolsets::{
-        ContextLevel, Toolset, ToolsetContext, ToolsetsError, TypeRequirement, check_context,
+        ContextLevel, ContextTypeStore as _, InMemoryToolsets, Toolset, ToolsetContext, ToolsetsError,
+        TypeRequirement, check_context,
     };
 
     fn semver(text: &str) -> Semver {
@@ -603,6 +608,65 @@ mod tests {
 
     fn lookup_in(types: Vec<ContextType>) -> impl Fn(&str) -> Option<ContextType> {
         move |name: &str| types.iter().find(|candidate| candidate.name == name).cloned()
+    }
+
+    // Scenario: un nom à préfixe réservé est accepté
+    #[test]
+    fn reserved_prefix_names_are_accepted() {
+        for name in ["G_cluster-2", "cluster", "A", "x_y", "K8s-prod"] {
+            match ContextType::new(name.to_owned(), semver("1.0.0"), schema(&[], &[])) {
+                Ok(built) => assert_eq!(
+                    built.name(),
+                    name,
+                    "the type is kept under the exact name `{name}`"
+                ),
+                Err(error) => panic!("`{name}` is a valid type name, got {error}"),
+            }
+        }
+    }
+
+    // Scenario: la casse distingue deux types
+    #[tokio::test]
+    async fn case_distinguishes_two_types_in_the_store() {
+        let store = InMemoryToolsets::new(8_000);
+        let upper = ContextType::new("G_cluster".to_owned(), semver("1.0.0"), schema(&[], &[]))
+            .expect("an uppercase name is a valid type name");
+        let lower = ContextType::new("g_cluster".to_owned(), semver("1.0.0"), schema(&[], &[]))
+            .expect("the same name in lowercase is a valid type name");
+        store
+            .put_type(&upper)
+            .await
+            .expect("the type with the reserved prefix is stored");
+        store
+            .put_type(&lower)
+            .await
+            .expect("the type named in lowercase is stored");
+        assert_eq!(
+            store.get_type("G_cluster").await.expect("the lookup succeeds"),
+            Some(upper),
+            "the exact key `G_cluster` finds the first type only"
+        );
+        assert_eq!(
+            store.get_type("g_cluster").await.expect("the lookup succeeds"),
+            Some(lower),
+            "`g_cluster` is another type, found under its own exact key"
+        );
+    }
+
+    // Scenario: un nom hors de l'alphabet est refusé
+    #[test]
+    fn names_outside_the_alphabet_are_refused() {
+        const REASON: &str = "the name must be non-empty ASCII letters, digits, hyphens and underscores";
+        // The names of the Scenario: empty, a space, a dot, a non-ASCII character (é), a slash.
+        for name in ["", "a b", "a.b", "\u{e9}", "a/b"] {
+            match ContextType::new(name.to_owned(), semver("1.0.0"), schema(&[], &[])) {
+                Err(ToolsetsError::InvalidContextType { reason, .. }) => assert_eq!(
+                    reason, REASON,
+                    "the fixed reason refuses `{name}` and never quotes it"
+                ),
+                other => panic!("`{name}` must fail with InvalidContextType, got {other:?}"),
+            }
+        }
     }
 
     // Scenario: inclure un type exige les deux ensembles de champs
@@ -837,13 +901,6 @@ mod tests {
         );
         assert!(
             matches!(
-                ContextType::new("Cluster".to_owned(), semver("1.0.0"), schema(&[], &[])),
-                Err(ToolsetsError::InvalidContextType { .. })
-            ),
-            "an uppercase name is refused"
-        );
-        assert!(
-            matches!(
                 ContextType::new("cluster".to_owned(), semver("1.0.0"), json!("not an object")),
                 Err(ToolsetsError::InvalidContextType { .. })
             ),
@@ -939,11 +996,10 @@ mod tests {
 
     #[test]
     fn deserialization_refuses_what_the_constructor_refuses() {
-        let text =
-            r#"{"name":"Cluster","version":"1.0.0","schema":{"type":"object"},"roles":[],"includes":[]}"#;
+        let text = r#"{"name":"a b","version":"1.0.0","schema":{"type":"object"},"roles":[],"includes":[]}"#;
         assert!(
             serde_json::from_str::<ContextType>(text).is_err(),
-            "an uppercase name must fail to deserialize"
+            "a name outside the alphabet must fail to deserialize"
         );
     }
 
