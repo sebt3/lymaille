@@ -11,6 +11,7 @@ mod contract;
 mod error;
 mod native;
 mod skill;
+mod start;
 mod store;
 mod template;
 mod toolset;
@@ -32,6 +33,7 @@ pub use contract::{Contract, VersionWarning, check_declared_version, extract_con
 pub use error::{ToolsetsError, ToolsetsResult};
 pub use native::{SkillTool, builtin_rhai_pad_skill, session_context_registration, skill_definition};
 pub use skill::Skill;
+pub use start::{StartTarget, resolve_start};
 pub use store::{ContextStore, ContextTypeStore, InMemoryToolsets, ToolsetStore};
 pub use template::{SessionMeta, check_template, render_prompt, render_skill};
 pub use toolset::{ParamDecl, RoleDecl, Toolset};

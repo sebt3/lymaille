@@ -1,0 +1,85 @@
+Spec: start
+
+Purpose:
+  Résolution du point de départ d'une session depuis le type de son contexte de travail : l'agent principal par défaut et la nature de session que le ContextType porte, vérifiés contre le catalogue d'agents, pour que deux hôtes n'écrivent pas le même lien
+    (`agent-sessions/toolsets#FR-21`, `AC-16`, `agent-sessions#BR-9`, `agent-sessions/agents#FR-5`, `sebt3/lymaille#5` point 3).
+
+Owns:
+  ./start.rs
+
+References:
+  ./context_type.sdd
+  ../agents/catalog.sdd
+  ../agents/definition.sdd
+  ../session/state.sdd
+
+Exposes:
+  @resolve_start
+  @StartTarget
+  @StartTarget::agent
+  @StartTarget::kind
+
+Accepts:
+  @resolve_start: un @ContextType et un `&A` où `A: AgentStore` (../agents/catalog.sdd ; paramètre générique, le harnais refuse `impl Trait` en paramètre) ; fonction asynchrone, sans futur boxé ni macro, dont le futur est `Send`.
+
+Returns:
+  @resolve_start: `ToolsetsResult<Option<StartTarget>>`. Rien quand le type ne porte pas d'agent par défaut : l'hôte décide seul, même si le type porte une nature de session. Sinon un @StartTarget.
+  @StartTarget::agent: la @AgentDefinition lue au catalogue sous le nom que porte le type.
+  @StartTarget::kind: la @SessionKind de la session : celle que pose le type, sinon celle déduite du genre de l'agent (@AgentKind::Work donne @SessionKind::Work, @AgentKind::Config donne @SessionKind::Config).
+
+Raises:
+  @ToolsetsError::InvalidContextType (nom du type, raison fixe, jamais le contenu d'une définition) : l'agent par défaut est absent du catalogue ; l'agent par défaut est un sous-agent (@AgentKind::Sub, lié à la session qui le délègue) ; la nature posée par le type ne correspond pas au genre de l'agent (nature de travail avec un agent de configuration, ou l'inverse).
+  @ToolsetsError::Store: échec du catalogue de l'hôte (le texte de l'erreur de l'hôte).
+
+Must:
+  Ne réaliser aucune E/S propre : la seule lecture est `get_agent` du catalogue de l'hôte, une fois, avec le nom que porte le type (`agent-sessions#CON-1`).
+  Le type est la seule source du choix : la fonction n'applique aucune valeur par défaut d'hôte et n'invente aucun agent ; sans agent par défaut elle ne lit pas le catalogue.
+  Ne modifie ni le type, ni le catalogue, ni aucune session.
+  Un @StartTarget est `Debug`, `Clone`, `PartialEq`, `Send + Sync` et `#[non_exhaustive]` ; ses champs sont lus par des accesseurs.
+  La surface publique de la crate ne s'élargit que de @resolve_start et @StartTarget.
+
+Depends on:
+  ./context_type.sdd
+  ./error.sdd
+  ../agents/catalog.sdd
+  ../agents/definition.sdd
+  ../session/state.sdd
+
+Scenario: un type sans agent par défaut ne lit pas le catalogue
+  Given un type `cluster` sans agent par défaut (avec ou sans nature) et un catalogue qui compte ses lectures
+  When resolve_start est appelé
+  Then il rend rien et aucune lecture du catalogue n'a eu lieu
+
+Scenario: l'agent et la nature sont rendus
+  Given un type `cluster` qui porte l'agent `ops` et la nature Config, et un catalogue où `ops` est un agent de configuration
+  When resolve_start est appelé
+  Then il rend un StartTarget dont agent est la définition de `ops` et dont kind est Config
+
+Scenario: la nature se déduit du genre de l'agent
+  Given un type qui porte l'agent `dev` sans nature, et un catalogue où `dev` est un agent de travail
+  When resolve_start est appelé
+  Then kind est Work ; le même avec un agent de configuration donne Config
+
+Scenario: un agent inconnu est refusé
+  Given un type qui porte l'agent `ghost` absent du catalogue
+  When resolve_start est appelé
+  Then il échoue avec InvalidContextType, le nom du type et une raison fixe
+
+Scenario: un sous-agent est refusé
+  Given un type qui porte l'agent `helper`, un sous-agent du catalogue
+  When resolve_start est appelé
+  Then il échoue avec InvalidContextType
+
+Scenario: une nature contradictoire est refusée
+  Given un type qui porte l'agent `ops` (configuration) avec la nature Work, et un autre qui porte `dev` (travail) avec la nature Config
+  When resolve_start est appelé pour chacun
+  Then chacun échoue avec InvalidContextType
+
+Scenario: l'échec du catalogue est rendu tel quel
+  Given un catalogue dont get_agent échoue
+  When resolve_start est appelé pour un type qui porte un agent
+  Then il échoue avec Store
+
+Tasks:
+  [x] #D2 Aide de résolution du point de départ (lot 0.2-D, `agent-sessions/toolsets#FR-21`, `AC-16`) : les sept Scenarios ci-dessus, tests vus rouges puis implémentation de @resolve_start et @StartTarget dans ./start.rs ; déclarer le module dans ./mod.rs et ré-exporter @resolve_start et @StartTarget (puis les ajouter au `pub use toolsets::{…}` de /src/lib.rs). Dépend de #D1 de ./context_type.sdd (les accesseurs `default_agent` et `session_kind`). Fichiers autorisés : ./start.rs, ./mod.rs, /src/lib.rs. Pas de dépendance nouvelle.
+      Validé le 2026-11-04 (validator : `scripts/check` complet vert, harnais intact, 7 Scenarios couverts avec leur `Then` réellement asserté ; mutation complète de start.rs : 2 mutants, 1 tué, 1 ne compile pas, 0 survivant, fichier identique avant et après. Écart accepté et reporté dans le Accepts : signature générique `<A: AgentStore>` car le workspace refuse `impl Trait` en paramètre. Remarque de convention : le test `the_resolution_future_is_send` couvre un Must sans Scenario).

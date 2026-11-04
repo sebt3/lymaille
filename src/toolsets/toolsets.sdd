@@ -19,6 +19,7 @@ Structure:
   ./compat.rs: compatibilité structurelle et règles de définition d'agent
   ./assemble.rs: construction des @GrantedModule, @GrantedToolset et @GrantedSkill
   ./native.rs: tool `skill`, fonction `session_context()`
+    ./start.rs: résolution du point de départ d'une session (agent par défaut et nature) depuis un ContextType et le catalogue d'agents
   ./config.rs: modules de l'agent de configuration (`contexts`, `inspect`, `sessions`)
   ./builder.rs: module de création de brouillons (`toolset_builder`)
 
@@ -42,6 +43,7 @@ References:
   ./store.sdd
   ./compat.sdd
   ./assemble.sdd
+  ./start.sdd
   ./native.sdd
   ./config.sdd
   ./builder.sdd
