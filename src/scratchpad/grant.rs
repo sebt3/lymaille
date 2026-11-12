@@ -1,4 +1,4 @@
-//! Abstract description of what the agent definition grants to the scratchpad: groups of the `vynil-core` common core,
+//! Abstract description of what the agent definition grants to the scratchpad: the host group of the `vynil-core` common core,
 //! Rhai modules, toolsets and skills. The scratchpad receives it from the host or from the toolsets domain; it knows
 //! neither toolsets nor MCP modules. Nothing is granted by default.
 
@@ -7,19 +7,16 @@ use std::fmt;
 
 use rhai::{Module, Shared};
 
-/// Group of functions of the `vynil-core` common core that the definition may grant. The pure group is always registered
-/// and is not listed here.
+/// Group of functions of the `vynil-core` common core that the definition may grant. The core group (`sleep`, encodings,
+/// text, glob, YAML, time) is always registered and is not listed here.
+///
+/// `Host` covers `get_env` and `log_*`, and the file functions and `shell_run` when this build of `lymaille` compiles the
+/// `vynil-core` features `fs` and `shell`: those two cannot be granted apart from `Host` (`vynil-core` 0.9.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum CoreGroup {
-    /// Host functions (`get_env`, `log_*`).
+    /// Host functions: `get_env`, `log_*`, and, under the `fs` and `shell` features, the files and `shell_run`.
     Host,
-    /// Waiting functions (`sleep`), with a cancellation point.
-    Sleep,
-    /// File functions (`file_*`).
-    Fs,
-    /// Shell functions (`shell_run`).
-    Shell,
 }
 
 /// A Rhai module granted to the scratchpad, callable as `name::function()`. Its content is code and bindings that the
@@ -146,7 +143,7 @@ pub struct Grants {
 }
 
 impl Grants {
-    /// Empty description: it grants nothing but the pure group, which is always registered.
+    /// Empty description: it grants nothing, the core group being always registered.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -189,7 +186,7 @@ impl Grants {
         Some(self)
     }
 
-    /// Granted groups, in order: host, sleep, files, shell.
+    /// Granted groups, in order.
     #[must_use]
     pub const fn groups(&self) -> &BTreeSet<CoreGroup> {
         &self.groups
@@ -255,10 +252,9 @@ mod tests {
     fn groups_accumulate_in_a_set() {
         let grants = Grants::new()
             .with_group(CoreGroup::Host)
-            .with_group(CoreGroup::Sleep)
             .with_group(CoreGroup::Host);
         let groups: Vec<CoreGroup> = grants.groups().iter().copied().collect();
-        assert_eq!(groups, vec![CoreGroup::Host, CoreGroup::Sleep], "a set in order");
+        assert_eq!(groups, vec![CoreGroup::Host], "a set: Host once");
     }
 
     #[test]

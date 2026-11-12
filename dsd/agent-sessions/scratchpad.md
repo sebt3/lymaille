@@ -38,10 +38,12 @@ et closures. `agent-sessions#CON-2` place le moteur dans `vynil-core`.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-3`, `AC-7`
 
-- **FR-11 - MUST:** Le moteur enregistre d'office le seul groupe pur du socle commun de `vynil-core` (`core_pure_rhai_register`) ; les
-  autres groupes (hôte : `get_env`, `log_*` ; attente : `sleep` ; fichiers ; `shell_run`) ne le sont que si la définition
-  d'agent les accorde, quelles que soient les features avec lesquelles le processus hôte compile `vynil-core`. Livré par
-  `vynil-core` 0.9.0 (`#18`).
+- **FR-11 - MUST:** Le moteur enregistre d'office le groupe `core` du socle commun de `vynil-core` (`core_rhai_register` : encodages, texte,
+  glob, YAML, temps dont `sleep`, sans autorité sur l'hôte) ; le groupe hôte (`host_rhai_register` : `get_env`, `log_*`, plus les fichiers et
+  `shell_run` quand les features `fs` et `shell` sont compilées) ne l'est que si la définition d'agent l'accorde, quelles que soient les features
+  avec lesquelles le processus hôte compile `vynil-core`. Les fichiers et le shell ne sont plus accordables séparément de l'hôte depuis
+  `vynil-core` 0.9.1 : ils sont absents d'une construction de `lymaille` qui n'active pas ses features `fs` et `shell` (désactivées par défaut).
+  Décision du développeur principal, 2026-11-12 (option C) ; le découpage fin d'avant (0.9.0) est abandonné.
     - **Source:** agent-sessions#BR-2, agent-sessions#CON-3 ; user instruction, 2026-10-25
     - **Verified by:** `AC-10`
 
@@ -162,7 +164,7 @@ Mesurés par les programmes de `spikes/rhai-1-25`, avec les features de `vynil-c
 - L'`AST` n'est pas sérialisable : la persistance des fonctions passe par leur texte source (DEC-1).
 - `vynil-core` 0.8.0 enregistrait d'office `get_env`, `sleep` et `log_*` ; avec les features `fs`, `shell` ou `password` du processus,
   il enregistre aussi les accès fichiers et `shell_run`. Le moteur est public, donc `on_progress` et les limites de taille se
-  posent depuis `lymaille`. La version 0.9.0 scinde ce socle en groupes publics.
+  posent depuis `lymaille`. La version 0.9.0 scinde ce socle en groupes publics ; la 0.9.1 les regroupe en un catalogue (`core`, `host`, ...), `sleep` passant dans `core` et les fichiers et le shell dans `host`.
 - `AST::iter_functions` rend nom, paramètres, accès et commentaires de documentation des fonctions. Rhai ne type pas
   statiquement : un contrat de toolset se réduit à des noms et des paramètres (`toolsets`, FR-10).
 - Un pointeur de fonction ou une closure se sérialise **sans erreur** en chaîne, ou en tableau s'il capture ; relue, la
@@ -247,8 +249,8 @@ Source: user instruction, 2026-10-30
 - **AC-8:** Une variable qui contient une closure produit l'avertissement et est absente après restauration, le reste
   du scope étant restauré.
 - **AC-9:** Un appel MCP simulé qui ne rend jamais est abandonné dans le délai d'une annulation, sans attendre sa fin.
-- **AC-10:** Dans le moteur d'un agent qui n'accorde aucun groupe de `vynil-core`, `json_encode` répond, tandis que
-  `get_env`, `sleep`, `file_read` et `shell_run` sont introuvables et absents de l'introspection, y compris quand le
+- **AC-10:** Dans le moteur d'un agent qui n'accorde aucun groupe de `vynil-core`, `json_encode` et `sleep` répondent, tandis que
+  `get_env`, `file_read` et `shell_run` sont introuvables et absents de l'introspection, y compris quand le
   processus est compilé avec les features `fs` et `shell` de `vynil-core`.
 - **AC-11:** Dans un moteur de session comme dans le moteur de construction des toolsets, `const C = #{a: 1}; C.a = 2` rend une
   erreur de syntaxe rendue au LLM, sans panique, et `let c = #{a: 1}; c.a = 2; c.a` rend `2`.

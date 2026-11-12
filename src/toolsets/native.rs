@@ -34,7 +34,7 @@ How a call works:
 
 Discover what is available before you write a script:
 - `vars()`: the variables of the scope at the start of this run, as maps `#{name, type, preview}`.
-- `modules()`: the granted modules and the groups of built-in functions (for example `pure`, `format` and `host`), as maps `#{name, kind, functions}`; `kind` is `module`, `core`, `format` or `host` and `functions` is the number of functions.
+- `modules()`: the granted modules and the groups of built-in functions (for example `core`, `format` and `host`), as maps `#{name, kind, functions}`; `kind` is `module`, `core`, `format` or `host` and `functions` is the number of functions.
 - `functions()`: every function you can call, as maps `#{path, signature, doc, origin}`. `functions(\"global\")` lists the built-in groups, `functions(\"script\")` the functions you defined in this session, and `functions(\"name\")` the functions of one granted module; any other name is an error.
 - `toolsets()`: the granted toolsets, as maps `#{name, description}`.
 - `skills()`: the granted skills, with their descriptions. Read the text of a skill with the `skill` tool, not with a script.
@@ -898,7 +898,7 @@ mod tests {
             r#""core" in modules().map(|entry| entry.kind)"#,
             r#""format" in modules().map(|entry| entry.kind)"#,
             r#""module" in modules().map(|entry| entry.kind)"#,
-            r#""pure" in modules().map(|entry| entry.name)"#,
+            r#""core" in modules().map(|entry| entry.name)"#,
             r#""host" in modules().map(|entry| entry.name)"#,
             r#""ops" in modules().map(|entry| entry.name)"#,
             r#"functions("global").len() > 0"#,
@@ -992,7 +992,7 @@ mod tests {
         for expected in [
             "functions(\"global\")",
             "functions(\"script\")",
-            "pure",
+            "core",
             "format",
             "host",
             "every word",

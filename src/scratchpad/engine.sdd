@@ -44,14 +44,14 @@ Returns:
   @base_engine: un @rhai::Engine réglé (voir `Must`), sans fonction accordée.
 
 Raises:
-  @ScratchpadError::Engine: groupe accordé dont `vynil-core` n'est pas compilé avec la feature nécessaire (`Fs` sans la feature `fs`, `Shell` sans la feature `shell`) ; fermeture d'enregistrement qui échoue ; module accordé dont le nom ou le contenu est refusé par Rhai.
+  @ScratchpadError::Engine: groupe accordé dont `vynil-core` n'est pas compilé avec la feature nécessaire (aucun cas depuis `vynil-core` 0.9.1 : `Host` est toujours disponible, les fichiers et le shell n'y figurent que si les features sont compilées) ; fermeture d'enregistrement qui échoue ; module accordé dont le nom ou le contenu est refusé par Rhai.
 
 Must:
   @base_engine part de `Engine::new_raw()` de Rhai chargé des paquets standard sauf le paquet de langage (`sleep` sans annulation, `exit`, `parse_json`, `tag` écartés, #10) et pose, dans cet ordre : `disable_symbol("const")` (`agent-sessions/scratchpad#FR-12`) ; le résolveur de modules de Rhai remplacé par un résolveur factice qui refuse tout `import` (le résolveur par défaut de Rhai lit des fichiers du répertoire courant : une E/S, `agent-sessions#CON-1`) ; les gestionnaires `on_print` et `on_debug` remplacés pour qu'aucun texte n'atteigne la sortie standard ni la sortie d'erreur du processus (le texte est capté, voir `Must` suivant) ; les plafonds par @ScratchpadLimits::apply_to.
   Le moteur de session et le moteur qui construit les modules de toolset sont tous deux issus de @base_engine : `const` y est une erreur de syntaxe (`agent-sessions/scratchpad#AC-11`). Ni l'hôte ni la librairie ne posent de constante dans le scope de session.
   Le texte de `print` et de `debug` est capté dans un tampon du run en cours (voir @RunScope), plafonné au plafond de rendu, jamais écrit ailleurs ; hors d'un run (construction d'un module de toolset), il est jeté.
-  Le builder enregistre dans cet ordre : @base_engine ; le groupe pur du socle commun (`core_pure_rhai_register`, d'office, `agent-sessions/scratchpad#FR-11`) ; les fonctions de format de ./format.sdd (toujours accordées, pures) ; les groupes de @Grants dans l'ordre hôte, attente, fichiers, shell ; les modules de @Grants par `register_static_module` (appelables en `nom::fonction()`) ; les fermetures d'enregistrement ; le catalogue et les fonctions d'introspection de ./introspect.sdd. Le catalogue attribue à chaque groupe, à chaque fermeture et à chaque module ce qu'il a ajouté (différence des signatures du moteur avant et après chaque étape).
-  Aucun groupe n'est enregistré s'il n'est pas dans @Grants, quelles que soient les features avec lesquelles le processus compile `vynil-core` : la construction part de `Engine::new_raw()` et des paquets standard, jamais de `Script::new_bare`, et n'appelle que les enregistreurs de groupe accordés (`agent-sessions/scratchpad#FR-11`, `agent-sessions/scratchpad#AC-10`). `get_env`, `log_*`, `sleep`, `file_*` et `shell_run` sont des fonctions introuvables, et absentes de l'introspection, tant que leur groupe n'est pas accordé.
+  Le builder enregistre dans cet ordre : @base_engine ; le groupe `core` du socle commun (`core_rhai_register`, d'office, `agent-sessions/scratchpad#FR-11`) ; les fonctions de format de ./format.sdd (toujours accordées, pures) ; le groupe hôte de @Grants (`host_rhai_register`) ; les modules de @Grants par `register_static_module` (appelables en `nom::fonction()`) ; les fermetures d'enregistrement ; le catalogue et les fonctions d'introspection de ./introspect.sdd. Le catalogue attribue à chaque groupe, à chaque fermeture et à chaque module ce qu'il a ajouté (différence des signatures du moteur avant et après chaque étape).
+  Aucun groupe n'est enregistré s'il n'est pas dans @Grants, quelles que soient les features avec lesquelles le processus compile `vynil-core` : la construction part de `Engine::new_raw()` et des paquets standard, jamais de `Script::new_bare`, et n'appelle que les enregistreurs de groupe accordés (`agent-sessions/scratchpad#FR-11`, `agent-sessions/scratchpad#AC-10`). `get_env`, `log_*`, `file_*` et `shell_run` sont des fonctions introuvables, et absentes de l'introspection, tant que `Host` n'est pas accordé ; `sleep` est du groupe `core`, donc toujours présent (sa version de `vynil-core` 0.9.1 se réveille à l'annulation).
   Les dépendances d'un toolset ne sont pas atteignables : seuls les modules de @Grants sont enregistrés (`agent-sessions/toolsets#FR-2`).
   Le crochet `on_progress` lit un jeton d'annulation propre au fil d'évaluation (voir @RunScope) : absent, il ne fait rien ; annulé, il interrompt le script en rendant le jeton d'arrêt de Rhai, ce que @ScratchpadError::from_rhai classe en `Cancelled`. Une interruption est possible entre deux opérations de Rhai (200 ms environ dans la mesure du spike) ; pendant un appel natif bloquant, c'est le pont de `vynil-core` qui rend la main (voir ./run.sdd).
     Observed in: spikes/rhai-1-25 (`persistence`, S5).
@@ -61,33 +61,29 @@ Must:
   L'API publique n'accepte que des types de la crate et les types de Rhai déjà exposés par les specs de ./grant.sdd ; la fermeture d'enregistrement est la seule porte vers le moteur brut.
 
 Must not:
-  Appeler `Script::new_bare` ni aucun enregistreur de `vynil-core` hors des groupes accordés et du groupe pur.
+  Appeler `Script::new_bare` ni aucun enregistreur de `vynil-core` hors des groupes accordés et du groupe `core`.
   Poser `set_max_operations`, un délai ou tout garde-fou de durée (./limits.sdd).
   Enregistrer `http`, `k8s`, `s3`, `oci` ni aucun module de `vynil-core` en dehors de ce que les fermetures d'enregistrement de l'hôte y ajoutent explicitement.
   Lire un fichier, l'environnement ou l'horloge système.
   [x] #16 `EngineBuilder::with_unlisted_registration` (`pub(in crate::scratchpad)`, ajouté par le lot T8 d'inspect) : enregistre après le catalogue et l'introspection une fonction appelable mais absente de `functions()` et `modules()` ; sert à `source(nom)` du pad d'inspection (./inspect.sdd).
 
-Scenario: seul le groupe pur par défaut
+Scenario: seul le groupe `core` par défaut
   Given un moteur construit sans groupe accordé, même si le processus lie `vynil-core` avec ses fonctionnalités `fs` et `shell`
   When un script évalue `json_encode(#{a: 1})`
   Then il rend le texte JSON
-  And `get_env("PATH")`, `sleep(1)`, `file_read("/etc/hostname")` et `shell_run("ls")` sont chacun une erreur de fonction introuvable
+  And `get_env("PATH")`, `file_read("/etc/hostname")` et `shell_run("ls")` sont chacun une erreur de fonction introuvable
+  And `sleep(0)` répond
 
 Scenario: les fonctions non accordées sont absentes de l'introspection
   Given le même moteur
   When le catalogue est lu
-  Then il contient `json_encode` et aucune de `get_env`, `sleep`, `file_read`, `shell_run`
+  Then il contient `json_encode` et `sleep`, et aucune de `get_env`, `file_read`, `shell_run`
 
 Scenario: un groupe accordé est enregistré
   Given un moteur dont les accords portent Host
   When un script évalue `get_env("LYMAILLE_ABSENT")`
   Then il rend la chaîne vide
-  And `sleep(1)` reste une erreur de fonction introuvable
-
-Scenario: groupe indisponible refusé
-  Given des accords qui portent le groupe Fs et une construction de `vynil-core` sans la fonctionnalité `fs`
-  When le constructeur construit
-  Then il échoue par une erreur Engine qui nomme le groupe
+  And `file_read` et `shell_run` restent des erreurs de fonction introuvable dans une construction sans les features `fs` et `shell`
 
 Scenario: const est une erreur de syntaxe
   Given un moteur de session et un moteur de construction de toolset issus de base_engine
@@ -159,7 +155,8 @@ Tasks:
   [x] #3 Les features `fs` et `shell` de `vynil-core` : la crate `lymaille` doit-elle les relayer par des features Cargo propres, désactivées par défaut, ou ne jamais pouvoir accorder `Fs` et `Shell` ? Dépend du manifeste (`/Cargo.toml`, hors de cette spec) et de l'usage visé (aucun besoin de fichier ou de processus n'est exprimé par le DSD pour les agents d'alerte). À trancher par le développeur principal. Recommandation : relayer `fs` et `shell` par des features désactivées par défaut ; les Scenarios « seul le groupe pur par défaut » et « groupe indisponible refusé » se jouent avec et sans.
       Décidé le 2026-10-29 par le développeur principal : `Fs` et `Shell` ne sont jamais accordés ; la crate ne relaie pas ces features de `vynil-core`.
       À rouvrir si un besoin réel apparaît.
-  [x] #4 Posé : le groupe pur et les fonctions de format sont toujours accordés ; la définition d'agent ne peut pas les retirer. Le DSD (`FR-11`) enregistre « d'office » le seul groupe pur ; les fonctions de format découlent de `FR-8`.
+  [x] #17 Lot 0.2.1-A (option C du 2026-11-12) : alignement sur `vynil-core` 0.9.1 ; `core_rhai_register` d'office (le prédicat du watcher aussi), `host_rhai_register` pour `Host`, `Sleep`, `Fs` et `Shell` supprimés ; retirer `require_feature` et le Scenario « groupe indisponible ». Vérifier la collision entre le `format` temporel de `core` et les fonctions de ./format.sdd. Remplace la décision de #3 : fichiers et shell se règlent par les features de la crate, pas par un groupe.
+  [x] #4 Posé : le groupe `core` et les fonctions de format sont toujours accordés ; la définition d'agent ne peut pas les retirer. Le DSD (`FR-11`) enregistre « d'office » le groupe `core` ; les fonctions de format découlent de `FR-8`.
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
   [x] #5 Posé : le résolveur de modules est factice (tout `import` échoue). Les modules accordés s'appellent par chemin de module statique, jamais par `import`. Si un jour le LLM doit pouvoir importer un module accordé, remplacer par un résolveur statique des seuls modules accordés.
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).

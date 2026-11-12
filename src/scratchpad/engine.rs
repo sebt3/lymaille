@@ -15,7 +15,7 @@ use rhai::packages::{
 };
 use rhai::{Dynamic, Engine as RhaiEngine, Position, Shared};
 
-use super::error::{ScratchpadError, ScratchpadResult};
+use super::error::ScratchpadResult;
 use super::format::register_format_functions;
 use super::grant::{CoreGroup, Grants};
 use super::introspect::{Catalog, IntrospectionSource, Origin, register_introspection, registration_step};
@@ -38,7 +38,7 @@ pub struct ScratchpadEngine {
 
 /// Builder of a [`ScratchpadEngine`]. Its groups and modules come from the grants.
 ///
-/// The registration closures run once, at build time, after the pure group, the format functions and the granted groups
+/// The registration closures run once, at build time, after the core group, the format functions and the granted group
 /// and modules.
 #[non_exhaustive]
 pub struct EngineBuilder {
@@ -121,14 +121,13 @@ impl EngineBuilder {
         self
     }
 
-    /// Builds the engine: the base engine, the pure group, the format functions, the granted groups in the order host,
-    /// sleep, files, shell, the granted modules, the registration closures, then the catalog and the introspection, and
-    /// last the unlisted registration closures.
+    /// Builds the engine: the base engine, the core group, the format functions, the granted host group, the granted
+    /// modules, the registration closures, then the catalog and the introspection, and last the unlisted registration
+    /// closures.
     ///
     /// # Errors
     ///
-    /// Returns an engine error when a granted group is not available in this build, when a registration closure fails, or
-    /// when the metadata of the engine cannot be read.
+    /// Returns an engine error when a registration closure fails or when the metadata of the engine cannot be read.
     pub fn build(self) -> ScratchpadResult<ScratchpadEngine> {
         let Self {
             limits,
@@ -139,9 +138,9 @@ impl EngineBuilder {
         let mut engine = base_engine(&limits);
         let mut steps = vec![registration_step(
             &mut engine,
-            Origin::Core("pure".to_owned()),
+            Origin::Core(CORE_GROUP.to_owned()),
             |engine| {
-                vynil_core::engine::core_pure_rhai_register(engine);
+                vynil_core::engine::core_rhai_register(engine);
                 Ok(())
             },
         )?];
@@ -154,7 +153,10 @@ impl EngineBuilder {
             steps.push(registration_step(
                 &mut engine,
                 Origin::Core(group_name(group).to_owned()),
-                |engine| register_group(engine, group),
+                |engine| {
+                    register_group(engine, group);
+                    Ok(())
+                },
             )?);
         }
         for module in grants.modules() {
@@ -224,45 +226,21 @@ fn register_standard_packages(engine: &mut RhaiEngine) {
     let _more_strings = engine.register_global_module(MoreStringPackage::new().as_shared_module());
 }
 
-/// Registers one granted group of the common core. Fails when this build does not compile the feature the group needs.
-fn register_group(engine: &mut RhaiEngine, group: CoreGroup) -> ScratchpadResult<()> {
+/// Name of the core group in the catalog, as `modules()` shows it. The core group is always registered.
+const CORE_GROUP: &str = "core";
+
+/// Registers the granted host group of the common core: `get_env`, `log_*`, and the files and `shell_run` when this build
+/// compiles the `vynil-core` features `fs` and `shell`.
+fn register_group(engine: &mut RhaiEngine, group: CoreGroup) {
     match group {
-        CoreGroup::Host => vynil_core::engine::core_host_rhai_register(engine),
-        CoreGroup::Sleep => vynil_core::engine::core_sleep_rhai_register(engine),
-        CoreGroup::Fs => {
-            require_feature(cfg!(feature = "fs"), "fs", "fs")?;
-            #[cfg(feature = "fs")]
-            vynil_core::engine::fs_rhai_register(engine);
-        }
-        CoreGroup::Shell => {
-            require_feature(cfg!(feature = "shell"), "shell", "shell")?;
-            #[cfg(feature = "shell")]
-            vynil_core::shell::shell_rhai_register(engine);
-        }
-    }
-    Ok(())
-}
-
-/// Refuses a group whose `vynil-core` feature this build does not enable.
-fn require_feature(available: bool, group: &str, feature: &str) -> ScratchpadResult<()> {
-    if available {
-        Ok(())
-    } else {
-        Err(ScratchpadError::Engine {
-            message: format!(
-                "group `{group}` is granted but this build of lymaille does not enable the `{feature}` feature"
-            ),
-        })
+        CoreGroup::Host => vynil_core::engine::host_rhai_register(engine),
     }
 }
 
-/// Name of a group in the catalog, as `modules()` shows it.
+/// Name of a granted group in the catalog, as `modules()` shows it.
 const fn group_name(group: CoreGroup) -> &'static str {
     match group {
         CoreGroup::Host => "host",
-        CoreGroup::Sleep => "sleep",
-        CoreGroup::Fs => "fs",
-        CoreGroup::Shell => "shell",
     }
 }
 
@@ -476,8 +454,9 @@ mod tests {
         CandidateSet::new(functions, modules, Vec::new())
     }
 
+    // Scenario: seul le groupe core par défaut (le groupe `core` est enregistré d'office, sans grant)
     #[test]
-    fn only_the_pure_group_by_default() {
+    fn only_the_core_group_by_default() {
         let engine = built(Grants::new());
         assert_eq!(
             value(&engine, "json_encode(#{a: 1})")
@@ -485,11 +464,15 @@ mod tests {
                 .ok()
                 .as_deref(),
             Some("{\"a\":1}"),
-            "the pure group answers"
+            "the core group answers"
+        );
+        assert_eq!(
+            value(&engine, "sleep(0)").as_unit().ok(),
+            Some(()),
+            "sleep answers without a grant"
         );
         for script in [
             "get_env(\"PATH\")",
-            "sleep(1)",
             "file_read(\"/etc/hostname\")",
             "shell_run(\"ls\")",
         ] {
@@ -507,9 +490,13 @@ mod tests {
         let global = column(&engine, "functions(\"global\")", "path");
         assert!(
             global.iter().any(|path| path == "json_encode"),
-            "the pure group: {global:?}"
+            "the core group: {global:?}"
         );
-        for name in ["get_env", "sleep", "file_read", "shell_run"] {
+        assert!(
+            global.iter().any(|path| path == "sleep"),
+            "sleep is in the core group, always registered: {global:?}"
+        );
+        for name in ["get_env", "file_read", "shell_run"] {
             assert!(
                 !global.iter().any(|path| path == name),
                 "`{name}` is absent: {global:?}"
@@ -541,7 +528,7 @@ mod tests {
     }
 
     #[test]
-    fn granted_host_group_is_registered_and_sleep_is_not() {
+    fn granted_host_group_is_registered() {
         let engine = built(Grants::new().with_group(CoreGroup::Host));
         assert_eq!(
             value(&engine, "get_env(\"LYMAILLE_ABSENT\")")
@@ -552,58 +539,75 @@ mod tests {
             "the granted host group answers"
         );
         assert_eq!(
-            failure(&engine, "sleep(1)").class(),
-            ScriptErrorClass::NotFound,
-            "sleep is not granted"
+            value(&engine, "sleep(0)").as_unit().ok(),
+            Some(()),
+            "sleep is in core, always there"
         );
+        if !cfg!(feature = "fs") {
+            assert_eq!(
+                failure(&engine, "file_read(\"/etc/hostname\")").class(),
+                ScriptErrorClass::NotFound,
+                "file_read is absent without the vynil-core fs feature"
+            );
+        }
+        if !cfg!(feature = "shell") {
+            assert_eq!(
+                failure(&engine, "shell_run(\"ls\")").class(),
+                ScriptErrorClass::NotFound,
+                "shell_run is absent without the vynil-core shell feature"
+            );
+        }
     }
 
     #[cfg(feature = "fs")]
     #[test]
-    fn granted_fs_group_is_catalogued_under_its_feature() {
-        let engine = built(Grants::new().with_group(CoreGroup::Fs));
+    fn granted_host_group_catalogues_files_under_the_fs_feature() {
+        let engine = built(Grants::new().with_group(CoreGroup::Host));
         let global = column(&engine, "functions(\"global\")", "path");
         assert!(
             global.iter().any(|path| path == "file_read"),
-            "the fs group is registered: {global:?}"
+            "the host group carries the files with the fs feature: {global:?}"
         );
     }
 
     #[cfg(feature = "shell")]
     #[test]
-    fn granted_shell_group_is_catalogued_under_its_feature() {
-        let engine = built(Grants::new().with_group(CoreGroup::Shell));
+    fn granted_host_group_catalogues_shell_under_the_shell_feature() {
+        let engine = built(Grants::new().with_group(CoreGroup::Host));
         let global = column(&engine, "functions(\"global\")", "path");
         assert!(
             global.iter().any(|path| path == "shell_run"),
-            "the shell group is registered: {global:?}"
+            "the host group carries shell_run with the shell feature: {global:?}"
         );
     }
 
-    #[cfg(not(feature = "fs"))]
+    // Scenario: les fonctions du groupe core et du format coexistent (collision de `format`, tâche #17)
     #[test]
-    fn group_fs_refused_without_its_feature() {
-        let grants = Grants::new().with_group(CoreGroup::Fs);
-        match ScratchpadEngine::builder(ScratchpadLimits::new(), grants).build() {
-            Ok(_) => panic!("a build without the fs feature cannot grant the fs group"),
-            Err(error) => {
-                assert_eq!(error.class(), ScriptErrorClass::Engine, "an engine error");
-                assert!(error.to_string().contains("fs"), "names the group: {error}");
-            }
-        }
-    }
-
-    #[cfg(not(feature = "shell"))]
-    #[test]
-    fn group_shell_refused_without_its_feature() {
-        let grants = Grants::new().with_group(CoreGroup::Shell);
-        match ScratchpadEngine::builder(ScratchpadLimits::new(), grants).build() {
-            Ok(_) => panic!("a build without the shell feature cannot grant the shell group"),
-            Err(error) => {
-                assert_eq!(error.class(), ScriptErrorClass::Engine, "an engine error");
-                assert!(error.to_string().contains("shell"), "names the group: {error}");
-            }
-        }
+    fn core_format_and_format_functions_coexist() {
+        let engine = built(Grants::new());
+        let origin_of = |path: &str| {
+            engine
+                .catalog()
+                .functions()
+                .iter()
+                .find(|entry| entry.path() == path)
+                .map(|entry| entry.origin().clone())
+        };
+        assert_eq!(
+            origin_of("format"),
+            Some(Origin::Core("core".to_owned())),
+            "the temporal format of the core group"
+        );
+        assert_eq!(
+            origin_of("fmt_text"),
+            Some(Origin::Format),
+            "the text formatting of the scratchpad"
+        );
+        assert_eq!(
+            value(&engine, "fmt_text(#{a: 1})").into_string().ok().as_deref(),
+            Some("{\"a\":1}"),
+            "the scratchpad format still answers beside the core format"
+        );
     }
 
     #[test]

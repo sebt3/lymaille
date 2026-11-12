@@ -47,7 +47,7 @@ sous-agents prédéfinis.
 - **FR-8 - MUST:** Un watcher est une souscription déclarative (source d'événement, filtre exprimé comme prédicat Rhai)
   dont la seule action est d'injecter une notification dans le tour suivant ou de demander à l'hôte d'en lancer un. Les
   watchers sont persistés avec la session. Le prédicat est une expression évaluée dans un moteur isolé, avec le seul
-  groupe pur de `vynil-core` et l'événement pour unique entrée : ni scope de session, ni module accordé, ni fonction
+  groupe `core` de `vynil-core` et l'événement pour unique entrée : ni scope de session, ni module accordé, ni fonction
   définie par le LLM. Il ne peut donc produire aucun effet de bord ni toucher l'état d'un tour en cours.
     - **Source:** user instruction, 2026-10-24 ; isolement du prédicat, user instruction, 2026-10-25
     - **Verified by:** `AC-4`, `AC-9`

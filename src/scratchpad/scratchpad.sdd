@@ -44,7 +44,7 @@ References:
 Must:
   Ne réaliser aucune E/S : ni fichier, ni processus, ni environnement, ni sortie standard ; le moteur n'a pas de résolveur de modules par fichier et capte `print` et `debug` (`agent-sessions#CON-1`, `agent-sessions#CON-3`).
   Ne lire l'horloge que par @Clock ; ne jamais appeler `std::thread::sleep` ni une attente sans point d'annulation (`agent-sessions#FR-4`).
-  N'enregistrer que le groupe pur du socle commun de `vynil-core` et les groupes que la définition d'agent accorde, quelles que soient les features avec lesquelles `vynil-core` est compilé ; aucun groupe de fonctions non accordé n'est atteignable ni visible (`agent-sessions#BR-2`, `agent-sessions/scratchpad#FR-11`).
+  N'enregistrer que le groupe `core` du socle commun de `vynil-core` et les groupes que la définition d'agent accorde, quelles que soient les features avec lesquelles `vynil-core` est compilé ; aucun groupe de fonctions non accordé n'est atteignable ni visible (`agent-sessions#BR-2`, `agent-sessions/scratchpad#FR-11`).
   Désactiver `const` dans tout moteur qu'il construit (`agent-sessions/scratchpad#FR-12`).
   N'imposer aucune limite de durée ni de nombre d'opérations à un script (`agent-sessions/scratchpad#FR-4`) ; l'arrêt d'une boucle est l'annulation par l'hôte.
   Exécuter chaque script dans un fil dédié à pile dimensionnée (`std::thread::Builder::stack_size`, amendement de DEC-3 du 2026-10-27) joint depuis une tâche async, avec une portée d'annulation (`agent-sessions/scratchpad#DEC-3`) ; ne dépendre ni de `toolsets`, ni de `modules`, ni de la boucle de tour : les entrées venues d'eux passent par ./grant.sdd.

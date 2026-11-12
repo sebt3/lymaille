@@ -45,7 +45,7 @@ Must:
   Sans `columns`, les colonnes sont l'union des clés des lignes, dans l'ordre de première apparition ; avec `columns`, seules ces colonnes sont rendues, dans cet ordre. Un tableau vide rend la chaîne vide (sans `columns`) ou l'en-tête et la séparation seuls (avec `columns`).
   Les comptes de caractères et les coupes se font en valeurs scalaires Unicode ; une coupe ne sépare jamais un caractère multi-octets.
   Aucune fonction ne panique : arguments hors bornes, indices énormes ou textes vides sont des cas définis (résultat vide ou erreur de script).
-  Ces fonctions ne remplacent pas `json_encode`, `json_decode` et `base64_*` du groupe pur de `vynil-core` : elles s'y ajoutent.
+  Ces fonctions ne remplacent pas `json_encode`, `json_decode` et `base64_*` du groupe `core` de `vynil-core` : elles s'y ajoutent.
 
 Scenario: un objet structuré en JSON
   Given un script qui rend la table `#{pods: [#{name: "a"}]}`
@@ -161,7 +161,7 @@ Scenario: fmt_grep respecte la casse
 Tasks:
   [x] #1 Tests puis implémentation, vérifié le 2026-10-30.
   [x] #2 Posé : liste des fonctions et noms (`fmt_text`, `fmt_json`, `fmt_json_pretty`, `fmt_table`, `fmt_pluck`, `fmt_path`, `fmt_grep`, `fmt_head`, `fmt_tail`, `fmt_truncate`, `fmt_truncate_ends`), préfixe `fmt_` décidé le 2026-10-27. `agent-sessions/scratchpad#FR-8` en donne le genre (texte, JSON, tableau aligné, extraction, troncature début et fin) sans noms : la liste reste à confirmer avec l'auteur du skill intégré (`toolsets`).
-  [x] #3 Posé : pas de format YAML ni Markdown : `vynil-core` offre `yaml_encode` dans ses modules toujours disponibles, mais ce module n'est pas accordé par le scratchpad (seuls le groupe pur et les groupes accordés le sont). À rouvrir si un besoin de YAML apparaît.
+  [x] #3 Posé : pas de format YAML ni Markdown : `vynil-core` offre `yaml_encode` dans ses modules toujours disponibles, mais ce module n'est pas accordé par le scratchpad (seuls le groupe `core` et les groupes accordés le sont). À rouvrir si un besoin de YAML apparaît.
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
   [x] #4 Posé : la largeur d'une cellule se compte en caractères, pas en cellules d'affichage (écritures asiatiques, emoji) ; le tableau est destiné à un LLM, non à un terminal.
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).

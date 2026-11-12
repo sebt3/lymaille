@@ -39,6 +39,12 @@ allowed-duplicate-crates = [
   # `base64` 0.22 (via `rig-core`, `rig` feature) and 0.23 (direct dependency): inherent to `rig-core` 0.43.0, measured by
   # `spikes/rig-probe`. Decision of the lead developer, 2026-10-31.
   "base64",
+  # `sha2` 0.10 (via `rig-core`, `rig` feature, which requires `^0.10` in every version from 0.43 to 0.46) and 0.11 (via vynil-core 0.9.1), with
+  # their dependencies `digest`, `block-buffer` and `crypto-common`. Decision of the lead developer, 2026-11-12.
+  "sha2",
+  "digest",
+  "block-buffer",
+  "crypto-common",
 ]
 
 # Architecture constraints of the design, enforced by the compiler.

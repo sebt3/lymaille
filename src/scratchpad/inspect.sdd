@@ -36,7 +36,7 @@ Accepts:
   @FunctionDescriptor::new: un nom, les noms des paramètres et une documentation optionnelle.
   @ModuleDescriptor::new: un nom de module (identifiant Rhai valide) ; constructeur chaîné : une @FunctionDescriptor ; rend `None` si le nom est invalide.
   @shell_module: un @ModuleDescriptor ; rend un @rhai::Module dont chaque fonction rend l'erreur d'inspection seule.
-  @InspectionPad::new: un @ScratchpadEngine de base (groupe pur et format), les @Grants de la cible, les @ModuleDescriptor des modules projetés et un @InspectionTarget.
+  @InspectionPad::new: un @ScratchpadEngine de base (groupe `core` et format), les @Grants de la cible, les @ModuleDescriptor des modules projetés et un @InspectionTarget.
   @InspectionTarget: `Definition` (un agent avec son ToolsetContext : rien de plus que les descriptions) ou `Session` (un @PadSnapshot restauré : variables en valeur, sources de fonctions).
   @descriptors_from_catalog: un @Catalog (./introspect.sdd) et les noms des modules à projeter ; rend les @ModuleDescriptor correspondants (noms, paramètres et documentation des fonctions publiques du niveau direct de chaque module).
   @InspectionPad::run: le texte du script, le @CancelHandle du run et un @RunEnv ; fonction asynchrone.
@@ -51,7 +51,7 @@ Must:
   Les fonctions d'introspection de ./introspect.sdd s'exécutent réellement ; `modules()` et `functions()` listent les coquilles comme les modules réels, avec leurs signatures et leur documentation (`agent-sessions/scratchpad#AC-13`).
   Aucune coquille n'appelle quoi que ce soit : pas d'E/S, pas de connexion, pas d'appel au serveur MCP, pas d'effet sur la cible ; l'erreur est la même pour toutes (`InspectionOnly`).
   Les variables d'une cible `Session` sont posées dans le scope comme des constantes : les lire rend leur valeur, les écrire échoue ; la restauration ne rejoue aucun script (`agent-sessions/scratchpad#DEC-1`). Les fonctions définies par le LLM dans la session se listent (`functions("script")`), leur texte source se lit par `source(nom)` (fonction du seul pad d'inspection, qui rend le texte ou une erreur nommant les fonctions connues) et elles ne sont pas appelables.
-  Le groupe pur et les fonctions de format sont accordés pour que l'agent de configuration puisse manipuler les valeurs lues ; aucun groupe `Fs`, `Shell`, `Sleep` ni `Host` (`get_env` lirait l'environnement du processus).
+  Le groupe `core` et les fonctions de format sont accordés pour que l'agent de configuration puisse manipuler les valeurs lues ; pas de groupe `Host` (`get_env` lirait l'environnement du processus, et il porte les fichiers et le shell quand leurs features sont compilées).
   Une cible `Definition` n'a aucune variable ; son catalogue est celui qu'un agent de la définition verrait.
   Les valeurs lues viennent de l'état persisté, déjà masqué des secrets déclarés (run.sdd #10) ; le texte rendu est masqué de nouveau par le @Redactor du run.
   L'ouverture d'une cible n'exécute aucune fonction de toolset, aucune initialisation de module.

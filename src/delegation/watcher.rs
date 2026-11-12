@@ -21,15 +21,15 @@ const PREDICATE_MAX_OPERATIONS: u64 = 10_000;
 /// Name of the constant that carries the event in a predicate's scope.
 const EVENT_CONSTANT: &str = "event";
 
-/// Engine a predicate is evaluated on: the pure base of the scratchpad, plus the pure group of `vynil-core` and the
-/// operation ceiling. No group, module or import is granted. Built fresh for each use, so that no evaluation sees
+/// Engine a predicate is evaluated on: the pure base of the scratchpad, plus the core group of `vynil-core` and the
+/// operation ceiling. No host group, module or import is granted. Built fresh for each use, so that no evaluation sees
 /// another one.
 ///
 /// The ceiling counts the progress callbacks of Rhai, not `set_max_operations`: a closure called by a native function
 /// (`map`, for instance) starts its own count, so the native ceiling does not bound the work of such a predicate.
 fn predicate_engine() -> rhai::Engine {
     let mut engine = base_engine(&ScratchpadLimits::new());
-    vynil_core::engine::core_pure_rhai_register(&mut engine);
+    vynil_core::engine::core_rhai_register(&mut engine);
     // The base engine writes `print` and `debug` into the output buffer of the run open on this thread: a predicate must not.
     let _print = engine.on_print(|_| {});
     let _debug = engine.on_debug(|_, _, _| {});
@@ -799,17 +799,24 @@ mod tests {
 
     #[test]
     fn predicate_sees_the_pure_group_and_nothing_else() {
-        // Control: the pure group of `vynil-core` is granted by default (SHA-256 of "abc").
-        let pure = set_of(vec![inject(
-            "pure",
-            "mcp",
-            r#"sha256("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad""#,
-        )]);
+        // Control: the core group of `vynil-core` is always registered (base64 of "abc"). `sha256` is no longer in
+        // `core` since `vynil-core` 0.9.1: it belongs to its `crypto` group, which is not registered here.
+        let pure = set_of(vec![inject("pure", "mcp", r#"base64_encode("abc") == "YWJj""#)]);
         let triggered = pure.evaluate(&event("mcp", "x", json!({})));
         assert_eq!(
             ids(triggered.notifications()),
             ["pure"],
-            "the pure group is available to predicates"
+            "the core group is available to predicates"
+        );
+
+        // `sleep` belongs to `core` since `vynil-core` 0.9.1 and stays available to predicates (interruptible, decision of
+        // the lead developer, 2026-11-12).
+        let sleeping = set_of(vec![inject("sleeping", "mcp", "sleep(0) == ()")]);
+        let slept = sleeping.evaluate(&event("mcp", "x", json!({})));
+        assert_eq!(
+            ids(slept.notifications()),
+            ["sleeping"],
+            "sleep is part of the core group and answers in a predicate"
         );
 
         // A function of a group that is not granted is unknown to the predicate.

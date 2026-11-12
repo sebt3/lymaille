@@ -26,7 +26,7 @@ const USAGE_PREFIX: &str = "Usage: ";
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Origin {
-    /// A function of a group of the `vynil-core` common core, named after the group (`pure`, `host`, `sleep`, `fs`, `shell`).
+    /// A function of a group of the `vynil-core` common core, named after the group (`core`, `host`).
     Core(String),
     /// A formatting function of the scratchpad.
     Format,

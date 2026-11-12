@@ -639,22 +639,12 @@ mod tests {
     // Scenario: aucun groupe fs ni shell (le groupe Host est absent aussi)
     #[tokio::test]
     async fn host_group_is_absent_even_when_the_target_grants_it() {
-        let target = Grants::new()
-            .with_group(crate::scratchpad::CoreGroup::Host)
-            .with_group(crate::scratchpad::CoreGroup::Sleep);
+        let target = Grants::new().with_group(crate::scratchpad::CoreGroup::Host);
         let Ok(pad) = InspectionPad::new(&base(), &target, &[grafana()], InspectionTarget::Definition) else {
             panic!("the inspection pad must build");
         };
-        let names = eval(
-            &pad,
-            r#"let names = modules().map(|m| m.name); "host" in names || "sleep" in names"#,
-        )
-        .await;
-        assert_eq!(
-            names.text(),
-            "false",
-            "neither the host nor the sleep group is listed"
-        );
+        let names = eval(&pad, r#"let names = modules().map(|m| m.name); "host" in names"#).await;
+        assert_eq!(names.text(), "false", "the host group is not listed");
         let listed = eval(
             &pad,
             r#"functions("global").filter(|f| f.path.starts_with("get_env") || f.path.starts_with("log_")).len()"#,
@@ -803,12 +793,10 @@ mod tests {
         assert_eq!(outcome.text(), "0", "a definition has no variable");
     }
 
-    // Scenario: aucun groupe fs ni shell
+    // Scenario: aucun groupe fs ni shell (ils relèvent de Host, jamais accordé à l'inspection)
     #[tokio::test]
     async fn no_filesystem_or_shell_group() {
-        let target = Grants::new()
-            .with_group(crate::scratchpad::CoreGroup::Fs)
-            .with_group(crate::scratchpad::CoreGroup::Shell);
+        let target = Grants::new();
         let Ok(pad) = InspectionPad::new(&base(), &target, &[grafana()], InspectionTarget::Definition) else {
             panic!("the inspection pad must build");
         };

@@ -98,10 +98,10 @@ Scenario: la dépendance d'un toolset est invisible
 Scenario: les groupes non accordés sont absents
   Given un moteur dont les accords ne portent aucun groupe
   When `functions("global")` est évalué
-  Then il liste le groupe pur et les fonctions de format, et aucune de `get_env`, `sleep`, `file_read`, `shell_run`
+  Then il liste le groupe `core` (dont `sleep`) et les fonctions de format, et aucune de `get_env`, `file_read`, `shell_run`
 
 Scenario: les fonctions portent signature et documentation
-  Given le groupe pur
+  Given le groupe `core`
   When `functions()` est évalué
   Then `json_encode` apparaît avec la signature `json_encode(value: Dynamic) -> string` et une documentation non vide
 
@@ -194,7 +194,7 @@ Tasks:
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
   [x] #10 Lot E2 : `functions()` ne liste pas les fonctions d'introspection elles-mêmes, enregistrées après le catalogue (ordre
       de ./engine.sdd). Le scénario « functions carry signature and documentation » utilise `fmt_json` (groupe de format) au
-      lieu de `json_encode` (groupe pur de `vynil-core`, bloqué : ../../lymaille.sdd #9).
+      lieu de `json_encode` (groupe `core` de `vynil-core`, bloqué : ../../lymaille.sdd #9).
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
   [x] #11 Lot E2 : les fonctions d'introspection, leurs constantes et `registration_step` portent
       `#[cfg_attr(not(test), expect(dead_code))]` tant que ./engine.rs ne les enregistre pas. Ces annotations sont à retirer

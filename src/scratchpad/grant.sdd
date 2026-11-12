@@ -1,7 +1,7 @@
 Spec: grant
 
 Purpose:
-  Description abstraite de ce que la définition d'agent accorde au scratchpad : groupes de fonctions du socle commun de `vynil-core`, modules Rhai, toolsets et skills.
+  Description abstraite de ce que la définition d'agent accorde au scratchpad : groupe hôte du socle commun de `vynil-core`, modules Rhai, toolsets et skills.
     Le scratchpad la reçoit de l'hôte ou du domaine `toolsets` et ne dépend ni des toolsets ni des modules MCP (`agent-sessions#BR-2`,
     `agent-sessions/scratchpad#FR-11`, `agent-sessions/scratchpad#FR-3`).
 
@@ -19,8 +19,8 @@ Exposes:
   @GrantedSkill
 
 Accepts:
-  @Grants::new: aucun argument, rend une description vide (ne contient que le groupe pur, toujours accordé).
-  @Grants::with_group: un @CoreGroup (`Host`, `Sleep`, `Fs`, `Shell`) ; le groupe pur (`core_pure_rhai_register`) n'est pas dans l'énumération car il est enregistré d'office.
+  @Grants::new: aucun argument, rend une description vide (le groupe `core`, toujours accordé, n'y figure pas).
+  @Grants::with_group: un @CoreGroup (`Host` seul : `get_env`, `log_*`, plus les fichiers et `shell_run` si les features `fs` et `shell` de `lymaille` sont activées) ; le groupe `core` (`core_rhai_register`, dont `sleep`) n'est pas dans l'énumération car il est enregistré d'office. Depuis `vynil-core` 0.9.1, `Sleep`, `Fs` et `Shell` n'existent plus.
   @Grants::with_module: un @GrantedModule ; rend `None` si le nom est déjà pris par un autre module accordé.
   @Grants::with_toolset: un @GrantedToolset ; rend `None` si le nom est déjà pris par un autre toolset.
   @Grants::with_skill: un @GrantedSkill ; rend `None` si le nom est déjà pris par un autre skill.
@@ -48,9 +48,9 @@ Scenario: rien n'est accordé par défaut
   Then il ne contient ni groupe, ni module, ni toolset, ni skill
 
 Scenario: les groupes s'accumulent dans un ensemble
-  Given un @Grants auquel Host est ajouté deux fois et Sleep une fois
+  Given un @Grants auquel Host est ajouté deux fois
   When les groupes sont lus
-  Then ce sont Host et Sleep
+  Then c'est Host, une seule fois
 
 Scenario: noms en double refusés
   Given un @Grants qui porte un module `grafana`
@@ -79,6 +79,7 @@ Scenario: le débogage masque le contenu du module
 
 Tasks:
   [x] #1 Tests puis implémentation.
+  [x] #6 Lot 0.2.1-A (alignement sur `vynil-core` 0.9.1, option C du 2026-11-12) : @CoreGroup ne garde que `Host` ; `Sleep`, `Fs` et `Shell` sont supprimés (rupture d'API assumée en patch (0.2.1), décision du développeur principal).
   [x] #2 Posé : les types d'entrée sont définis ici, dans le scratchpad, plutôt que de dépendre de `toolsets` et `modules` non encore spécifiés. Quand ces domaines seront écrits, ils produiront ces types (ou une conversion vers eux) ; si leur forme diverge, c'est cette spec qui change, pas l'inverse.
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
   [x] #3 La liste des mots réservés de Rhai est celle de la version épinglée : un test vérifie le refus par l'analyseur de Rhai (un module nommé d'un mot réservé ne compile pas dans `nom::f()`) plutôt qu'une liste figée dans le code.
