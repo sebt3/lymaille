@@ -6,11 +6,10 @@ all-features = true
 
 [advisories]
 # Unmaintained crates reached only through dependencies we do not control. Each exception names its path. Reviewed on
-# 2026-11-01 ahead of the 0.1 publication: both exceptions temporarily accepted, decision of the lead developer
+# 2026-11-01 ahead of the 0.1 publication: one exception left (the `serde_yaml` one went with vynil-core 0.9.1, 2026-11-12), temporarily accepted, decision of the lead developer
 # (lymaille.sdd #3, lymaille.sdd #1).
 ignore = [
   { id = "RUSTSEC-2026-0249", reason = "smartstring is unmaintained; pulled by rhai 1.27.0, no alternative short of replacing rhai; still accepted for now, temporarily accepted on 2026-11-01 (lymaille.sdd #1)" },
-  { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml is unmaintained; pulled by serde_yaml, itself pulled by vynil-core 0.9.0; temporarily accepted on 2026-11-01 (lymaille.sdd #1); serde_yaml must disappear from the picture in the next vynil-core delivery" },
 ]
 
 [licenses]

@@ -61,6 +61,7 @@ Tasks:
       Report assumé le 2026-10-29 par le développeur principal : à traiter avant la publication de #3.
       Fait le 2026-10-29 (accord du développeur principal) : `deny.toml` écrit (licences permissives, MPL-2.0 pour `smartstring` via `rhai`, deux avis `unmaintained` ignorés avec raison à réexaminer avant la publication) ; `cargo deny check` passe.
       Réexaminé le 2026-11-01 (décision du développeur principal) : les deux avis `unmaintained` sont acceptés temporairement — `unsafe-libyaml` doit disparaître avec la prochaine livraison de `vynil-core` (retrait de `serde_yaml`) ; `smartstring` reste accepté encore quelque temps, faute d'alternative sans remplacer `rhai`. Les raisons de `deny.toml` portent la décision.
+      Fait le 2026-11-12 (lot 0.2.1-A) : `vynil-core` 0.9.1 a retiré `serde_yaml`, l'exception `RUSTSEC-2024-0449` est supprimée de `deny.toml` ; `rmcp` passe de `=3.8.0` à `=3.9.0` (RUSTSEC-2026-0462).
   [x] #2 Épingler dans ce manifeste les versions de `serde`, `serde_json`, `thiserror`, `tokio` et `tokio-util` posées
       par les specs de `session` : l'implémenteur les ajoute avec `cargo add`, le développeur principal confirme les
       majeures retenues.
