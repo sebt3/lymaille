@@ -125,6 +125,12 @@ pub enum EventKind {
         /// Whether the model is relaunched after the empty response.
         will_retry: bool,
     },
+    /// The lease of the active turn was lost, `agent-sessions/session#FR-17`. Emitted once, before `TurnEnded`, when the loss
+    /// signal of the turn gate cancels the turn. Carries the turn, no session value.
+    TurnLeaseLost {
+        /// Rank of the turn in its session.
+        turn: TurnId,
+    },
 }
 
 /// Event observed by the host: the session it belongs to, the instant it happened and what it reports.
@@ -211,8 +217,8 @@ mod tests {
     use crate::clock::Timestamp;
     use crate::session::{EventSink as _, Outcome, RunId, SessionId, TurnId};
 
-    /// Names of the eighteen variants of [`EventKind`], in the order of [`one_of_each_kind`].
-    const ALL_VARIANTS: [&str; 18] = [
+    /// Names of the nineteen variants of [`EventKind`], in the order of [`one_of_each_kind`].
+    const ALL_VARIANTS: [&str; 19] = [
         "TokenUsage",
         "TodoChanged",
         "MemoryChanged",
@@ -231,6 +237,7 @@ mod tests {
         "ReviewRequested",
         "ResponseTruncated",
         "EmptyResponse",
+        "TurnLeaseLost",
     ];
 
     fn session() -> SessionId {
@@ -331,7 +338,13 @@ mod tests {
             ("ReviewRequested", review_requested_sample()),
             ("ResponseTruncated", response_truncated_sample()),
             ("EmptyResponse", empty_response_sample()),
+            ("TurnLeaseLost", turn_lease_lost_sample()),
         ]
+    }
+
+    /// The lease of the active turn was lost, its turn carried like in `TurnStarted`.
+    fn turn_lease_lost_sample() -> EventKind {
+        EventKind::TurnLeaseLost { turn: TurnId::new(3) }
     }
 
     /// An empty response set aside, with the model relaunched.
@@ -398,6 +411,7 @@ mod tests {
             EventKind::ReviewRequested { .. } => "ReviewRequested",
             EventKind::ResponseTruncated { .. } => "ResponseTruncated",
             EventKind::EmptyResponse { .. } => "EmptyResponse",
+            EventKind::TurnLeaseLost { .. } => "TurnLeaseLost",
         }
     }
 
@@ -453,7 +467,7 @@ mod tests {
         let kinds = one_of_each_kind();
         assert!(
             kinds.iter().map(|(name, _)| *name).eq(ALL_VARIANTS),
-            "the samples must cover each of the eighteen variants of EventKind, in order"
+            "the samples must cover each of the nineteen variants of EventKind, in order"
         );
         for (name, kind) in &kinds {
             assert_eq!(

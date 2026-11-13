@@ -66,7 +66,7 @@ Scenario: le @RecordingSink est partageable entre threads
 Scenario: chaque variante fait l'aller-retour et est listée
   Given un @Event de chaque variante de @EventKind, `RunInterrupted` compris
   When chacune est sérialisée puis désérialisée
-  Then chacune revient égale, et la liste des exemples nomme chacune des dix-huit variantes
+  Then chacune revient égale, et la liste des exemples nomme chacune des dix-neuf variantes
 
 Scenario: un run interrompu nomme son run et sa session de sous-agent
   Given un `RunInterrupted` pour le run `run-7` et la session `sub-7` de son sous-agent
@@ -94,4 +94,4 @@ Tasks:
   [x] #3 Événements de délégation définis par le domaine `delegation` (livré) : `RunEnded` (#4) et `RunInterrupted` (#10) ; le démarrage d'un run et le déclenchement d'un watcher ne sont pas des événements de session (le watcher passe par la notification injectée au tour suivant, delegation/watcher.sdd), aucune exigence du DSD n'en demande.
   [x] #11 Variantes `TitleChanged { title }` et `ReviewRequested { reason }` (Décision du 2026-11-01 (accord du développeur principal), lot S2) : titre normalisé et masqué, raison bornée (200 caractères) et masquée ; aucune valeur de session. Tests puis implémentation.
   [x] #12 Variante `ResponseTruncated { has_text, has_tool_calls }` (Décision du 2026-11-01 (accord du développeur principal, relevé du spike R2), lot R3) : aucune valeur de session ; aller-retour JSON et liste exhaustive des variantes mis à jour.
-  [ ] #14 Variante `TurnLeaseLost { turn }` (`agent-sessions/session#FR-17`, `AC-14`, lot 0.3.0) : `turn` du même type que dans `TurnStarted` ; aller-retour JSON et liste exhaustive des variantes mis à jour (le test de liste compte les variantes : une de plus), tests puis variante, rustdoc en anglais. Précède ../runtime/turn.sdd #10.
+  [x] #14 Variante `TurnLeaseLost { turn }` (`agent-sessions/session#FR-17`, `AC-14`, lot 0.3.0) : `turn` du même type que dans `TurnStarted` ; aller-retour JSON et liste exhaustive des variantes mis à jour (le test de liste compte les variantes : une de plus), tests puis variante, rustdoc en anglais. Précède ../runtime/turn.sdd #10.
