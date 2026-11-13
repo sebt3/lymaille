@@ -28,7 +28,7 @@ Must:
     (`Overrun`, avec la durée écoulée), titre de session modifié (`TitleChanged`, avec le nouveau titre — une ligne bornée, masquée), demande de revue d'un humain (`ReviewRequested`, avec la raison bornée et masquée), réponse coupée par la limite de sortie (`ResponseTruncated`, avec deux booléens `has_text` et `has_tool_calls` ; aucune valeur de session), réponse vide écartée (`EmptyResponse`, avec un booléen `will_retry` qui dit si le modèle est relancé ; aucune valeur de session), réessai d'inférence (numéro, délai en millisecondes, classe de l'erreur), début de tour,
     fragment de texte streamé (`TextDelta`, avec le tour et le texte du fragment), fin de tour (issue de type @Outcome, réponse
     complète), fin de run, interruption d'un run de sous-agent à la restauration de la session principale (`RunInterrupted`,
-    avec l'identifiant du run et celui de la session du sous-agent, `agent-sessions/delegation#FR-14`).
+    avec l'identifiant du run et celui de la session du sous-agent, `agent-sessions/delegation#FR-14`), perte du bail du tour (`TurnLeaseLost`, avec le tour ; aucune valeur de session ; émis une fois, avant `TurnEnded`, quand le signal de perte du permis annule le tour, `agent-sessions/session#FR-17`).
   `TextDelta` porte un fragment de la réponse en cours ; les fragments d'un tour arrivent dans l'ordre d'émission, et la réponse
     complète reste dans `TurnEnded`.
   @Event se sérialise en JSON et se désérialise à l'identique (l'hôte peut le journaliser).
@@ -94,3 +94,4 @@ Tasks:
   [x] #3 Événements de délégation définis par le domaine `delegation` (livré) : `RunEnded` (#4) et `RunInterrupted` (#10) ; le démarrage d'un run et le déclenchement d'un watcher ne sont pas des événements de session (le watcher passe par la notification injectée au tour suivant, delegation/watcher.sdd), aucune exigence du DSD n'en demande.
   [x] #11 Variantes `TitleChanged { title }` et `ReviewRequested { reason }` (Décision du 2026-11-01 (accord du développeur principal), lot S2) : titre normalisé et masqué, raison bornée (200 caractères) et masquée ; aucune valeur de session. Tests puis implémentation.
   [x] #12 Variante `ResponseTruncated { has_text, has_tool_calls }` (Décision du 2026-11-01 (accord du développeur principal, relevé du spike R2), lot R3) : aucune valeur de session ; aller-retour JSON et liste exhaustive des variantes mis à jour.
+  [ ] #14 Variante `TurnLeaseLost { turn }` (`agent-sessions/session#FR-17`, `AC-14`, lot 0.3.0) : `turn` du même type que dans `TurnStarted` ; aller-retour JSON et liste exhaustive des variantes mis à jour (le test de liste compte les variantes : une de plus), tests puis variante, rustdoc en anglais. Précède ../runtime/turn.sdd #10.

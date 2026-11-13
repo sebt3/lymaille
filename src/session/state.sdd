@@ -52,6 +52,7 @@ Must:
   La création pose la version @FormatVersion::CURRENT.
   @SessionState::with_kind retire ce que la nouvelle nature ne porte pas : la cible d'inspection quand la nature n'est plus `Config`, la session parente quand elle n'est plus `Sub` (décidé le 2026-10-29). @SessionState::set_inspection_target est un mutateur public (`&mut self`, état inchangé en cas de refus ; `None` efface la cible) : la cible d'inspection change en cours de session par construction, c'est l'exception à l'absence de mutateur public.
   La nature de la session est un champ de l'état (`agent-sessions/session#FR-2`) : absente à la lecture, elle vaut `Work` ; un sous-agent porte l'identifiant de sa session parente ; seule une session `Config` porte une cible d'inspection, qui se relit à l'identique (`agent-sessions#BR-8`). @SessionState::set_inspection_target sur une session qui n'est pas `Config` est refusé par une variante d'erreur dédiée (tâche #8).
+  Sous la feature `ts-rs`, @SessionKind dérive `TS` sans changer la sérialisation serde ; la déclaration TypeScript décrit exactement la forme serde (`agent-sessions#NFR-4`).
 
 Must not:
   Écrire ou lire quoi que ce soit : le texte est rendu ou reçu, le stockage est l'affaire de @SessionStore.
@@ -68,6 +69,7 @@ Depends on:
   ../clock.sdd
   serde
   serde_json
+  ts-rs (feature optionnelle `ts-rs`, voir ../../lymaille.sdd)
 
 Tasks:
   [x] #1 Tests puis implémentation.
@@ -89,6 +91,7 @@ Tasks:
       Validé le 2026-10-29 (implémentation vérifiée par mutations de l'auteur) ; validation du validator groupée avec T7.
   [x] #10 Validation du 2026-10-29 : `from_json` refuse (SessionError::Serialization, message sans contenu) un état dont la nature n'est pas `Sub` et qui porte un parent, ou dont la nature n'est pas `Config` et qui porte une cible d'inspection ; `set_inspection_target(None)` accepté sur toute nature, testé ; accesseurs `kind()`, `parent()`, `inspection_target()` ajoutés à `Exposes` ; Debug manuel de @SessionState (identifiant, nature, tailles, jamais l'historique ni les valeurs) ; `#[expect(clippy::trivially_copy_pass_by_ref)]` de `SessionKind::is_work` conservé (raison précise).
       Validé le 2026-10-29 (validator, 76 mutants, `scripts/check` complet vert).
+  [ ] #11 `ts-rs` (`sebt3/lymaille#10`) : dériver `TS` sous la feature `ts-rs` pour @SessionKind. Atteint par la déclaration de @ContextType (../toolsets/context_type.sdd) ; seul ce type de ./state.rs est concerné, pas @SessionState. Poser `#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]` sans `#[ts(export)]` (ses tests générés écrivent des fichiers). Un entier 64 bits (`u64`, `NonZeroU64`) se sérialise en nombre JSON : `#[cfg_attr(feature = "ts-rs", ts(type = "number"))]`, jamais `bigint`. Un champ avec `skip_serializing_if` est optionnel dans la déclaration (`ts(optional)`, à vérifier dans la documentation de la version retenue de `ts-rs`). Une version `Semver` (`serde(with = "semver_text")`) se déclare `string` ; une valeur `serde_json::Value` utilise l'implémentation `serde-json-impl`. Aucun test de sérialisation existant ne change ; une erreur de compilation sous la feature est le rouge attendu. Dépend de la tâche « feature `ts-rs` » de /lymaille.sdd (elle ajoute la dépendance optionnelle) ; le contrat est vérifié par ../ts_contract.sdd.
 
 Scenario: aller-retour complet
   Given un état avec historique, deux variables, une source de fonction, une entrée de todo, des compteurs de tokens et des étiquettes

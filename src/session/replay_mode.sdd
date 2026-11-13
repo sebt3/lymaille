@@ -26,9 +26,11 @@ Must:
   @ReplayMode se sérialise et se désérialise en ce même texte (sous forme de chaîne JSON) ; un texte inconnu est refusé à la
     lecture, il n'est jamais ramené à un mode par défaut.
   `parse` est l'inverse de `as_str` et refuse tout autre texte.
+  Sous la feature `ts-rs`, @ReplayMode dérive `TS` sans changer la sérialisation serde ; la déclaration TypeScript décrit exactement la forme serde (`agent-sessions#NFR-4`).
 
 Depends on:
   serde
+  ts-rs (feature optionnelle `ts-rs`, voir ../../lymaille.sdd)
 
 Tasks:
   [x] #1 Déplacé de ../context/replay.sdd (lot Q3, décision du 2026-10-31) : même définition, même texte, défini ici puis ré-exporté
@@ -36,3 +38,4 @@ Tasks:
       qui les exercent par le ré-export.
   [x] #2 Rendu par @ModelSnapshot (./segment.sdd #2) : l'instantané porte ce type et non plus un texte libre.
   [x] #3 Pas de note de migration (Décision du 2026-11-01 (accord du développeur principal)) : un état ancien dont le mode de rejeu est un texte libre autre que `none`, `intra_turn` ou `all_turns` ne se relit plus ; aucune session de production n'existe avant la publication 0.1 (même raison que `agents/definition.sdd` #16).
+  [ ] #4 `ts-rs` (`sebt3/lymaille#10`) : dériver `TS` sous la feature `ts-rs` pour @ReplayMode. Atteint par la déclaration de @ModelProfile (../agents/profile.sdd). Poser `#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]` sans `#[ts(export)]` (ses tests générés écrivent des fichiers). Un entier 64 bits (`u64`, `NonZeroU64`) se sérialise en nombre JSON : `#[cfg_attr(feature = "ts-rs", ts(type = "number"))]`, jamais `bigint`. Un champ avec `skip_serializing_if` est optionnel dans la déclaration (`ts(optional)`, à vérifier dans la documentation de la version retenue de `ts-rs`). Une version `Semver` (`serde(with = "semver_text")`) se déclare `string` ; une valeur `serde_json::Value` utilise l'implémentation `serde-json-impl`. Aucun test de sérialisation existant ne change ; une erreur de compilation sous la feature est le rouge attendu. Dépend de la tâche « feature `ts-rs` » de /lymaille.sdd (elle ajoute la dépendance optionnelle) ; le contrat est vérifié par ../ts_contract.sdd.

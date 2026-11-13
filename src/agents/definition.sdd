@@ -1,12 +1,20 @@
 Spec: definition
 
 Purpose:
-  Définition d'un agent, de travail (`Work`), de configuration (`Config`) ou sous-agent (`Sub`, `agent-sessions#BR-8`) : identifiant, nature, prompt système templaté, nom du profil de modèle et paramètres, modules et toolsets accessibles,
+  Définition d'un agent, de travail (`Work`), de configuration (`Config`) ou sous-agent (`Sub`, `agent-sessions#BR-8`) : identifiant, nature, prompt système templaté, nom du profil de modèle (facultatif) et paramètres, modules et toolsets accessibles,
     limites de sandbox, stratégie de fenêtre de contexte, sous-agents délégables (`Work`) ou schéma de sortie (`Sub`), et son empreinte
-    (`agent-sessions/agents#FR-1`, `FR-2`, `FR-8`, `agent-sessions/session#FR-2`).
+    (`agent-sessions/agents#FR-1`, `FR-2`, `FR-8`, `FR-9`, `FR-10`, `agent-sessions/session#FR-2`).
 
 Owns:
   ./definition.rs
+
+Can modify:
+  ./catalog.rs: les appels de @AgentDefinition::new de ses tests, seulement (migration de la signature, sans autre changement).
+  ../toolsets/compat.rs: idem.
+  ../toolsets/config.rs: idem.
+  ../toolsets/start.rs: idem.
+  ../delegation/module.rs: idem.
+  ../tools/inspect.rs: idem.
 
 Exposes:
   @AgentDefinition
@@ -21,9 +29,11 @@ Exposes:
   @AgentDefinition::fingerprint
   @AgentDefinition::to_text
   @AgentDefinition::from_text
+  @AgentDefinition::with_profile
+  @AgentDefinition::profile
 
 Accepts:
-  @AgentDefinition::new: l'identifiant, la nature (@AgentKind : `Work`, `Config` ou `Sub`), le prompt système (gabarit texte) et le nom du profil de modèle, puis des constructeurs chaînés : paramètres d'échantillonnage, modules, toolsets, @SandboxLimits (délai de script, plafond de rendu en caractères, et trois plafonds de mémoire optionnels), nom de la stratégie de contexte, sous-agents délégables (agent de travail), schéma JSON de sortie (sous-agent).
+  @AgentDefinition::new: l'identifiant, la nature (@AgentKind : `Work`, `Config` ou `Sub`) et le prompt système (gabarit texte) ; la définition n'a alors aucun profil. Constructeurs chaînés : @AgentDefinition::with_profile (le nom du profil de modèle, texte), paramètres d'échantillonnage, modules, toolsets, @SandboxLimits (délai de script, plafond de rendu en caractères, et trois plafonds de mémoire optionnels), nom de la stratégie de contexte, sous-agents délégables (agent de travail), schéma JSON de sortie (sous-agent).
   @AgentDefinition::validate: aucun argument.
   @SandboxLimits::with_max_string_bytes, @SandboxLimits::with_max_array_len, @SandboxLimits::with_max_map_len: un entier non signé (`u64`) par plafond de mémoire (octets pour la chaîne, éléments pour le tableau, entrées pour la table) ; zéro est accepté par le constructeur et refusé par @AgentDefinition::validate.
 
@@ -31,6 +41,7 @@ Accepts:
   @AgentDefinition::from_text: un texte de ce format, de 256 Kio au plus (décision du 2026-10-31, D-a).
 
 Returns:
+  @AgentDefinition::profile: le nom du profil, ou `None` quand la définition n'en porte pas.
   @AgentDefinition::to_text: le texte `---`, les champs de la définition sauf `prompt` en YAML (clés triées), `---`, puis le prompt exactement, sans ajout ni retrait.
   @AgentDefinition::from_text: la définition relue ; un champ inconnu du frontmatter est ignoré.
   @AgentDefinition::fingerprint: une chaîne hexadécimale de 16 caractères, empreinte stable de la définition.
@@ -38,23 +49,25 @@ Returns:
   @SandboxLimits::max_string_bytes, @SandboxLimits::max_array_len, @SandboxLimits::max_map_len: `None` quand le plafond est absent (le défaut de `scratchpad/limits` s'applique alors), sinon la valeur posée.
 
 Raises:
-  @AgentsError::InvalidDefinition: un sous-agent ou un agent de configuration qui déclare des sous-agents délégables ; un agent de travail ou de configuration qui déclare un schéma de sortie ; un module réservé à la configuration (`toolset_creator`, `inspect`, `contexts`, `sessions`) accordé à un agent de travail ou à un sous-agent ; le module `session` accordé à un sous-agent (la raison porte le texte de la règle, ../toolsets/compat.sdd) ; un identifiant, un prompt ou un nom de profil vide ; un sous-agent délégable égal à l'agent lui-même ou en double ; une liste de toolsets ou de modules qui contient un doublon ; un plafond de mémoire du sandbox posé à zéro.
+  @AgentsError::InvalidDefinition: un sous-agent ou un agent de configuration qui déclare des sous-agents délégables ; un agent de travail ou de configuration qui déclare un schéma de sortie ; un module réservé à la configuration (`toolset_creator`, `inspect`, `contexts`, `sessions`) accordé à un agent de travail ou à un sous-agent ; le module `session` accordé à un sous-agent (la raison porte le texte de la règle, ../toolsets/compat.sdd) ; un identifiant ou un prompt vide, un nom de profil présent mais vide ou blanc ; un sous-agent délégable égal à l'agent lui-même ou en double ; une liste de toolsets ou de modules qui contient un doublon ; un plafond de mémoire du sandbox posé à zéro.
   @AgentsError::InvalidDefinition, identifiant `<AGENT.md>` et raison fixe : frontmatter absent ou non fermé, YAML illisible, champ de mauvais type, champ `prompt` dans le frontmatter, texte de plus de 256 Kio (refusé avant toute analyse), nombre non fini (`.nan`, `.inf`, `-.inf`), clé qui n'est pas un texte, clé déclarée deux fois au premier niveau (le prompt est le corps, choix posé le 2026-10-31 à valider : un doublon refusé plutôt qu'écrasé en silence). Le message ne porte jamais le prompt ni une valeur du texte.
 
 Must:
-  Le modèle se désigne par un nom de profil : la définition n'a aucun champ de fournisseur.
+  Le modèle se désigne, quand la définition en désigne un, par un nom de profil : la définition n'a aucun champ de fournisseur.
+  Le profil est facultatif (`agent-sessions/agents#FR-9`) : une définition sans profil est valide et se sérialise sans la clé `profile` (JSON et texte) ; un JSON ou un frontmatter sans la clé, ou avec `profile: null`, se lit comme l'absence de profil ; une définition qui porte un profil garde le JSON, le texte et l'empreinte qu'elle avait quand le profil était obligatoire. La résolution d'une définition sans profil appartient à l'hôte : la librairie n'appelle jamais la résolution d'un profil avec un nom vide.
   L'empreinte est déterministe et indépendante de la plate-forme : même définition, même empreinte, y compris après un aller-retour de sérialisation ; elle change dès qu'un champ de la définition change (prompt, profil, toolsets, modules, limites, plafonds de mémoire du sandbox, sous-agents, schéma). Calculée par FNV-1a 64 bits sur la sérialisation JSON canonique (clés triées), sans dépendance externe.
   Les trois plafonds de mémoire du sandbox sont optionnels : absents, ils ne sont pas sérialisés (aucune clé dans le JSON) et le JSON ancien qui ne les porte pas se lit sans eux. Posés, chacun entre dans l'empreinte et sa valeur se relit à l'identique. Un zéro est refusé par @AgentDefinition::validate, jamais silencieusement ramené au défaut. Les plafonds ne sont branchés au moteur de `scratchpad` qu'avec `run` : ce module ne dépend pas du scratchpad.
   Un sous-agent ne délègue pas (`agent-sessions#BR-6`) ; seul un agent de travail a des sous-agents délégables. Un agent de configuration ne délègue pas et reçoit seul les modules réservés à la configuration (`agent-sessions#BR-8`).
   Les capacités sont exactement celles de la définition (`agent-sessions#BR-2`) : aucune valeur par défaut n'accorde un module ou un toolset ; les listes absentes sont vides. La définition ne porte aucun droit de Memory : l'accès à un niveau se décide par les toolsets (`agent-sessions/modules#FR-4`).
   Se sérialise et se désérialise à l'identique ; aucun champ ne porte de secret.
-  Le texte ne porte aucune clé de fournisseur (`agents#FR-8`) : le profil seul.
+  Le texte ne porte aucune clé de fournisseur (`agents#FR-8`) : le profil seul, quand il existe.
   `from_text(to_text(d))` est identique à `d` et a la même empreinte. Les plafonds de mémoire absents n'apparaissent pas dans le texte, comme dans le JSON.
   Le prompt est le corps exact : aucun `trim`, aucune ligne ajoutée. Seule la première ligne `---` après le frontmatter ferme ce dernier ; une ligne `---` dans le corps reste dans le prompt.
   Le texte doit s'ouvrir par la ligne `---` ; les fins de ligne CRLF sont acceptées à la relecture et le prompt garde les siennes.
   Le découpage du frontmatter reprend celui de `../toolsets/skill.rs` (`Skill::parse`) par copie : à factoriser dans un module partagé si un troisième texte apparaît.
   Un texte de plus de 256 Kio (262 144 octets) est refusé avant toute analyse, avec une raison fixe qui dit la taille ; la constante `TEXT_MAX_BYTES` est nommée dans le code (décision du 2026-10-31, D-a).
   Un nombre non fini (`.nan`, `.inf`, `-.inf`) à n'importe quelle profondeur du frontmatter est refusé : il ne peut pas être conservé, et il ne devient jamais un échantillonnage vide. Une clé qui n'est pas un texte (`1: x`) et une clé déclarée deux fois au premier niveau sont refusées, jamais écrasées (décision du 2026-10-31).
+  Sous la feature `ts-rs`, @AgentDefinition, @AgentKind et @SandboxLimits dérivent `TS` sans changer la sérialisation serde ; la déclaration TypeScript décrit exactement la forme serde (`agent-sessions#NFR-4`).
 
 Depends on:
   ./error.sdd
@@ -62,6 +75,7 @@ Depends on:
   serde
   serde_json
   yaml_serde (décidé le 2026-10-31, ../toolsets/toolsets.sdd #2)
+  ts-rs (feature optionnelle `ts-rs`, voir ../../lymaille.sdd)
 
 Scenario: texte de plus de 256 Kio refusé avant toute analyse
   Given un texte de plus de 256 Kio (262 144 octets) dont le frontmatter est illisible
@@ -87,6 +101,36 @@ Scenario: clé qui n'est pas un texte refusée
   Given un texte dont le frontmatter porte la clé `1`
   When il est relu
   Then la relecture échoue avec InvalidDefinition
+
+Scenario: une définition sans profil est valide
+  Given une définition construite par @AgentDefinition::new, sans appel à with_profile
+  When elle est validée et que profile est lu
+  Then la validation réussit et profile rend None
+
+Scenario: une définition sans profil se sérialise sans la clé
+  Given une définition sans profil
+  When elle est sérialisée en JSON puis écrite en texte
+  Then ni le JSON ni le frontmatter ne portent la clé `profile`, et les deux se relisent à l'identique
+
+Scenario: l'absence de profil se lit de deux façons
+  Given un JSON sans clé `profile`, un JSON avec `profile: null` et un frontmatter sans clé `profile`
+  When chacun est relu
+  Then chacun donne une définition sans profil
+
+Scenario: un profil présent mais vide est refusé
+  Given une définition construite avec with_profile("") puis une avec with_profile("  ")
+  When chacune est validée
+  Then les deux échouent avec InvalidDefinition
+
+Scenario: l'ajout d'un profil change l'empreinte
+  Given une définition sans profil et la même avec le profil `strix-qwen`
+  When leurs empreintes sont calculées
+  Then elles diffèrent, et l'empreinte de la seconde est celle de la même définition avant que le profil devienne facultatif
+
+Scenario: une définition avec profil garde son JSON et son texte
+  Given le JSON et le texte d'une définition avec le profil `strix-qwen`, relevés avant que le profil devienne facultatif
+  When ils sont relus puis réécrits
+  Then ils se relisent à l'identique et se réécrivent octet pour octet
 
 Tasks:
   [x] #6 Tests manquants : l'empreinte change pour chaque champ de la liste du Must (prompt, profil, toolsets, modules, délai et plafond de sandbox, sous-agents délégables, schéma de sortie, aussi id, nature, paramètres, stratégie de contexte) ;
@@ -120,6 +164,10 @@ Tasks:
       Validé le 2026-11-01 (validateur, lot pré-publication, scripts/check complet).
   [x] #20 Refus au chargement du module `session` accordé à un sous-agent (décision du 2026-11-01, ../toolsets/compat.sdd #9) : la raison cite la règle, copie privée du texte de ../toolsets/compat.rs épinglée par tests des deux côtés ; les Scenarios « module session … » ci-dessus ; tests vus rouges puis verts.
       Validé le 2026-11-01 (validateur, scripts/check complet ; mutations sur definition.rs : 43/43, aucun survivant, et 8/8 sur compat.rs, aucun survivant).
+  [ ] #21 Profil facultatif, tests (`agent-sessions/agents#FR-9`, `AC-3`, `sebt3/lymaille#11`) : avant de toucher au code, relever dans le code actuel l'empreinte, le JSON et le texte d'une définition de référence avec le profil `strix-qwen` et les figer en constantes des tests ; écrire ensuite les tests des six Scenarios « profil facultatif » (sans profil valide, sans clé à la sérialisation, absence lue de deux façons, profil vide refusé, empreinte, JSON et texte inchangés avec profil) et les voir échouer pour la bonne raison.
+  [ ] #22 Profil facultatif, implémentation (`sebt3/lymaille#11`) ; dépend de #21 : le champ devient `Option<String>` avec `#[serde(default, skip_serializing_if = "Option::is_none")]` ; @AgentDefinition::new perd son argument `profile` ; @AgentDefinition::with_profile(String) (chaînable, comme les autres) pose le profil ; @AgentDefinition::profile rend `Option<&str>` ; `validate` refuse un profil présent vide ou blanc et accepte l'absence ; `to_text` / `from_text` n'écrivent pas la clé absente ; rustdoc en anglais mis à jour. Aucun changement de l'empreinte d'une définition avec profil.
+  [ ] #23 Profil facultatif, migration des appelants ; dépend de #22 : la signature de @AgentDefinition::new change, ses 21 appels (le grep `AgentDefinition::new` les donne) sont migrés : dans ./definition.rs, et dans les tests de ./catalog.rs, ../toolsets/compat.rs, ../toolsets/config.rs, ../toolsets/start.rs, ../delegation/module.rs et ../tools/inspect.rs (permission de `Can modify` ci-dessus, appels de `new` seulement : `.with_profile(...)` là où le test s'appuie sur le profil). `scripts/check` complet doit passer.
+  [ ] #24 `ts-rs` (`sebt3/lymaille#10`) : dériver `TS` sous la feature `ts-rs` pour @AgentDefinition, @AgentKind et @SandboxLimits. Les trois plafonds de @SandboxLimits (`u64`) se déclarent `number` ; `sampling` renvoie à @SamplingParams (../agents/profile.sdd) et `output_schema` est une valeur JSON. Exécuter après #23 (même fichier). Poser `#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]` sans `#[ts(export)]` (ses tests générés écrivent des fichiers). Un entier 64 bits (`u64`, `NonZeroU64`) se sérialise en nombre JSON : `#[cfg_attr(feature = "ts-rs", ts(type = "number"))]`, jamais `bigint`. Un champ avec `skip_serializing_if` est optionnel dans la déclaration (`ts(optional)`, à vérifier dans la documentation de la version retenue de `ts-rs`). Une version `Semver` (`serde(with = "semver_text")`) se déclare `string` ; une valeur `serde_json::Value` utilise l'implémentation `serde-json-impl`. Aucun test de sérialisation existant ne change ; une erreur de compilation sous la feature est le rouge attendu. Dépend de la tâche « feature `ts-rs` » de /lymaille.sdd (elle ajoute la dépendance optionnelle) ; le contrat est vérifié par ../ts_contract.sdd.
 
 Scenario: modèle désigné par le seul nom du profil
   Given une définition construite avec le profil `strix-qwen`

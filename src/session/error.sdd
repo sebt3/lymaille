@@ -21,6 +21,7 @@ Raises:
   @SessionError::Serialization: état non (dé)sérialisable, message texte.
   @SessionError::IncompatibleFormat: version majeure de format différente, porte les deux @FormatVersion (enregistrée et courante).
   @SessionError::TurnActive: un tour est déjà actif pour la session, porte l'identifiant.
+  @SessionError::TurnLock: la porte de tour fournie par l'hôte échoue pour une raison qui lui est propre (hors `TurnActive`), message texte produit par l'appelant, sans secret (`agent-sessions/session#FR-17`). Texte `Display` : « turn lock failed: <message> ».
   @SessionError::PendingToolCall: un message utilisateur ne peut s'insérer entre un appel d'outil et son résultat.
   @SessionError::InvalidNativeTool: un tool natif est refusé à l'enregistrement (nom réservé `rhai_pad` ou nom déjà enregistré, ../runtime/turn.sdd) ; porte le nom du tool. Texte `Display` : « invalid native tool `<nom>`: its name is reserved or already registered ».
   @SessionError::Poisoned: un verrou interne empoisonné.
@@ -59,3 +60,4 @@ Tasks:
       dans le module `agents`, pas ici : confirmer.
       Validé le 2026-10-29 par le développeur principal.
   [x] #5 Variante `InvalidNativeTool { name }` et son test de `Display` (décision du 2026-10-31, lot P1) ; le texte ne reprend aucune valeur de session.
+  [ ] #6 Variante @SessionError::TurnLock(String) (`agent-sessions/session#FR-17`, lot 0.3.0) : tests du texte `Display` (`turn lock failed: <message>`) puis la variante, rustdoc en anglais, comme `Store`. Aucun autre changement de l'énumération ; ses `match` exhaustifs éventuels traitent la variante. Précède ./turn_gate.sdd #3.

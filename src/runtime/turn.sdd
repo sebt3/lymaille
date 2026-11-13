@@ -28,7 +28,7 @@ Exposes:
   @RHAI_PAD_TOOL
 
 Accepts:
-  @TurnConfig::new: la @Clock partagée, le @Redactor, un @EventSink partagé, un @CancelHandle racine et la @Budget de la session ; constructeurs chaînés : `with_overrun` (durée après laquelle `Overrun` est émis, jamais d'interruption), `with_max_steps` (nombre maximal d'appels au modèle dans un tour, 200 par défaut), `with_agent` (nom de l'agent pour l'audit).
+  @TurnConfig::new: la @Clock partagée, le @Redactor, un @EventSink partagé, un @CancelHandle racine et la @Budget de la session ; constructeurs chaînés : `with_overrun` (durée après laquelle `Overrun` est émis, jamais d'interruption), `with_max_steps` (nombre maximal d'appels au modèle dans un tour, 200 par défaut), `with_agent` (nom de l'agent pour l'audit), `with_turn_lock` (un `Arc<dyn TurnLock>` de ../session/turn_gate.sdd, la porte de tour de l'hôte ; sans lui, la porte en mémoire du processus).
   @TurnRunner::new: un fournisseur d'inférence (@InferenceProvider, générique), une stratégie de compaction (@CompactionStrategy, générique), le @ResolvedProfile, le @SegmentContext (prompt système rendu et définitions des tools natifs), un @Scratchpad, un @SessionStore, un @SessionState de départ et une @TurnConfig.
   @TurnRunner::with_native_tool: `&mut self` et un `Arc<dyn NativeTool>` (../session/native_tool.sdd) ; rend `Result<&mut Self, SessionError>`, chaînable avec `?` ; refuse le nom `rhai_pad` et un nom déjà enregistré par @SessionError::InvalidNativeTool, et le runner reste utilisable après un refus (décision du 2026-10-31).
   @TurnRunner::with_session_edits: une `Arc<SessionEdits>` (../session/edits.sdd) ; chaînable.
@@ -42,11 +42,14 @@ Returns:
 
 Raises:
   @SessionError::TurnActive: un tour est déjà actif pour la session ; rien n'est modifié.
+  @SessionError::TurnLock: la porte de tour de l'hôte échoue pour une raison qui lui est propre ; rien n'est modifié.
   @SessionError::Store: la sauvegarde de fin de tour échoue (le tour reste terminé, l'erreur est rendue).
   Les échecs du modèle ne sont pas des erreurs de la fonction : ils donnent un @TurnOutput d'issue `Failed` (erreur permanente ou débordement non résolu) après avoir émis `TurnEnded`.
 
 Must:
-  Au plus un tour actif par session au sein d'un processus (@TurnGate de ../session/turn_gate.sdd) ; la permission est relâchée à la fin du tour, y compris sur annulation ou échec.
+  Au plus un tour actif par session, selon la porte de tour de @TurnConfig (@TurnLock de ../session/turn_gate.sdd) ; sans porte fournie, @TurnGate, partagée par tous les runners du processus, de sorte qu'un tour est actif au plus une fois par session dans le processus quel que soit le runner. Le permis est demandé (asynchrone) avant tout changement d'état et relâché à la fin du tour, y compris sur annulation ou échec.
+  Perte de bail (`agent-sessions/session#FR-17`) : le signal @TurnPermit::lost du permis se lit comme le handle d'annulation du tour, avant chaque requête, pendant l'inférence et pendant un script. Annulé, il arrête le tour comme une annulation (aucun appel d'outil sans résultat dans l'historique en mémoire), l'issue est `Cancelled`, l'événement `TurnLeaseLost` est émis une fois avant `TurnEnded`, et @SessionStore::save n'est pas appelé pour ce tour : une autre réplique peut déjà tenir la session, et la reprise est la dernière sauvegarde, comme après un arrêt brutal. Le signal est lu une dernière fois juste avant la sauvegarde de fin de tour ; annulé, la sauvegarde est omise et l'issue est `Cancelled`, même si la réponse était terminée. Le @TurnOutput ne porte aucune erreur : l'hôte distingue la perte par l'événement et restaure la session depuis le stockage plutôt que de réutiliser le runner.
+  Limite connue, acceptée : un bail perdu entre la dernière lecture du signal et la fin de @SessionStore::save n'est pas détectable ; l'écriture concurrente reste la responsabilité du stockage de l'hôte (`agent-sessions/session#DEC-1`).
   Un tour commence par `TurnStarted` et finit par `TurnEnded` (issue et réponse masquée) ; les fragments de la réponse en cours sont émis comme `TextDelta` dans l'ordre, après masquage par le @Redactor avec report des derniers caractères tant qu'ils pourraient former le début d'un secret coupé entre deux fragments (le report est vidé à la fin de la réponse). Le texte complet de `TurnEnded` est masqué aussi.
   Avant chaque requête : si la @Budget demande la compaction, la @CompactionStrategy compacte et ouvre un nouveau segment (frontière `Compaction`, résumé en message utilisateur) ; un message d'entrée trop gros est refusé (`Failed`) sans appel au modèle.
   La requête porte le prompt système et les tools du segment courant, l'historique et le raisonnement rejoué selon le mode du profil (`replayed_reasoning`) ; l'usage rapporté, ou estimé en repli, met à jour le @UsageTracker et émet `TokenUsage`.
@@ -142,6 +145,41 @@ Scenario: un seul tour actif
   When un second run_turn est demandé pour la même session
   Then l'erreur est TurnActive et l'état du tour en cours est intact
 
+Scenario: une porte de l'hôte est utilisée à la place de la porte du processus
+  Given un @TurnConfig avec une porte de test qui refuse la session `s1` avec TurnActive
+  When run_turn est demandé pour `s1`
+  Then l'erreur est TurnActive, aucun appel au modèle n'est fait et l'état est inchangé
+
+Scenario: l'échec d'une porte de l'hôte est rendu
+  Given une porte de test qui échoue avec @SessionError::TurnLock
+  When run_turn est demandé
+  Then l'erreur est TurnLock et rien n'est modifié ni émis
+
+Scenario: un tour sans porte fournie garde la porte du processus
+  Given deux runners sans `with_turn_lock` pour la même session
+  When le second run_turn est demandé pendant le tour du premier
+  Then l'erreur est TurnActive
+
+Scenario: le bail perdu pendant l'inférence annule le tour sans sauvegarde
+  Given une porte de test dont le permis déclenche son signal de perte pendant l'appel au modèle, et un @InMemoryStore
+  When run_turn s'exécute
+  Then l'issue est Cancelled, `TurnLeaseLost` puis `TurnEnded` sont émis dans cet ordre, et le stockage n'a reçu aucune sauvegarde pour ce tour
+
+Scenario: le bail perdu pendant un script annule le tour sans sauvegarde
+  Given une porte de test dont le permis déclenche son signal de perte pendant un script de `rhai_pad`
+  When run_turn s'exécute
+  Then le script est annulé, l'issue est Cancelled, l'historique en mémoire n'a aucun appel d'outil sans résultat, et le stockage n'a reçu aucune sauvegarde
+
+Scenario: le bail perdu juste avant la sauvegarde l'omet
+  Given une porte de test dont le signal de perte se déclenche après la réponse finale et avant la sauvegarde
+  When run_turn s'exécute
+  Then l'issue est Cancelled, `TurnLeaseLost` est émis et le stockage n'a reçu aucune sauvegarde
+
+Scenario: sans perte de bail, rien ne change
+  Given une porte de test qui ne déclenche jamais son signal
+  When run_turn s'exécute avec une réponse simple
+  Then l'issue est Valid, la sauvegarde a lieu et aucun `TurnLeaseLost` n'est émis
+
 Scenario: outil inconnu
   Given un fournisseur qui demande un outil `inconnu`
   When run_turn s'exécute
@@ -234,3 +272,5 @@ Tasks:
   [x] #7 `with_session_edits` (Décision du 2026-11-01 (accord du développeur principal), lot S2) : après chaque appel d'outil la boucle vide la cellule, applique le titre (@normalize_title, @Redactor, `set_title`, événement `TitleChanged`) et ajoute pour chaque signalement une étiquette `review-requested: <raison>` (raison bornée à 200 caractères, masquée, auteur automatique, cible la session) avec l'événement `ReviewRequested` ; la persistance de fin de tour les inclut. Scenarios : un titre posé par un script apparaît dans l'état et l'événement ; un signalement ajoute l'étiquette ; un secret n'apparaît nulle part.
   [x] Posé à l'implémentation (#7) : `with_session_edits` prend `&mut self` et rend `&mut Self` (chaînable comme `with_native_tool`, sans erreur possible) ; la cellule est vidée après chaque appel d'outil, `rhai_pad` comme tool natif, annulé compris ; le titre est masqué, normalisé puis masqué à nouveau (une coupure ne laisse pas le début d'un secret), la raison est masquée, mise sur une ligne et bornée à 200 caractères ; `ReviewRequested` porte la raison masquée (vide si aucune).
   [x] #8 Troncature de la réponse et jetons de raisonnement (Décision du 2026-11-01 (accord du développeur principal, relevé du spike R2), lot R3) : tests puis implémentation ; variante d'événement `ResponseTruncated` dans ../session/event.sdd.
+  [ ] #10 Porte de tour remplaçable, tests (`agent-sessions/session#FR-17`, `AC-13`, `AC-14`, lot 0.3.0) : écrire les tests des sept Scenarios ci-dessus (porte de l'hôte utilisée, échec `TurnLock`, porte du processus par défaut, perte pendant l'inférence, pendant un script, avant la sauvegarde, sans perte) avec les doubles de ../session/turn_gate.sdd #3 (ou des copies de test) ; les voir échouer pour la bonne raison. Dépend de ../session/turn_gate.sdd #3, ../session/error.sdd et ../session/event.sdd (variante `TurnLeaseLost`).
+  [ ] #11 Porte de tour remplaçable, implémentation (lot 0.3.0) ; dépend de #10 : `TurnConfig::with_turn_lock(Arc<dyn TurnLock>)` (chaînable, défaut : la porte du processus, aujourd'hui la `static GATE` de ./turn.rs, conservée comme défaut) ; `run_turn` demande le permis par `.await` ; le signal @TurnPermit::lost est observé aux trois points du Must (avant la requête, pendant l'inférence et le script, juste avant `save`) comme le handle du tour, sans nouveau mécanisme d'annulation : réutiliser les deux handles par combinaison (un enfant ou une sélection sur les deux futurs) ; en cas de perte, émettre `TurnLeaseLost` puis `TurnEnded`, ne pas appeler `save`, issue `Cancelled` ; rustdoc en anglais de `with_turn_lock`. Les appels de `try_begin` d'ailleurs dans la crate sont migrés si le compilateur les désigne. `scripts/check` complet.

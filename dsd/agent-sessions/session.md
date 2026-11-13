@@ -31,7 +31,8 @@ non-interruption sur le temps.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-2`
 
-- **FR-4 - MUST:** Au plus un tour est actif par session au sein d'un processus.
+- **FR-4 - MUST:** Au plus un tour est actif par session au sein d'un processus. Entre processus, l'exclusion est celle de la
+  porte de tour que l'hôte fournit, le cas échéant (FR-17).
     - **Source:** agent-sessions#NFR-2
 
 - **FR-5 - MUST:** Un tour en cours est annulable par un handle d'annulation rendu à l'hôte au lancement.
@@ -114,6 +115,19 @@ non-interruption sur le temps.
       sortie, échec impossible à diagnostiquer), 2026-11-03 ; relance unique puis échec, user instruction, 2026-11-03
     - **Verified by:** `AC-11`, `AC-12`
 
+- **FR-17 - MUST:** La porte de tour est un trait que l'hôte peut remplacer ; l'implémentation en mémoire, qui garantit un tour
+  actif par session au sein d'un processus, reste le défaut et garde son comportement. Une porte demande un permis par session :
+  la demande est asynchrone, ne bloque pas sur un tour déjà actif (refus immédiat, `TurnActive`) et peut échouer pour une
+  raison propre à l'hôte (erreur typée). Le permis se relâche à sa destruction, y compris sur erreur ou annulation, et porte un
+  signal de perte de bail que seule l'implémentation de l'hôte déclenche. Quand le signal se déclenche pendant un tour, le tour
+  est annulé comme par le handle d'annulation de l'hôte (FR-5), l'issue est `Cancelled`, l'événement `TurnLeaseLost` est
+  émis avant `TurnEnded`, et l'état du tour n'est pas sauvegardé : une autre réplique peut déjà tenir la session, et la reprise
+  est celle de la dernière sauvegarde, comme après un arrêt brutal du processus. Le renouvellement et l'expiration du bail
+  relèvent de l'hôte.
+    - **Source:** `sebt3/lymaille#12` (miryad-core#81) ; forme du trait (acquisition asynchrone et non bloquante) et perte de
+      bail (signal, tour annulé, pas de sauvegarde), user instruction, 2026-11-13 ; agent-sessions#DEC-14
+    - **Verified by:** `AC-13`, `AC-14`
+
 ## Décisions
 
 - **DEC-1 - Collisions d'écriture laissées au stockage**
@@ -123,6 +137,9 @@ non-interruption sur le temps.
     - **Consequences:** le trait est un `load` et un `save` simples, sans jeton de version ; la librairie ne détecte aucun
       conflit entre processus. Avec plusieurs réplicas, deux processus peuvent charger la même session et le dernier
       `save` l'emporte : l'unicité d'une session entre processus est garantie par l'hôte (`agent-sessions#CON-7`).
+    - **Amendé le 2026-11-13 (`agent-sessions#DEC-14`):** la librairie reste sans détection de conflit d'écriture du stockage ;
+      en revanche, l'unicité du tour actif entre processus peut être fournie par une porte de tour partagée que l'hôte branche
+      (FR-17). Un hôte sans porte partagée garde la responsabilité décrite ci-dessus.
     - **Source:** user instruction, 2026-10-24
 
 ## Extension réservée : export de données d'entraînement
@@ -184,6 +201,13 @@ Source: user instruction, 2026-10-24
   raisonnement, le tour échoue sans relance ; l'historique garde le raisonnement partiel marqué tronqué, et la requête suivante
   du modèle (nouveau tour) ne le contient pas.
 
+- **AC-13:** Deux portes de tour partagées (une implémentation de test qui partage son état, simulant deux processus) refusent
+  un second tour actif sur la même session avec `TurnActive`, accordent un permis à une autre session, et accordent de nouveau la
+  session après la destruction du permis ; la porte par défaut garde son comportement (FR-4).
+- **AC-14:** Avec une porte de test dont le permis déclenche son signal de perte pendant un tour (inférence ou script en cours),
+  le tour se termine `Cancelled`, l'événement `TurnLeaseLost` précède `TurnEnded`, aucun appel d'outil n'est laissé sans
+  résultat dans l'historique en mémoire, et le stockage n'a reçu aucune sauvegarde pour ce tour.
+
 ## Réalisation SpecDD
 
 Specs dans `src/session/` (une par fichier source, spec de répertoire `session.sdd` comprise), implémentées (des tâches de durcissement restent listées dans les `Tasks` de certaines specs) :
@@ -199,7 +223,7 @@ Specs dans `src/session/` (une par fichier source, spec de répertoire `session.
 - `store.sdd` : trait de stockage de l'hôte et stockage mémoire (FR-1, DEC-1).
 - `redact.sdd`, `audit.sdd` : masquage des secrets, enregistrements d'audit des scripts et des appels MCP (CON-3).
 - `event.sdd` : événements observables et canal vers l'hôte, dont `TextDelta`, `McpReconnect` et `TargetOpened` (FR-6, BR-5).
-- `cancel.sdd`, `backoff.sdd`, `turn_gate.sdd` : annulation, calendrier des réessais, au plus un tour actif par session (FR-4, FR-5, FR-7, NFR-2).
+- `cancel.sdd`, `backoff.sdd`, `turn_gate.sdd` : annulation, calendrier des réessais, porte de tour remplaçable et son implémentation en mémoire, au plus un tour actif par session (FR-4, FR-5, FR-7, FR-17, NFR-2).
 - `label.sdd`, `signals.sdd` : étiquettes de l'hôte et signaux de qualité par tour et par run (FR-13, DEC-12, DEC-13).
 - `notice.sdd` : messages système signalant au LLM ce qui a changé à la restauration.
 

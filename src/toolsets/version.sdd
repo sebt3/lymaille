@@ -24,10 +24,12 @@ Raises:
 Must:
   `cluster@1.2` est satisfait par 1.2.0 et 1.3.0, pas par 1.1.0 ni 2.0.0 (`agent-sessions/toolsets#AC-7`) ; une version de préversion n'est jamais satisfaisante.
   Une exigence `1.2` vaut `1.2.0`.
+  Sous la feature `ts-rs`, @TypeRequirement dérive `TS` sans changer la sérialisation serde ; la déclaration TypeScript décrit exactement la forme serde (`agent-sessions#NFR-4`).
 
 Depends on:
   ./error.sdd
   vynil-core
+  ts-rs (feature optionnelle `ts-rs`, voir ../../lymaille.sdd)
 
 Scenario: même majeure, mineure supérieure ou égale
   Given l'exigence `cluster@1.2`
@@ -48,3 +50,4 @@ Tasks:
   [x] #1 Tests puis implémentation.
       Validé le 2026-10-29 (validator, mutations manuelles) sous `SKIP=deny scripts/check`.
   [x] #2 `vynil_core::Semver` est réutilisé tel quel : son champ public `version` donne la majeure, la mineure et la préversion sans dépendre de la crate `semver` (constaté dans `vynil-core` 0.9.0).
+  [ ] #3 `ts-rs` (`sebt3/lymaille#10`) : dériver `TS` sous la feature `ts-rs` pour @TypeRequirement. Poser `#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]` sans `#[ts(export)]` (ses tests générés écrivent des fichiers). Un entier 64 bits (`u64`, `NonZeroU64`) se sérialise en nombre JSON : `#[cfg_attr(feature = "ts-rs", ts(type = "number"))]`, jamais `bigint`. Un champ avec `skip_serializing_if` est optionnel dans la déclaration (`ts(optional)`, à vérifier dans la documentation de la version retenue de `ts-rs`). Une version `Semver` (`serde(with = "semver_text")`) se déclare `string` ; une valeur `serde_json::Value` utilise l'implémentation `serde-json-impl`. Aucun test de sérialisation existant ne change ; une erreur de compilation sous la feature est le rouge attendu. Dépend de la tâche « feature `ts-rs` » de /lymaille.sdd (elle ajoute la dépendance optionnelle) ; le contrat est vérifié par ../ts_contract.sdd.

@@ -159,6 +159,13 @@ uniquement) s'appliquent.
     - **Source:** `sebt3/lymaille#4` et `#5` point 3, user instruction, 2026-11-04
     - **Verified by:** `AC-16`
 
+- **FR-22 - SHOULD:** Sous la feature Cargo optionnelle `ts-rs` (hors des features par défaut), les types de définition de ce
+  domaine dérivent `TS` : le toolset (avec ses skills, exigences de type, paramètres et rôles déclarés), le ContextType (avec ses
+  rôles) et le ToolsetContext (avec ses niveaux). La sérialisation serde ne change pas ; la déclaration TypeScript d'un type
+  correspond à sa forme serde. La librairie n'écrit aucun fichier : l'hôte appelle l'export de `ts-rs`.
+    - **Source:** `sebt3/lymaille#10`, 2026-11-13 ; `agent-sessions#NFR-4`
+    - **Verified by:** `AC-17`
+
 ## Questions ouvertes
 
 - **Question (non bloquante):** un nom d'agent par défaut à espace de bord (`ops `) est accepté tel quel par le ContextType (seuls le vide et le blanc sont refusés, FR-21) ; la résolution contre le catalogue échoue alors avec une erreur explicite (agent absent). Faut-il le normaliser ou le refuser plus tôt ? Cas limite relevé à la validation du 2026-11-04, volontairement non traité : aucun hôte ne l'a rencontré (approche XP). À reprendre en issue si un hôte le rencontre ; ne bloque pas la livraison.
@@ -205,6 +212,10 @@ uniquement) s'appliquent.
   catalogue rend l'agent et la nature (celle du type, sinon celle du genre de l'agent) ; elle refuse un agent absent du catalogue, un
   sous-agent et une nature contradictoire avec le genre de l'agent, et ne lit pas le catalogue quand le type ne porte pas d'agent.
 
+- **AC-17:** Avec la feature `ts-rs`, un test de contrat atteste que la déclaration TypeScript de `Toolset`, `Skill`, `TypeRequirement`,
+  `ParamDecl`, `RoleDecl`, `ContextType`, `RoleSpec`, `ToolsetContext` et `ContextLevel` décrit exactement les clés de la sérialisation
+  serde d'une valeur complète et d'une valeur minimale ; la sérialisation est inchangée avec et sans la feature.
+
 ## Réalisation SpecDD
 
 Specs dans `src/toolsets/`, implémentées sauf mention contraire (des tâches de durcissement restent listées dans les `Tasks` de certaines specs) :
@@ -212,7 +223,7 @@ Specs dans `src/toolsets/`, implémentées sauf mention contraire (des tâches d
 - `toolsets.sdd` : spec de répertoire.
 - `version.sdd`, `contract.sdd` : exigences de version et contrat de sortie extrait de l'AST, nature d'un changement (FR-10, FR-13, FR-14).
 - `context_type.sdd`, `toolset_context.sdd` : types de contexte versionnés et inclusion, ToolsetContext sans secret, valeurs résolues (FR-3, FR-4, FR-9, FR-20, FR-21).
-- `skill.sdd`, `toolset.sdd` : skills `SKILL.md` et déclaration d'un toolset (FR-1, FR-7, FR-15).
+- `skill.sdd`, `toolset.sdd` : skills `SKILL.md` et déclaration d'un toolset (FR-1, FR-7, FR-15, FR-22).
 - `template.sdd` : rendu Handlebars du prompt et des skills (FR-6).
 - `store.sdd` : traits de stockage, stockage mémoire, cascade (FR-8, FR-16).
 - `compat.sdd` : compatibilité structurelle, sous-agents retirés signalés par `Delegation`, règle du module de création (FR-4, FR-8, AC-3, AC-4, AC-8).

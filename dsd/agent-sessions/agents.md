@@ -23,8 +23,8 @@ fournit l'abstraction des fournisseurs.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-1`
 
-- **FR-2 - MUST:** Le modèle (désigné par un nom de profil, FR-8) et son paramétrage font partie de la définition
-  d'agent.
+- **FR-2 - MUST:** Le modèle (désigné par un nom de profil facultatif, FR-8 et FR-9) et son paramétrage font partie de la
+  définition d'agent.
     - **Source:** user instruction, 2026-10-24
 
 - **FR-3 - SHOULD:** Une définition d'agent est sérialisable en un format simple et éditable à la main (frontmatter
@@ -62,9 +62,26 @@ et ce que l'agent consomme.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-2`
 
-- **FR-8 - MUST:** Une définition d'agent désigne son modèle par le nom d'un profil de modèle et ne référence jamais
-  un fournisseur directement.
+- **FR-8 - MUST:** Une définition d'agent désigne son modèle, quand elle le fait, par le nom d'un profil de modèle (FR-9) et ne
+  référence jamais un fournisseur directement.
     - **Source:** user instruction, 2026-10-24
+
+- **FR-9 - MUST:** Le nom du profil de modèle d'une définition d'agent est facultatif. Une définition sans profil est valide et
+  se sérialise sans le champ (JSON comme texte à frontmatter) ; une clé absente ou `null` se lit comme l'absence de profil ; une
+  définition qui porte un profil se comporte comme avant, et son empreinte est celle qu'elle avait. Un nom de profil présent mais
+  vide ou blanc reste refusé. La résolution d'un agent sans profil est l'affaire de l'hôte à l'ouverture de session : il fournit le
+  profil par défaut, ou une erreur qui nomme la cause ; la librairie n'appelle jamais la résolution d'un profil avec un nom vide.
+    - **Source:** `sebt3/lymaille#11` (miryad-core#75 : agents par défaut qui suivent un profil par défaut modifiable sans réécrire
+      chaque agent), 2026-11-13 ; forme (`new` sans profil et `with_profile`, champ omis), user instruction, 2026-11-13
+    - **Verified by:** `AC-3`
+
+- **FR-10 - SHOULD:** Sous la feature Cargo optionnelle `ts-rs` (hors des features par défaut), les types de définition de ce
+  domaine dérivent `TS` : la définition d'agent et les types qu'elle sérialise, le profil de modèle et le fournisseur. La
+  sérialisation serde ne change pas ; la déclaration TypeScript d'un type correspond à sa forme serde. La librairie n'écrit aucun
+  fichier : l'hôte appelle l'export de `ts-rs` (`T::export_all_to`).
+    - **Source:** `sebt3/lymaille#10`, 2026-11-13 ; pas de fonction d'export fournie, user instruction, 2026-11-13 ;
+      `agent-sessions#NFR-4`
+    - **Verified by:** `AC-4`
 
 ## Questions ouvertes
 
@@ -85,15 +102,22 @@ et ce que l'agent consomme.
   cours de session.
 - **AC-2:** Un profil qui surcharge la taille de contexte annoncée par le fournisseur est celle qu'utilise le calcul de
   compaction de `agent-sessions/context-window#FR-2`.
+- **AC-3:** Une définition construite sans profil est valide, se sérialise sans clé `profile` (JSON et texte), se relit à l'identique
+  depuis un JSON sans la clé ou avec `profile: null`, et diffère par son empreinte de la même définition avec un profil ; une
+  définition construite avec un profil a le JSON, le texte et l'empreinte qu'elle avait avant ce changement ; un profil vide ou blanc
+  est refusé.
+- **AC-4:** Avec la feature `ts-rs`, un test de contrat atteste que la déclaration TypeScript de `AgentDefinition`, `ModelProfile`
+  et `Provider` (et des types qu'ils contiennent) décrit exactement les clés de la sérialisation serde d'une valeur complète et
+  d'une valeur minimale ; sans la feature, `ts-rs` est absent du graphe de dépendances et la sérialisation est inchangée.
 
 ## Réalisation SpecDD
 
 Specs dans `src/agents/`, implémentées (des tâches de durcissement restent listées dans les `Tasks` de certaines specs) :
 
 - `agents.sdd` : spec de répertoire (définitions, fournisseurs, profils, catalogue, trait d'inférence).
-- `definition.sdd` : définition d'agent de nature `Work`, `Config` ou `Sub`, bac à sable, plafonds, empreinte (FR-1, FR-2, BR-8).
-- `provider.sdd` : fournisseur d'inférence, adresse et authentification par références (FR-6).
-- `profile.sdd` : profil de modèle, surcharge de ce que le fournisseur détecte (FR-7).
+- `definition.sdd` : définition d'agent de nature `Work`, `Config` ou `Sub`, profil facultatif, bac à sable, plafonds, empreinte (FR-1, FR-2, FR-9, FR-10, BR-8).
+- `provider.sdd` : fournisseur d'inférence, adresse et authentification par références (FR-6, FR-10).
+- `profile.sdd` : profil de modèle, surcharge de ce que le fournisseur détecte (FR-7, FR-10).
 - `catalog.sdd` : traits de stockage, stockage mémoire et cascade `Layered` par niveau (FR-5).
 - `inference.sdd` : trait du fournisseur d'inférence, classement des erreurs, streaming de fragments, fournisseur scripté.
 - `error.sdd` : erreur typée du module.

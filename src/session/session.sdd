@@ -12,7 +12,7 @@ Structure:
   ./id.rs: identifiants de session, de tour et de run
   ./backoff.rs: calendrier de réessai
   ./cancel.rs: handle d'annulation
-  ./turn_gate.rs: exclusion d'un tour actif par session
+  ./turn_gate.rs: porte de tour remplaçable par l'hôte et son implémentation en mémoire (un tour actif par session)
   ./redact.rs: masquage des secrets
   ./audit.rs: événements d'audit de script et d'appel MCP
   ./event.rs: événements observables et canal

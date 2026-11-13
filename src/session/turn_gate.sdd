@@ -1,35 +1,51 @@
 Spec: turn_gate
 
 Purpose:
-  Garantir au plus un tour actif par session au sein d'un processus (`agent-sessions#NFR-2`, `agent-sessions/session#FR-4`),
-    sans détecter de conflit entre processus (`agent-sessions/session#DEC-1`).
+  Porte de tour remplaçable : un trait que l'hôte implémente pour garantir au plus un tour actif par session, et son implémentation par défaut en mémoire, qui le garantit au sein d'un processus (`agent-sessions#NFR-2`, `agent-sessions#DEC-14`, `agent-sessions/session#FR-4`, `FR-17`).
+    La librairie ne détecte aucun conflit d'écriture entre processus (`agent-sessions/session#DEC-1`) ; une porte partagée entre processus est du code de l'hôte.
 
 Owns:
   ./turn_gate.rs
 
+Can modify:
+  ./mod.rs et ../lib.rs: le ré-export de @TurnLock, seulement.
+
 Exposes:
+  @TurnLock
   @TurnGate
   @TurnPermit
+  @TurnPermit::new
+  @TurnPermit::session
+  @TurnPermit::lost
 
 Accepts:
-  @TurnGate::try_begin: un @SessionId.
+  @TurnLock::try_begin: un @SessionId ; asynchrone, rend un futur boxé (`Pin<Box<dyn Future<Output = SessionResult<TurnPermit>> + Send>>`) pour que le trait s'utilise en `Arc<dyn TurnLock>`, comme @NativeTool (../session/native_tool.sdd).
+  @TurnGate::try_begin: un @SessionId ; synchrone, comme avant le trait (appel inhérent, sans `.await`).
+  @TurnGate::is_active: un @SessionId.
+  @TurnPermit::new: un @SessionId, une fermeture de relâchement (`FnOnce() + Send + 'static`) et un @CancelHandle, le signal de perte de bail ; construit par l'implémentation d'une porte, hôte compris.
 
 Returns:
-  @TurnGate::try_begin: un @TurnPermit si aucun tour n'est actif pour cette session.
+  @TurnLock::try_begin, @TurnGate::try_begin: un @TurnPermit si aucun tour n'est actif pour cette session.
+  @TurnPermit::session: l'identifiant de la session du permis.
+  @TurnPermit::lost: le @CancelHandle de perte de bail du permis (un clone partage l'état).
 
 Raises:
   @SessionError::TurnActive: un tour est déjà actif pour cette session.
-  @SessionError::Poisoned: le verrou interne est empoisonné.
+  @SessionError::Poisoned: le verrou interne de @TurnGate est empoisonné.
+  @SessionError::TurnLock: la porte de l'hôte échoue pour une raison qui lui est propre.
 
 Must:
-  @TurnGate est partageable entre threads (clonable, état commun) ; des sessions différentes ne s'excluent pas.
-  Le @TurnPermit libère la session quand il est détruit, y compris à la suite d'une erreur ou d'une annulation.
-  @TurnGate::is_active dit si une session a un tour actif.
-  Aucune attente : un refus est immédiat.
+  @TurnLock est `Send + Sync` et s'utilise en `Arc<dyn TurnLock>`.
+  @TurnLock::try_begin ne bloque pas sur un tour déjà actif : le refus `TurnActive` est immédiat, qu'il vienne de @TurnGate ou d'une porte de l'hôte. Une porte de l'hôte rend `TurnLock` pour un échec qui lui est propre.
+  @TurnGate implémente @TurnLock et garde son comportement : partageable entre threads (clonable, état commun), des sessions différentes ne s'excluent pas, @TurnGate::is_active dit si une session a un tour actif, et un verrou empoisonné est récupéré par `is_active` et par la libération (seul `try_begin` rend `Poisoned`).
+  @TurnPermit appelle sa fermeture de relâchement exactement une fois, à sa destruction, y compris à la suite d'une erreur ou d'une annulation. La fermeture ne bloque pas : une porte qui relâche par le réseau y lance une tâche, ou laisse le bail expirer.
+  Le signal de perte (@TurnPermit::lost) n'est déclenché que par l'implémentation de la porte : @TurnGate ne le déclenche jamais, et la librairie ne le déclenche ni ne le renouvelle. Le bail, sa durée et son renouvellement relèvent de l'hôte.
+  La librairie ne porte aucun état de bail et n'écrit aucun stockage : le trait n'impose à l'hôte que d'accorder, refuser ou perdre un permis.
 
 Depends on:
   ./id.sdd
   ./error.sdd
+  ./cancel.sdd
 
 Scenario: un second tour est refusé
   Given un permis détenu pour la session `s1`
@@ -51,6 +67,38 @@ Scenario: tentatives concurrentes
   When ils s'exécutent tous
   Then exactement un obtient un permis
 
+Scenario: la porte en mémoire s'utilise derrière le trait
+  Given un @TurnGate placé dans un `Arc<dyn TurnLock>`
+  When try_begin est attendu deux fois pour la même session
+  Then le premier rend un permis et le second échoue avec TurnActive, sans attente
+
+Scenario: deux portes partagées refusent un second tour entre elles
+  Given deux portes de test qui partagent le même état (deux « processus »), implémentant @TurnLock
+  When la première accorde `s1` puis la seconde est interrogée pour `s1` et pour `s2`
+  Then la seconde refuse `s1` avec TurnActive et accorde `s2` ; après la destruction du permis de la première, la seconde accorde `s1`
+
+Scenario: la fermeture de relâchement est appelée une fois
+  Given un permis construit par @TurnPermit::new avec une fermeture qui compte ses appels
+  When le permis est détruit, y compris après une panique d'un autre thread du test
+  Then la fermeture a été appelée exactement une fois
+
+Scenario: le signal de perte est observable et partagé
+  Given un permis dont le signal de perte est tenu par l'implémentation de test
+  When l'implémentation annule son signal
+  Then @TurnPermit::lost rend un handle annulé, ses clones aussi, et le permis n'est pas libéré pour autant
+
+Scenario: la porte en mémoire ne déclenche jamais la perte
+  Given un permis de @TurnGate pris, gardé, puis détruit
+  When le signal de perte est lu à chaque étape
+  Then il n'est jamais annulé
+
+Scenario: l'échec d'une porte de l'hôte est une erreur typée
+  Given une porte de test qui échoue avec @SessionError::TurnLock
+  When try_begin est attendu
+  Then l'erreur est rendue telle quelle, sans permis
+
 Tasks:
+  [ ] #3 Porte de tour remplaçable (`agent-sessions/session#FR-17`, `AC-13`, `agent-sessions#DEC-14`, `sebt3/lymaille#12`), tests puis implémentation : trait @TurnLock (async par futur boxé, `Send + Sync`, objet-sûr) ; @TurnGate l'implémente et garde son appel inhérent synchrone `try_begin` et `is_active` (le comportement et les tests existants ne changent pas) ; @TurnPermit devient un permis à fermeture de relâchement (`Option<Box<dyn FnOnce() + Send>>` appelée une fois dans `Drop`) avec @TurnPermit::new, @TurnPermit::session et @TurnPermit::lost ; `Debug` manuel du permis (une fermeture n'est pas `Debug`) qui n'affiche que l'identifiant de session ; le ré-export de @TurnLock dans ./mod.rs et ../lib.rs ; rustdoc en anglais. Les doubles de test des Scenarios (deux portes partagées, signal de perte, échec de l'hôte) vivent dans le module de test du fichier. Dépend de ./error.sdd #6 (variante `TurnLock`) et de ./cancel.sdd (livré) ; précède ../runtime/turn.sdd #10 et #11.
+  [ ] #4 Le défaut garde son comportement (`agent-sessions/session#FR-17`, `AC-13`) : les quatre Scenarios d'origine passent inchangés, `scripts/check` complet vert, et les mutants de ce fichier (`scripts/mutants`, périmètre ./turn_gate.rs) sont tués ; à lancer après #3, sans écrire de code produit.
   [x] #1 Tests puis implémentation.
   [x] #2 `is_active` et la libération au `drop` récupèrent un verrou empoisonné au lieu d'échouer (seul `try_begin` rend `Poisoned`) : confirmé le 2026-10-27.

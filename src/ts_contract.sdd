@@ -1,0 +1,69 @@
+Spec: ts_contract
+
+Platform: Rust/ts-rs
+
+Purpose:
+  Test de contrat des déclarations TypeScript : pour chaque type de définition racine, la déclaration que produit `ts-rs` décrit les mêmes clés et les mêmes formes de valeur que la sérialisation serde (`agent-sessions#NFR-4`, `agent-sessions/agents#FR-10`, `agent-sessions/toolsets#FR-22`, `sebt3/lymaille#10`).
+    Module de test seulement, compilé sous `cfg(all(test, feature = "ts-rs"))` : il n'expose rien et ne produit aucun fichier.
+
+Owns:
+  ./ts_contract.rs
+
+Can modify:
+  ./lib.rs: la seule déclaration `#[cfg(all(test, feature = "ts-rs"))] mod ts_contract;`, sans autre changement.
+
+References:
+  ../lymaille.sdd
+  ../dsd/agent-sessions/agents.md
+  ../dsd/agent-sessions/toolsets.md
+  ./lib.sdd
+  ./agents/definition.sdd
+  ./agents/profile.sdd
+  ./agents/provider.sdd
+  ./session/replay_mode.sdd
+  ./session/state.sdd
+  ./toolsets/toolset.sdd
+  ./toolsets/skill.sdd
+  ./toolsets/version.sdd
+  ./toolsets/toolset_context.sdd
+  ./toolsets/context_type.sdd
+
+Must:
+  Couvrir les six types racines @AgentDefinition, @ModelProfile, @Provider, @Toolset, @ContextType et @ToolsetContext, chacun par une valeur complète (tout champ optionnel et toute collection renseignés, les types imbriqués @Skill, @TypeRequirement, @ParamDecl, @RoleDecl, @RoleSpec, @ContextLevel, @SamplingParams, @ReplayMode, @AgentKind, @SandboxLimits, @ProviderLevel et @SessionKind atteints au moins une fois) et par une valeur minimale (aucun champ optionnel).
+  Pour chaque valeur, l'ensemble des clés de chaque objet de la déclaration est exactement celui du JSON de la valeur ; une clé que serde omet (`skip_serializing_if`) est optionnelle dans la déclaration (`?`) ; une clé que serde écrit toujours, `null` compris, figure dans la déclaration, dont le type accepte `null` quand la valeur peut l'être.
+  Les entiers 64 bits se déclarent `number` (forme JSON), jamais `bigint` ; une version se déclare `string` ; une énumération se déclare par les valeurs de sa forme serde (`snake_case`), sans l'alias de lecture (`project`, `main`).
+  Les champs `serde(skip)` (détecteur de secrets, schéma compilé) n'apparaissent dans aucune déclaration.
+  Ne produire aucun fichier : aucun `#[ts(export)]`, aucun `export_to`, aucun répertoire de sortie ; la déclaration se lit en mémoire (`T::decl()` ou `T::inline()` de `ts-rs`).
+  Ne compiler que sous la feature `ts-rs` : sans elle, le module n'existe pas et `ts-rs` n'est pas dans le graphe.
+
+Depends on:
+  ts-rs (feature optionnelle `ts-rs`, voir ../lymaille.sdd)
+  serde_json
+
+Scenario: les clés d'une valeur complète sont exactement celles de la déclaration
+  Given une valeur complète de chacun des six types racines
+  When son JSON est comparé à la déclaration TypeScript du type
+  Then chaque objet porte les mêmes clés dans les deux
+
+Scenario: une valeur minimale omet exactement les clés optionnelles
+  Given une valeur minimale de chacun des six types racines
+  When son JSON est comparé à la déclaration
+  Then les clés absentes du JSON sont celles que la déclaration marque optionnelles, et rien d'autre
+
+Scenario: les entiers 64 bits sont des nombres
+  Given un profil de modèle dont `context_size` vaut 262144 et une définition dont un plafond de sandbox vaut 1000
+  When la déclaration de chaque type est lue
+  Then ces champs sont déclarés `number`, et aucune déclaration ne contient `bigint`
+
+Scenario: une énumération se déclare par ses valeurs serde
+  Given @ContextLevel, @ProviderLevel, @AgentKind et @ReplayMode
+  When leur déclaration est lue
+  Then elle liste les valeurs écrites par serde en `snake_case`, sans `project` ni `main`
+
+Scenario: aucun champ de service dans une déclaration
+  Given @Toolset, @ToolsetContext et @ContextType
+  When leur déclaration est lue
+  Then elle ne contient ni détecteur de secrets ni schéma compilé
+
+Tasks:
+  [ ] #1 Test de contrat (`agent-sessions/agents#AC-4`, `agent-sessions/toolsets#AC-17`, `sebt3/lymaille#10`) : créer ./ts_contract.rs avec les tests des cinq Scenarios, déclarer le module dans ./lib.rs sous `#[cfg(all(test, feature = "ts-rs"))]`. Écrire les tests en premier : tant que les dérives `TS` des specs enfants ne sont pas posées (tâches `ts-rs` de ./agents/*.sdd, ./session/replay_mode.sdd, ./session/state.sdd et ./toolsets/*.sdd), la compilation échoue sous la feature, ce qui est le rouge attendu ; une fois les dérives posées, les tests se lisent comme le contrat qui oblige leurs attributs (`ts(optional)`, `ts(type = "number")`, `ts(type = "string")`). Dépend de la tâche « feature `ts-rs` » de ../lymaille.sdd ; à finir en dernier des tâches `ts-rs`. Les valeurs complètes et minimales se construisent par les constructeurs publics (les types sont `#[non_exhaustive]`, leurs champs privés) ; le test est dans la crate. Lancer aussi `scripts/check` complet, qui passe `--all-features` à clippy et aux tests, et `cargo hack --each-feature`.

@@ -19,6 +19,7 @@ References:
   ./runtime/runtime.sdd
   ./delegation/delegation.sdd
   ./tools/tools.sdd
+  ./ts_contract.sdd
 
 Must:
   Déclarer chaque module de ./, de ./session, de ./context, de ./agents, de ./scratchpad, de ./toolsets, de ./modules et de ./tools et ré-exporter à la racine les types publics qu'une spec enfant déclare
@@ -27,6 +28,7 @@ Must:
   Ne contenir ni fonction ni type : tout comportement vit dans un fichier à spec propre.
   Décision du 2026-10-27 (développeur principal) : le type d'erreur du scratchpad se nomme `ScriptErrorClass` et est réexporté
     sous ce nom, sans alias ; `ErrorClass` à la racine reste celui d'`agents`, inchangé.
+  Déclarer le module de test `ts_contract` sous `#[cfg(all(test, feature = "ts-rs"))]` (./ts_contract.sdd) ; ce module ne se ré-exporte pas.
 
 Tasks:
   [x] #1 Ajouter les déclarations `mod` et les `pub use` au fil des specs enfants livrées.

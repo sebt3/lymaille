@@ -36,7 +36,7 @@ References:
 Must:
   Ne réaliser aucune E/S : détection de modèles, appels d'inférence et stockage sont des traits ou des données (`agent-sessions#CON-1`).
   Ne jamais contenir de secret : un fournisseur ne porte que des références nommées que l'hôte résout (`agent-sessions#CON-3`).
-  Une définition d'agent désigne son modèle par le nom d'un profil et ne référence jamais un fournisseur (`agents#FR-8`).
+  Une définition d'agent désigne son modèle, quand elle le fait, par le nom d'un profil facultatif (`agents#FR-9`) et ne référence jamais un fournisseur (`agents#FR-8`).
   Déclarer chaque sous-module et ré-exporter ce que les specs enfants exposent ; mod.rs ne contient aucun comportement.
 
 Tasks:

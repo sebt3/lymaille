@@ -38,12 +38,14 @@ Must:
   @ResolvedContext est une copie indépendante : en modifier une valeur n'affecte pas le contexte.
   Se sérialise et se désérialise à l'identique ; les tables sont ordonnées.
   @ContextLevel se sérialise en `user`, `shared` et `session` ; l'ancien nom `project` de la 0.1 (`Project`, renommé `Shared` en 0.2.0 : `sebt3/lymaille#5`) est encore accepté à la désérialisation, lu comme `Shared` et jamais écrit. La variante `Project` n'existe plus. Le niveau d'un contexte n'entre ni dans sa clé de stockage ni dans la résolution des valeurs.
+  Sous la feature `ts-rs`, @ToolsetContext et @ContextLevel dérivent `TS` sans changer la sérialisation serde ; la déclaration TypeScript décrit exactement la forme serde (`agent-sessions#NFR-4`).
 
 Depends on:
   ./error.sdd
   ../secret.sdd
   serde
   serde_json
+  ts-rs (feature optionnelle `ts-rs`, voir ../../lymaille.sdd)
 
 Can modify:
   ./native.rs, ./template.rs, ./config.rs, ./compat.rs, ./store.rs, ./context_type.rs, ./assemble.rs et ../tools/inspect.rs: seulement les occurrences de `ContextLevel::Project` de leurs tests et de leur rustdoc, qui deviennent `ContextLevel::Shared` (renommage mécanique, aucun autre changement de comportement), avec leurs specs respectives.
@@ -89,3 +91,4 @@ Tasks:
       Décision modifiée : la détection de secret passe par un trait remplaçable par l'hôte, avec l'heuristique de `provider.sdd` comme implémentation par défaut ; la librairie ne l'impose pas à l'hôte. À spécifier et implémenter ; le même trait sert `provider.sdd`. (accord du développeur principal, 2026-10-31).
       Extraite (toolsets#6) : la détection vit dans `../secret.rs` (`looks_like_secret`, `pub(crate)`), appelée ici et par `../agents/provider.rs`.
   [x] #P5 @ToolsetContext::with_secret_detector et @ToolsetContext::check (lot P5, 2026-10-31) : la désérialisation applique @DefaultSecretDetector.
+  [ ] #8 `ts-rs` (`sebt3/lymaille#10`) : dériver `TS` sous la feature `ts-rs` pour @ToolsetContext et @ContextLevel. Le détecteur (`serde(skip)`) n'apparaît pas ; `ContextLevel` se déclare par les valeurs `user`, `shared`, `session` (l'alias de lecture `project` n'en est pas une). Poser `#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]` sans `#[ts(export)]` (ses tests générés écrivent des fichiers). Un entier 64 bits (`u64`, `NonZeroU64`) se sérialise en nombre JSON : `#[cfg_attr(feature = "ts-rs", ts(type = "number"))]`, jamais `bigint`. Un champ avec `skip_serializing_if` est optionnel dans la déclaration (`ts(optional)`, à vérifier dans la documentation de la version retenue de `ts-rs`). Une version `Semver` (`serde(with = "semver_text")`) se déclare `string` ; une valeur `serde_json::Value` utilise l'implémentation `serde-json-impl`. Aucun test de sérialisation existant ne change ; une erreur de compilation sous la feature est le rouge attendu. Dépend de la tâche « feature `ts-rs` » de /lymaille.sdd (elle ajoute la dépendance optionnelle) ; le contrat est vérifié par ../ts_contract.sdd.

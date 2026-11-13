@@ -16,6 +16,8 @@ Lot 0.2.0 (2026-11-03) : cinq issues des hôtes (vanyline, miryad-core, `sebt3/l
 
 Avancement au 2026-11-04 : le lot 0.2.0 est livré. Les cinq issues `sebt3/lymaille#1` à `#5` sont réalisées par des specs `.sdd` implémentées et validées : réponse vide et raisonnement conservé (`session`, `context-window`), ligne d'usage des fonctions MCP (`modules`, `scratchpad`), identifiants de ContextType (`toolsets` FR-20), niveau `Shared` des fournisseurs, profils, ToolsetContext et de la Memory (rupture d'API, sans alias), et ContextType qui porte l'agent par défaut et la nature de session avec l'aide `resolve_start` (`toolsets` FR-21). Reste, hors blocage : la version 0.2.0 du crate à publier, et une question ouverte non bloquante sur le nom d'agent à espace de bord (`toolsets`, Questions ouvertes).
 
+Lot 0.3.0 (2026-11-13) : trois issues d'un hôte (miryad-core, `sebt3/lymaille#10` à `#12`) sont traduites en exigences : le profil de modèle d'une définition d'agent devient facultatif (`agents` FR-9), les types de définition dérivent TypeScript derrière une feature optionnelle (`NFR-4`, `agents` FR-10, `toolsets` FR-22), et la porte de tour devient remplaçable par l'hôte pour étendre l'exclusion d'un tour par session à plusieurs processus (`DEC-14`, `session` FR-17). Les specs portent les tâches correspondantes ; rien n'est encore implémenté.
+
 ## Objectif et problème
 
 Les solutions d'agent usuelles chargent des dizaines de milliers de tokens de définitions d'outils au démarrage, perdent
@@ -219,8 +221,10 @@ Le mot « contexte » n'apparaît jamais seul dans les documents de ce domaine :
     - **Source:** user instruction, 2026-10-24
 
 - **NFR-2 - MUST:** Plusieurs sessions s'exécutent concurremment dans un même processus, avec au plus un tour actif par
-  session.
-    - **Source:** user instruction, 2026-10-24 (« si on fait de l'async, les store doivent être sous mutex »)
+  session. La librairie le garantit au sein d'un processus ; entre processus, l'exclusion est celle d'une porte de tour que
+  l'hôte fournit (`DEC-14`).
+    - **Source:** user instruction, 2026-10-24 (« si on fait de l'async, les store doivent être sous mutex ») ; extension entre
+      processus : `sebt3/lymaille#12`, 2026-11-13
 
 - **NFR-3 - MUST:** Le code passe sans exception injustifiée le harnais de qualité, point d'entrée `scripts/check` : formatage,
   clippy avec les groupes `all`, `pedantic`, `nursery` et `cargo` et une sélection de lints `restriction`, tous en `deny`,
@@ -229,6 +233,13 @@ Le mot « contexte » n'apparaît jamais seul dans les documents de ce domaine :
   `#[expect]` avec une raison.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-10`
+
+- **NFR-4 - SHOULD:** Un hôte qui expose les définitions de la librairie à une interface TypeScript peut en obtenir les types
+  sans les réécrire : une feature Cargo optionnelle, hors des features par défaut, fait dériver TypeScript aux types de
+  définition (agents, fournisseurs, profils, toolsets, types de contexte, contextes de toolset) sans changer leur
+  sérialisation. Sans la feature, la dépendance n'est pas dans le graphe de la crate.
+    - **Source:** `sebt3/lymaille#10` (consommateur : miryad-core#72), 2026-11-13
+    - **Verified by:** `agent-sessions/agents#AC-4`, `agent-sessions/toolsets#AC-17`
 
 - **CON-1:** La librairie est pure : elle n'effectue aucune E/S de stockage persistant et définit des traits que l'hôte
   implémente (session, Memory, ToolsetContext, définitions d'agents et de projets, toolsets, skills). Elle possède en
@@ -270,11 +281,12 @@ Le mot « contexte » n'apparaît jamais seul dans les documents de ce domaine :
   explicite.
     - **Source:** user instruction, 2026-10-24 ; pont de référence : vynil-core `src/rt.sdd`
 
-- **CON-7:** L'hôte garantit qu'une session n'est active que dans un seul processus à la fois ; la librairie garantit un
-  seul tour actif par session au sein d'un processus (NFR-2) et ne détecte aucun conflit entre processus. L'agent Matrix y
-  satisfait par l'unicité que Matrix fournit et que miryad-core implémente ; vanyline doit traiter ce point de son côté
-  (voir `session`, DEC-1).
-    - **Source:** user instruction, 2026-10-24
+- **CON-7:** L'hôte garantit qu'une session n'est active que dans un seul processus à la fois, ou fournit une porte de tour
+  partagée qui le garantit à sa place (`DEC-14`). Par défaut la librairie garantit un seul tour actif par session au sein d'un
+  processus (NFR-2) et ne détecte aucun conflit entre processus ; elle ne détecte pas davantage les écritures concurrentes du
+  stockage (`session`, DEC-1). L'agent Matrix y satisfait par l'unicité que Matrix fournit et que miryad-core implémente ;
+  vanyline doit traiter ce point de son côté.
+    - **Source:** user instruction, 2026-10-24 ; porte partagée : `sebt3/lymaille#12`, 2026-11-13
 
 - **CON-8:** La librairie est publiée sous licence BSD-3-Clause, comme `vynil-core`.
     - **Source:** user instruction, 2026-10-24
@@ -415,6 +427,24 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
       les signaux automatiques ne donnent pas. Aucun outil de rapport n'est exigé avant qu'un volume de sessions le
       justifie : une requête au stockage suffit les premiers mois.
     - **Source:** user instruction, 2026-10-26
+
+- **DEC-14 - Exclusion de tour remplaçable par l'hôte**
+    - **Context:** un hôte veut plusieurs répliques de son application (`sebt3/lymaille#12`, miryad-core#81). L'exclusion
+      d'un tour par session de la librairie ne vaut que dans un processus : deux répliques peuvent ouvrir deux tours
+      simultanés sur la même session, et le dernier `save` l'emporte (`session` DEC-1).
+    - **Decision:** la porte de tour est un trait que l'hôte peut remplacer. L'implémentation en mémoire reste le défaut et
+      garde son comportement. L'hôte fournit une porte partagée (verrou consultatif PostgreSQL, objet virtuel Restate) qui rend
+      un permis par session, relâché à la fin du tour ou à la perte du processus. Le permis porte un signal de perte de bail :
+      quand l'implémentation de l'hôte le déclenche, le tour est annulé comme une annulation normale et l'état n'est pas
+      sauvegardé, puisqu'une autre réplique peut déjà tenir la session. Le renouvellement et l'expiration du bail restent chez
+      l'hôte.
+    - **Alternatives:** une exclusion entre processus écrite par la librairie, écartée (elle écrirait dans un stockage, contre
+      `CON-1`, et choisirait un système de verrou pour tous les hôtes) ; l'unicité de la session garantie par l'hôte en amont
+      (routage), maintenue comme défaut par `CON-7`.
+    - **Consequences:** `NFR-2` et `CON-7` s'étendent entre processus quand l'hôte fournit la porte ; l'appel d'ouverture de tour
+      devient asynchrone pour la porte remplaçable ; la perte d'un bail pendant un tour se signale par un événement, l'issue du
+      tour étant `Cancelled`. La détection des écritures concurrentes du stockage reste hors de la librairie (`session`, DEC-1).
+    - **Source:** `sebt3/lymaille#12`, 2026-11-13 ; forme du trait et comportement à la perte du bail : user instruction, 2026-11-13
 
 ## Risques
 

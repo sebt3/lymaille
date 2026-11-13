@@ -57,6 +57,7 @@ Must:
   La borne de taille est de 64 Kio (65 536 octets) sur la forme sérialisée du schéma (`SCHEMA_MAX_BYTES`, décision du 2026-10-31, D-b) : au-delà, le type est refusé avec une raison fixe qui ne cite pas le schéma. Un schéma exactement à la borne est accepté.
   Le schéma est compilé une seule fois, à la construction du type (@ContextType::new, que la désérialisation emprunte aussi) ; le validateur compilé est conservé par le type et repris par @ContextType::flatten, sans recompilation à la vérification (décision du 2026-10-31, D-b).
   Limite connue, décidée le 2026-10-31 et non corrigée : toute clé d'un objet nommé `properties` compte comme nom déclaré, y compris sous `enum`, `const` ou `default` où elle est une valeur. Un tel nom peut alors être rendu à la place de `*` ; une valeur n'est jamais rendue.
+  Sous la feature `ts-rs`, @ContextType et @RoleSpec dérivent `TS` sans changer la sérialisation serde ; la déclaration TypeScript décrit exactement la forme serde (`agent-sessions#NFR-4`).
 
 Depends on:
   ./error.sdd
@@ -66,6 +67,7 @@ Depends on:
   serde
   serde_json
   vynil-core
+  ts-rs (feature optionnelle `ts-rs`, voir ../../lymaille.sdd)
 
 Scenario: un nom à préfixe réservé est accepté
   Given les noms `G_cluster-2`, `cluster`, `A`, `x_y` et `K8s-prod`
@@ -194,3 +196,4 @@ Tasks:
   [x] #2 Révisé pour la validation complète, décision du 2026-10-30 (voir ./toolsets.sdd #3) : un schéma de paramètres est compilé à la construction (refus si la compilation échoue, `$ref` distant compris) et conservé tel quel ; la vérification structurelle ne s'arrête plus à `required` et `properties` : chaque valeur présente est validée contre le schéma du type et des types inclus (voir Must). Livré le 2026-10-31 (correctif 2 et limite connue) : tests écrits, vus rouges avant la correction pour la borne de 64 Kio ; en attente de validation par le validateur.
   [x] #4 Correctif du 2026-10-31 (validation indépendante, décision D-b) : schéma compilé une seule fois (le validateur est conservé par le type et par @FlatContextType), borne de 64 Kio, `violations` sans erreur, limite de `collect_declared` documentée. Scenarios « schéma … 64 Kio » ci-dessus, tests vus rouges avant correction pour la borne ; la mise en cache n'a pas de comportement observable (pas de test rouge possible, couverte par la batterie existante). En attente de validation par le validateur.
   [x] #P5 @ContextType::new_with_detector (lot P5, 2026-10-31).
+  [ ] #5 `ts-rs` (`sebt3/lymaille#10`) : dériver `TS` sous la feature `ts-rs` pour @ContextType et @RoleSpec. Le schéma compilé (`serde(skip)`) n'apparaît pas ; `default_agent` et `session_kind` sont optionnels (`skip_serializing_if`). Poser `#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]` sans `#[ts(export)]` (ses tests générés écrivent des fichiers). Un entier 64 bits (`u64`, `NonZeroU64`) se sérialise en nombre JSON : `#[cfg_attr(feature = "ts-rs", ts(type = "number"))]`, jamais `bigint`. Un champ avec `skip_serializing_if` est optionnel dans la déclaration (`ts(optional)`, à vérifier dans la documentation de la version retenue de `ts-rs`). Une version `Semver` (`serde(with = "semver_text")`) se déclare `string` ; une valeur `serde_json::Value` utilise l'implémentation `serde-json-impl`. Aucun test de sérialisation existant ne change ; une erreur de compilation sous la feature est le rouge attendu. Dépend de la tâche « feature `ts-rs` » de /lymaille.sdd (elle ajoute la dépendance optionnelle) ; le contrat est vérifié par ../ts_contract.sdd.
