@@ -60,4 +60,4 @@ Tasks:
       dans le module `agents`, pas ici : confirmer.
       Validé le 2026-10-29 par le développeur principal.
   [x] #5 Variante `InvalidNativeTool { name }` et son test de `Display` (décision du 2026-10-31, lot P1) ; le texte ne reprend aucune valeur de session.
-  [ ] #6 Variante @SessionError::TurnLock(String) (`agent-sessions/session#FR-17`, lot 0.3.0) : tests du texte `Display` (`turn lock failed: <message>`) puis la variante, rustdoc en anglais, comme `Store`. Aucun autre changement de l'énumération ; ses `match` exhaustifs éventuels traitent la variante. Précède ./turn_gate.sdd #3.
+  [x] #6 Variante @SessionError::TurnLock(String) (`agent-sessions/session#FR-17`, lot 0.3.0) : tests du texte `Display` (`turn lock failed: <message>`) puis la variante, rustdoc en anglais, comme `Store`. Aucun autre changement de l'énumération ; ses `match` exhaustifs éventuels traitent la variante. Précède ./turn_gate.sdd #3.

@@ -23,6 +23,10 @@ pub enum SessionError {
     /// A turn is already active for the session.
     #[error("a turn is already active for session {0}")]
     TurnActive(SessionId),
+    /// The turn lock provided by the host failed for a reason of its own, other than a turn already being active. The
+    /// message is produced by the caller and carries no secret.
+    #[error("turn lock failed: {0}")]
+    TurnLock(String),
     /// A user message cannot be inserted between a tool call and its result.
     #[error("a user message cannot be inserted between a tool call and its result")]
     PendingToolCall,
@@ -86,6 +90,10 @@ mod tests {
             (
                 SessionError::TurnActive(session.clone()),
                 "a turn is already active for session s-1",
+            ),
+            (
+                SessionError::TurnLock("the test gate lost its lease".to_owned()),
+                "turn lock failed: the test gate lost its lease",
             ),
             (
                 SessionError::PendingToolCall,
