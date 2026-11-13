@@ -1,0 +1,7 @@
+# Exceptions de `cargo audit` (workflow audit.yml). Miroir des `ignore` de deny.toml : les deux outils doivent s'accorder.
+# Une advisory corrigeable par `cargo update` n'entre jamais ici.
+[advisories]
+ignore = [
+  # smartstring is unmaintained; pulled by rhai 1.27.0, no alternative short of replacing rhai (lymaille.sdd #1)
+  "RUSTSEC-2026-0249",
+]
