@@ -501,19 +501,13 @@ mod tests {
             "main".to_owned(),
             AgentKind::Work,
             "You are the main agent.".to_owned(),
-            "strix-qwen".to_owned(),
         )
         .with_delegable(delegable)
     }
 
     fn sub_agent(id: &str, toolsets: Vec<String>) -> AgentDefinition {
-        AgentDefinition::new(
-            id.to_owned(),
-            AgentKind::Sub,
-            "You are a sub-agent.".to_owned(),
-            "strix-qwen".to_owned(),
-        )
-        .with_toolsets(toolsets)
+        AgentDefinition::new(id.to_owned(), AgentKind::Sub, "You are a sub-agent.".to_owned())
+            .with_toolsets(toolsets)
     }
 
     // Scenario: un sous-agent retiré est signalé avec sa raison
@@ -729,7 +723,6 @@ mod tests {
             "author".to_owned(),
             AgentKind::Sub,
             "You write toolsets.".to_owned(),
-            "strix-qwen".to_owned(),
         )
         .with_modules(vec![CREATION_MODULE.to_owned()]);
         let result = check_creation_rule(&sub, &[], CREATION_MODULE);
@@ -779,7 +772,6 @@ mod tests {
             "setup".to_owned(),
             AgentKind::Config,
             "You create toolsets.".to_owned(),
-            "strix-qwen".to_owned(),
         )
         .with_modules(vec![CREATION_MODULE.to_owned()]);
         assert!(
@@ -816,13 +808,8 @@ mod tests {
             check_session_module_rule(&work, &[], "session").is_ok(),
             "a work agent may hold the session module"
         );
-        let config = AgentDefinition::new(
-            "setup".to_owned(),
-            AgentKind::Config,
-            "You configure.".to_owned(),
-            "strix-qwen".to_owned(),
-        )
-        .with_modules(vec!["session".to_owned()]);
+        let config = AgentDefinition::new("setup".to_owned(), AgentKind::Config, "You configure.".to_owned())
+            .with_modules(vec!["session".to_owned()]);
         assert!(
             check_session_module_rule(&config, &[], "session").is_ok(),
             "a configuration agent may hold the session module"

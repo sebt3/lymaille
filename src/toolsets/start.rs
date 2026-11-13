@@ -161,12 +161,7 @@ mod tests {
     }
 
     fn agent(id: &str, kind: AgentKind) -> AgentDefinition {
-        AgentDefinition::new(
-            id.to_owned(),
-            kind,
-            "You are the assistant.".to_owned(),
-            "strix-qwen".to_owned(),
-        )
+        AgentDefinition::new(id.to_owned(), kind, "You are the assistant.".to_owned())
     }
 
     // Scenario: un type sans agent par défaut ne lit pas le catalogue

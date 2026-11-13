@@ -387,13 +387,8 @@ mod tests {
             .toolsets()
             .activate("ops")
             .expect("the toolset is activated");
-        let agent = AgentDefinition::new(
-            "cfg".to_owned(),
-            AgentKind::Work,
-            "You configure.".to_owned(),
-            "strix-qwen".to_owned(),
-        )
-        .with_toolsets(vec!["ops".to_owned()]);
+        let agent = AgentDefinition::new("cfg".to_owned(), AgentKind::Work, "You configure.".to_owned())
+            .with_toolsets(vec!["ops".to_owned()]);
         stores
             .agents()
             .put_agent(&agent)

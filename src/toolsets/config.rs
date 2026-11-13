@@ -1142,13 +1142,8 @@ mod tests {
 
     /// A work agent that lists the toolsets `toolsets`.
     fn work_agent(id: &str, toolsets: &[&str]) -> AgentDefinition {
-        AgentDefinition::new(
-            id.to_owned(),
-            AgentKind::Work,
-            "You are a work agent.".to_owned(),
-            "strix-qwen".to_owned(),
-        )
-        .with_toolsets(toolsets.iter().map(|name| (*name).to_owned()).collect())
+        AgentDefinition::new(id.to_owned(), AgentKind::Work, "You are a work agent.".to_owned())
+            .with_toolsets(toolsets.iter().map(|name| (*name).to_owned()).collect())
     }
 
     /// The `cluster` type of version 1.0.0: the parameter `namespace` and the role `k8s`, both required.

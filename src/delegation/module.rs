@@ -347,7 +347,7 @@ mod tests {
     }
 
     fn definition(id: &str, kind: AgentKind) -> AgentDefinition {
-        AgentDefinition::new(id.to_owned(), kind, "prompt".to_owned(), "profile".to_owned())
+        AgentDefinition::new(id.to_owned(), kind, "prompt".to_owned())
     }
 
     /// The proof of a work agent that may delegate to the given sub-agents.

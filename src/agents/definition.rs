@@ -1,6 +1,7 @@
-//! Agent definition, work, configuration or sub-agent: identifier, kind, templated system prompt, model profile name and parameters,
-//! reachable modules and toolsets, sandbox limits, context strategy, delegable sub-agents or output schema, and its
-//! fingerprint (`agent-sessions/agents#FR-1`, `FR-2`, `FR-8`, `agent-sessions/session#FR-2`). The definition carries no
+//! Agent definition, work, configuration or sub-agent: identifier, kind, templated system prompt, optional model
+//! profile name and parameters, reachable modules and toolsets, sandbox limits, context strategy, delegable sub-agents
+//! or output schema, and its
+//! fingerprint (`agent-sessions/agents#FR-1`, `FR-2`, `FR-8`, `FR-9`, `agent-sessions/session#FR-2`). The definition carries no
 //! Memory right: access to a Memory level is decided by the toolsets (`agent-sessions/modules#FR-4`).
 
 use std::collections::BTreeSet;
@@ -110,14 +111,16 @@ impl SandboxLimits {
     }
 }
 
-/// Definition of an agent. It designates its model by the name of a profile and never names a provider.
+/// Definition of an agent. When it designates its model, it does so by the name of an optional profile and never names
+/// a provider.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct AgentDefinition {
     id: String,
     kind: AgentKind,
     prompt: String,
-    profile: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    profile: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     sampling: Option<SamplingParams>,
     #[serde(default)]
@@ -135,15 +138,15 @@ pub struct AgentDefinition {
 }
 
 impl AgentDefinition {
-    /// Builds a definition from its identifier, its nature, its system prompt template and the name of its profile.
-    /// Every capability starts empty.
+    /// Builds a definition from its identifier, its nature and its system prompt template. It carries no profile: call
+    /// [`AgentDefinition::with_profile`] to set one. Every capability starts empty.
     #[must_use]
-    pub const fn new(id: String, kind: AgentKind, prompt: String, profile: String) -> Self {
+    pub const fn new(id: String, kind: AgentKind, prompt: String) -> Self {
         Self {
             id,
             kind,
             prompt,
-            profile,
+            profile: None,
             sampling: None,
             modules: Vec::new(),
             toolsets: Vec::new(),
@@ -152,6 +155,14 @@ impl AgentDefinition {
             delegable: Vec::new(),
             output_schema: None,
         }
+    }
+
+    /// Sets the name of the model profile. The definition names a profile, never a provider. An empty or blank name is
+    /// accepted here and refused by [`AgentDefinition::validate`].
+    #[must_use]
+    pub fn with_profile(mut self, profile: String) -> Self {
+        self.profile = Some(profile);
+        self
     }
 
     /// Sets the sampling parameters.
@@ -222,10 +233,11 @@ impl AgentDefinition {
         &self.prompt
     }
 
-    /// Returns the name of the model profile.
+    /// Returns the name of the model profile, if the definition carries one. Resolving a definition without a profile
+    /// belongs to the host: this library never resolves a profile under an empty name.
     #[must_use]
-    pub fn profile(&self) -> &str {
-        &self.profile
+    pub fn profile(&self) -> Option<&str> {
+        self.profile.as_deref()
     }
 
     /// Returns the sampling parameters, if any.
@@ -274,7 +286,8 @@ impl AgentDefinition {
     ///
     /// # Errors
     ///
-    /// Returns [`AgentsError::InvalidDefinition`] when the identifier, the prompt or the profile name is empty, when a
+    /// Returns [`AgentsError::InvalidDefinition`] when the identifier or the prompt is empty, when a profile is set but
+    /// its name is empty or blank (an absent profile is accepted), when a
     /// sub-agent or a configuration agent declares delegable sub-agents, when a work or configuration agent declares an
     /// output schema, when a configuration module is granted to a work agent or a sub-agent, when a sub-agent is
     /// granted the `session` module, when a delegable sub-agent
@@ -287,7 +300,11 @@ impl AgentDefinition {
         if self.prompt.trim().is_empty() {
             return self.refuse("prompt is empty");
         }
-        if self.profile.trim().is_empty() {
+        if self
+            .profile
+            .as_ref()
+            .is_some_and(|profile| profile.trim().is_empty())
+        {
             return self.refuse("profile name is empty");
         }
         if matches!(self.kind, AgentKind::Sub | AgentKind::Config) && !self.delegable.is_empty() {
@@ -545,8 +562,8 @@ mod tests {
             "main".to_owned(),
             AgentKind::Work,
             "You are the assistant of {{project}}.".to_owned(),
-            "strix-qwen".to_owned(),
         )
+        .with_profile(PROFILE.to_owned())
     }
 
     fn sub_agent() -> AgentDefinition {
@@ -554,7 +571,6 @@ mod tests {
             "reviewer".to_owned(),
             AgentKind::Sub,
             "Review the change.".to_owned(),
-            "strix-qwen".to_owned(),
         )
     }
 
@@ -587,7 +603,8 @@ mod tests {
             .with_top_p(0.9)
             .with_top_k(40)
             .with_extra("seed".to_owned(), serde_json::json!(42));
-        AgentDefinition::new(id.to_owned(), kind, prompt.to_owned(), profile.to_owned())
+        AgentDefinition::new(id.to_owned(), kind, prompt.to_owned())
+            .with_profile(profile.to_owned())
             .with_sampling(sampling)
             .with_modules(vec!["files".to_owned(), "git".to_owned()])
             .with_toolsets(vec!["k8s".to_owned(), "logs".to_owned()])
@@ -677,12 +694,7 @@ mod tests {
     #[test]
     fn prompt_is_kept_byte_for_byte() {
         let prompt = "\nFirst line.\n---\nLast line.\n\n";
-        let definition = AgentDefinition::new(
-            "main".to_owned(),
-            AgentKind::Work,
-            prompt.to_owned(),
-            PROFILE.to_owned(),
-        );
+        let definition = AgentDefinition::new("main".to_owned(), AgentKind::Work, prompt.to_owned());
         let text = definition.to_text().expect("a definition is written");
         assert_eq!(
             body_of(&text),
@@ -695,13 +707,8 @@ mod tests {
 
     #[test]
     fn absent_memory_limits_are_not_written() {
-        let definition = AgentDefinition::new(
-            "main".to_owned(),
-            AgentKind::Work,
-            PROMPT.to_owned(),
-            PROFILE.to_owned(),
-        )
-        .with_sandbox(sandbox(30, 10_000, None, None, None));
+        let definition = AgentDefinition::new("main".to_owned(), AgentKind::Work, PROMPT.to_owned())
+            .with_sandbox(sandbox(30, 10_000, None, None, None));
         let text = definition.to_text().expect("a definition is written");
         assert!(
             !text.contains("max_string_bytes"),
@@ -781,14 +788,9 @@ mod tests {
 
     /// The text of the main definition with a prompt of `prompt_len` bytes.
     fn text_with_prompt_of(prompt_len: usize) -> String {
-        AgentDefinition::new(
-            "main".to_owned(),
-            AgentKind::Work,
-            "x".repeat(prompt_len),
-            "strix-qwen".to_owned(),
-        )
-        .to_text()
-        .expect("the definition writes")
+        AgentDefinition::new("main".to_owned(), AgentKind::Work, "x".repeat(prompt_len))
+            .to_text()
+            .expect("the definition writes")
     }
 
     // Scenario: texte de plus de 256 Kio refusé avant toute analyse
@@ -1260,13 +1262,8 @@ mod tests {
 
     /// Builds a definition of nature `kind` that grants the modules `modules`.
     fn with_modules_of(kind: AgentKind, modules: &[&str]) -> AgentDefinition {
-        AgentDefinition::new(
-            "agent".to_owned(),
-            kind,
-            "You are an agent.".to_owned(),
-            "strix-qwen".to_owned(),
-        )
-        .with_modules(modules.iter().map(|module| (*module).to_owned()).collect())
+        AgentDefinition::new("agent".to_owned(), kind, "You are an agent.".to_owned())
+            .with_modules(modules.iter().map(|module| (*module).to_owned()).collect())
     }
 
     // Scenario: un agent de configuration ne peut pas déléguer
@@ -1276,7 +1273,6 @@ mod tests {
             "setup".to_owned(),
             AgentKind::Config,
             "You configure the host.".to_owned(),
-            "strix-qwen".to_owned(),
         )
         .with_delegable(vec!["worker".to_owned()]);
         assert_invalid(&config, "a configuration agent declaring a delegable sub-agent");
@@ -1369,7 +1365,6 @@ mod tests {
             "setup".to_owned(),
             AgentKind::Config,
             "You configure the host.".to_owned(),
-            "strix-qwen".to_owned(),
         )
         .with_output_schema(serde_json::json!({"type": "object"}));
         assert_invalid(&config, "a configuration agent declaring an output schema");
@@ -1390,6 +1385,178 @@ mod tests {
             Some("work"),
             "a work agent serializes as `work`"
         );
+    }
+
+    /// The fingerprint of the reference definition (`full_main_agent` fields) under the profile `strix-qwen`, and its
+    /// JSON and text, taken with the code before the profile became optional (task #21): they must not move once the
+    /// field is `Option<String>`.
+    const REFERENCE_FINGERPRINT: &str = "f101c4eca7528257";
+    const REFERENCE_JSON: &str = r#"{"id":"main","kind":"work","prompt":"You are the assistant of {{project}}.","profile":"strix-qwen","sampling":{"temperature":0.7,"top_p":0.9,"top_k":40,"extra":{"seed":42}},"modules":["files","git"],"toolsets":["k8s","logs"],"sandbox":{"script_timeout":{"secs":30,"nanos":0},"render_cap_chars":10000,"max_string_bytes":1000,"max_array_len":500,"max_map_len":200},"context_strategy":"summarize","delegable":["reviewer"]}"#;
+    const REFERENCE_TEXT: &str = "---
+context_strategy: summarize
+delegable:
+- reviewer
+id: main
+kind: work
+modules:
+- files
+- git
+profile: strix-qwen
+sampling:
+  extra:
+    seed: 42
+  temperature: 0.7
+  top_k: 40
+  top_p: 0.9
+sandbox:
+  max_array_len: 500
+  max_map_len: 200
+  max_string_bytes: 1000
+  render_cap_chars: 10000
+  script_timeout:
+    nanos: 0
+    secs: 30
+toolsets:
+- k8s
+- logs
+---
+You are the assistant of {{project}}.";
+
+    /// The reference definition with every useful field set, no profile yet: the frozen values above are those of this
+    /// definition once `with_profile(PROFILE)` is applied.
+    fn reference_definition() -> AgentDefinition {
+        let sampling = SamplingParams::default()
+            .with_temperature(0.7)
+            .with_top_p(0.9)
+            .with_top_k(40)
+            .with_extra("seed".to_owned(), serde_json::json!(42));
+        AgentDefinition::new("main".to_owned(), AgentKind::Work, PROMPT.to_owned())
+            .with_sampling(sampling)
+            .with_modules(vec!["files".to_owned(), "git".to_owned()])
+            .with_toolsets(vec!["k8s".to_owned(), "logs".to_owned()])
+            .with_sandbox(sandbox(30, 10_000, Some(1_000), Some(500), Some(200)))
+            .with_context_strategy("summarize".to_owned())
+            .with_delegable(vec!["reviewer".to_owned()])
+    }
+
+    // Scenario: une définition sans profil est valide
+    #[test]
+    fn definition_without_profile_is_valid() {
+        let definition = AgentDefinition::new("main".to_owned(), AgentKind::Work, PROMPT.to_owned());
+        let valid = definition.validate();
+        assert!(
+            matches!(valid, Ok(())),
+            "a definition built without a profile must be valid, got {valid:?}"
+        );
+        assert_eq!(
+            definition.profile(),
+            None,
+            "a definition built without `with_profile` carries no profile"
+        );
+    }
+
+    // Scenario: une définition sans profil se sérialise sans la clé
+    #[test]
+    fn definition_without_profile_serializes_without_the_key() {
+        let definition = AgentDefinition::new("main".to_owned(), AgentKind::Work, PROMPT.to_owned())
+            .with_toolsets(vec!["k8s".to_owned()]);
+        let json = serde_json::to_string(&definition).expect("a definition serializes");
+        assert!(
+            !json.contains("profile"),
+            "the JSON carries no profile key: {json}"
+        );
+        let back: AgentDefinition = serde_json::from_str(&json).expect("the JSON reads back");
+        assert_eq!(back, definition, "the JSON reads back identically");
+        assert_eq!(back.profile(), None, "the read definition carries no profile");
+        let text = definition.to_text().expect("a definition is written");
+        assert!(
+            !text.contains("profile"),
+            "the frontmatter carries no profile key: {text}"
+        );
+        let read = AgentDefinition::from_text(&text).expect("the text reads back");
+        assert_eq!(read, definition, "the text reads back identically");
+        assert_eq!(read.profile(), None, "the read definition carries no profile");
+        assert_eq!(
+            read.fingerprint(),
+            definition.fingerprint(),
+            "the round trip keeps the fingerprint"
+        );
+    }
+
+    // Scenario: l'absence de profil se lit de deux façons
+    #[test]
+    fn absence_of_profile_reads_two_ways() {
+        for json in [
+            r#"{"id":"main","kind":"work","prompt":"hello"}"#,
+            r#"{"id":"main","kind":"work","prompt":"hello","profile":null}"#,
+        ] {
+            let definition: AgentDefinition = serde_json::from_str(json).expect("the JSON reads");
+            assert_eq!(
+                definition.profile(),
+                None,
+                "a JSON without the key, or with a null profile, reads as no profile: {json}"
+            );
+        }
+        let definition = AgentDefinition::from_text("---\nid: main\nkind: work\n---\nhello\n")
+            .expect("a frontmatter without the profile key is read");
+        assert_eq!(
+            definition.profile(),
+            None,
+            "a frontmatter without the key reads as no profile"
+        );
+    }
+
+    // Scenario: un profil présent mais vide est refusé
+    #[test]
+    fn present_but_blank_profile_refused() {
+        for name in ["", "  "] {
+            let definition = AgentDefinition::new("main".to_owned(), AgentKind::Work, PROMPT.to_owned())
+                .with_profile(name.to_owned());
+            assert_invalid(&definition, &format!("a profile set to {name:?}"));
+        }
+    }
+
+    // Scenario: l'ajout d'un profil change l'empreinte
+    #[test]
+    fn adding_a_profile_changes_the_fingerprint() {
+        let without = reference_definition();
+        let with = reference_definition().with_profile(PROFILE.to_owned());
+        assert_ne!(
+            with.fingerprint(),
+            without.fingerprint(),
+            "adding a profile must change the fingerprint"
+        );
+        assert_eq!(
+            with.fingerprint(),
+            REFERENCE_FINGERPRINT,
+            "the fingerprint of a definition with a profile is the one it had before the profile became optional"
+        );
+    }
+
+    // Scenario: une définition avec profil garde son JSON et son texte
+    #[test]
+    fn definition_with_profile_keeps_its_json_and_text() {
+        let with = reference_definition().with_profile(PROFILE.to_owned());
+        let json = serde_json::to_string(&with).expect("a definition serializes");
+        assert_eq!(
+            json, REFERENCE_JSON,
+            "the JSON is the one taken before the profile became optional"
+        );
+        let read: AgentDefinition = serde_json::from_str(REFERENCE_JSON).expect("the JSON reads back");
+        assert_eq!(read, with, "the frozen JSON reads as the definition");
+        let text = with.to_text().expect("a definition is written");
+        assert_eq!(
+            text, REFERENCE_TEXT,
+            "the text is the one taken before the profile became optional"
+        );
+        let written = AgentDefinition::from_text(REFERENCE_TEXT).expect("the text reads back");
+        assert_eq!(written, with, "the frozen text reads as the definition");
+        assert_eq!(
+            written.to_text().expect("the definition is rewritten"),
+            REFERENCE_TEXT,
+            "the frozen text is rewritten byte for byte"
+        );
+        assert_eq!(written.fingerprint(), REFERENCE_FINGERPRINT);
     }
 
     #[test]

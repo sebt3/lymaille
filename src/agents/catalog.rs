@@ -261,7 +261,6 @@ mod tests {
             "main".to_owned(),
             AgentKind::Work,
             "You are the assistant.".to_owned(),
-            "strix-qwen".to_owned(),
         )
         .with_toolsets(vec!["k8s".to_owned()])
     }
@@ -379,7 +378,6 @@ mod tests {
             "reviewer".to_owned(),
             AgentKind::Sub,
             "Review the change.".to_owned(),
-            "strix-qwen".to_owned(),
         )
         .with_delegable(vec!["other".to_owned()]);
         let refused = catalog.put_agent(&sub).await;
