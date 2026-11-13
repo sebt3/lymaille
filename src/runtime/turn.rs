@@ -22,7 +22,7 @@ use crate::session::{
     Backoff, BoundaryKind, CancelHandle, DiscardCause, Event, EventKind, EventSink, History, Message,
     NativeTool, Outcome, Reasoning, Redactor, RunSignals, Segment, SegmentContext, SessionEdits,
     SessionError, SessionResult, SessionState, SessionStore, SleepOutcome, TokenCounters, ToolCall, TurnGate,
-    TurnId,
+    TurnId, TurnLock,
 };
 
 /// Name of the native tool that runs a script in the scratchpad of the session.
@@ -54,8 +54,9 @@ const CANCELLED_RESULT: &str = "tool call cancelled";
 const MISSING_SCRIPT: &str = "the rhai_pad tool requires a string argument `script`";
 
 /// The sessions that have an active turn in this process. A session has at most one active turn per process, whatever the
-/// runner that drives it (`agent-sessions/session#FR-4`).
-static GATE: LazyLock<TurnGate> = LazyLock::new(TurnGate::new);
+/// runner that drives it (`agent-sessions/session#FR-4`). Behind an `Arc`, it is the default turn gate of every runner
+/// that is given no gate of its own (`agent-sessions/session#FR-17`).
+static GATE: LazyLock<Arc<dyn TurnLock>> = LazyLock::new(|| Arc::new(TurnGate::new()));
 
 /// Messages the host sends to a session while a turn is active.
 ///
@@ -97,6 +98,7 @@ pub struct TurnConfig {
     overrun: Option<Duration>,
     max_steps: u32,
     agent: Option<String>,
+    turn_lock: Arc<dyn TurnLock>,
 }
 
 impl std::fmt::Debug for TurnConfig {
@@ -110,8 +112,8 @@ impl std::fmt::Debug for TurnConfig {
 
 impl TurnConfig {
     /// Builds a configuration from the shared clock, the redactor of the session, the shared event sink, the root
-    /// cancellation handle and the context budget. There is no overrun delay, the limit is 200 model calls per turn, and
-    /// the agent name for the audit is the one of the session state.
+    /// cancellation handle and the context budget. There is no overrun delay, the limit is 200 model calls per turn, the
+    /// agent name for the audit is the one of the session state, and the turn gate is the in-memory gate of the process.
     #[must_use]
     pub fn new(
         clock: Arc<dyn Clock>,
@@ -129,6 +131,7 @@ impl TurnConfig {
             overrun: None,
             max_steps: DEFAULT_MAX_STEPS,
             agent: None,
+            turn_lock: Arc::clone(&GATE),
         }
     }
 
@@ -150,6 +153,18 @@ impl TurnConfig {
     #[must_use]
     pub fn with_agent<A: Into<String>>(mut self, agent: A) -> Self {
         self.agent = Some(agent.into());
+        self
+    }
+
+    /// Sets the turn gate of the host: the runner asks this `TurnLock` the permit of every turn, instead of the
+    /// in-memory gate shared by the runners of the process (`agent-sessions/session#FR-17`). The host implements the
+    /// trait to share the exclusion across processes (`agent-sessions#DEC-14`); its permit may carry a lease-loss
+    /// signal, read like the cancellation handle of the turn: cancelled, the turn ends `Cancelled`, `TurnLeaseLost`
+    /// is emitted before `TurnEnded`, and nothing is saved for that turn. Without this, the in-memory gate of the
+    /// process stays the default and keeps its behaviour.
+    #[must_use]
+    pub fn with_turn_lock(mut self, turn_lock: Arc<dyn TurnLock>) -> Self {
+        self.turn_lock = turn_lock;
         self
     }
 }
@@ -212,39 +227,49 @@ impl Finish {
     }
 }
 
-/// Cancellation of a turn: the handle of the turn and the root handle, and a handle that merges them for the scripts.
+/// Cancellation of a turn: the handle of the turn, the root handle and the lease-loss signal of the permit, and a
+/// handle that merges them for the scripts. The loss signal is read like a cancellation, never as a mechanism of its
+/// own (`agent-sessions/session#FR-17`).
 struct TurnCancel {
     turn: CancelHandle,
     root: CancelHandle,
+    lost: CancelHandle,
     merged: CancelHandle,
     bridge: JoinHandle<()>,
 }
 
 impl TurnCancel {
-    /// Merges the handle of the turn into a child of the root handle, so that a script sees either of them.
-    fn new(turn: &CancelHandle, root: &CancelHandle) -> Self {
+    /// Merges the handle of the turn and the lease-loss signal of the permit into a child of the root handle, so that
+    /// a script sees either of them.
+    fn new(turn: &CancelHandle, root: &CancelHandle, lost: &CancelHandle) -> Self {
         let merged = root.child();
         let (source, target) = (turn.clone(), merged.clone());
+        let lease = lost.clone();
         let bridge = tokio::spawn(async move {
-            source.cancelled().await;
+            tokio::select! {
+                () = source.cancelled() => {}
+                () = lease.cancelled() => {}
+            }
             target.cancel();
         });
         Self {
             turn: turn.clone(),
             root: root.clone(),
+            lost: lost.clone(),
             merged,
             bridge,
         }
     }
 
     fn is_cancelled(&self) -> bool {
-        self.turn.is_cancelled() || self.root.is_cancelled()
+        self.turn.is_cancelled() || self.root.is_cancelled() || self.lost.is_cancelled()
     }
 
     async fn cancelled(&self) {
         tokio::select! {
             () = self.turn.cancelled() => {}
             () = self.root.cancelled() => {}
+            () = self.lost.cancelled() => {}
         }
     }
 
@@ -626,14 +651,17 @@ impl<P: InferenceProvider, C: CompactionStrategy, S: SessionStore> TurnRunner<P,
 
     /// Runs one turn for the message `text`, under the cancellation handle `cancel` of the turn (the root handle of the
     /// configuration also cancels it). The model is called until a response without tool call; a failure of the model is
-    /// an outcome, not an error.
+    /// an outcome, not an error. A lease lost during the turn (`agent-sessions/session#FR-17`) is an outcome too: the
+    /// outcome is `Cancelled`, `TurnLeaseLost` is emitted before `TurnEnded`, and the state is not saved.
     ///
     /// # Errors
     ///
     /// Returns [`crate::SessionError::TurnActive`] when a turn is already active for the session, in which case nothing is
-    /// modified, and [`crate::SessionError::Store`] when the save at the end of the turn fails: the turn is then over.
+    /// modified, [`crate::SessionError::TurnLock`] when the turn gate of the host fails for a reason of its own, and
+    /// [`crate::SessionError::Store`] when the save at the end of the turn fails: the turn is then over.
     pub async fn run_turn(&mut self, text: &str, cancel: &CancelHandle) -> SessionResult<TurnOutput> {
-        let permit = GATE.try_begin(self.state.id().clone())?;
+        let permit = self.config.turn_lock.try_begin(self.state.id().clone()).await?;
+        let lost = permit.lost();
         let turn = self
             .state
             .signals()
@@ -642,7 +670,7 @@ impl<P: InferenceProvider, C: CompactionStrategy, S: SessionStore> TurnRunner<P,
             .map_or(TurnId::new(1), |last| last.next());
         let mut run = TurnRun {
             turn,
-            cancel: TurnCancel::new(cancel, &self.config.cancel),
+            cancel: TurnCancel::new(cancel, &self.config.cancel, &lost),
             started: self.config.clock.now(),
             overrun_sent: false,
             steps: 0,
@@ -653,18 +681,31 @@ impl<P: InferenceProvider, C: CompactionStrategy, S: SessionStore> TurnRunner<P,
         };
         self.emitter.emit(EventKind::TurnStarted { turn });
         let finish = self.drive(&mut run, text).await?;
-        self.record_signals(&run, finish.outcome);
-        let saved = self.store.save(&self.state).await;
+        // The last reading of the lease-loss signal, just before the save: cancelled, the save is omitted and the
+        // turn ends as a cancellation even though the answer was complete (`agent-sessions/session#FR-17`).
+        let lease_lost = lost.is_cancelled();
+        let (outcome, response) = if lease_lost {
+            (Outcome::Cancelled, String::new())
+        } else {
+            (finish.outcome, finish.response)
+        };
+        self.record_signals(&run, outcome);
+        let mut saved = Ok(());
+        if lease_lost {
+            self.emitter.emit(EventKind::TurnLeaseLost { turn });
+        } else {
+            saved = self.store.save(&self.state).await;
+        }
         drop(permit);
         self.emitter.emit(EventKind::TurnEnded {
             turn,
-            outcome: finish.outcome,
-            response: finish.response.clone(),
+            outcome,
+            response: response.clone(),
         });
         saved?;
         Ok(TurnOutput {
-            outcome: finish.outcome,
-            response: finish.response,
+            outcome,
+            response,
             calls: run.calls,
         })
     }
@@ -1126,10 +1167,10 @@ impl<P: InferenceProvider, C: CompactionStrategy, S: SessionStore> TurnRunner<P,
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashSet};
     use std::pin::Pin;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{Arc, OnceLock};
+    use std::sync::{Arc, Mutex, OnceLock, PoisonError};
     use std::time::Duration;
 
     use serde_json::{Value, json};
@@ -1152,7 +1193,7 @@ mod tests {
         AgentRef, BoundaryKind, CancelHandle, DiscardCause, EventKind, InMemoryStore, LabelAuthor, Message,
         ModelSnapshot, NativeTool, Outcome, Reasoning, RecordingSink, Redactor, ReviewState, Segment,
         SegmentContext, SessionEdits, SessionError, SessionId, SessionResult, SessionState, SessionStore,
-        TaggedValue, ToolCall, TurnId, review_state,
+        TaggedValue, ToolCall, TurnId, TurnLock, TurnPermit, review_state,
     };
 
     // --- doubles -------------------------------------------------------------------------------------------------
@@ -1259,6 +1300,107 @@ mod tests {
         }
     }
 
+    /// A provider that signals the loss of the lease as it answers: the signal fires while the final response is
+    /// produced, before the loop reaches the save (`agent-sessions/session#FR-17`).
+    struct Losing {
+        signal: CancelHandle,
+    }
+
+    impl InferenceProvider for Losing {
+        fn complete(&self, _request: InferenceRequest) -> impl Future<Output = Reply> + Send {
+            self.signal.cancel();
+            std::future::ready(say("done"))
+        }
+    }
+
+    // --- turn gate doubles: adapted copies of the doubles of `session::turn_gate`, which are private there ----------
+
+    /// The reason the failing double reports, checked verbatim by the failure Scenario.
+    const HOST_FAILURE: &str = "the test gate lost its lease";
+
+    /// The sessions held by the gate doubles of one test, standing for the lock table shared by two processes.
+    type ActiveSessions = Arc<Mutex<HashSet<SessionId>>>;
+
+    /// The boxed future of `TurnLock::try_begin`.
+    type TurnAttempt = Pin<Box<dyn Future<Output = SessionResult<TurnPermit>> + Send>>;
+
+    /// A gate double sharing its active set with its siblings, like two processes sharing one lock table, and
+    /// holding the loss signal from which the signals of its permits are derived.
+    struct TestGate {
+        active: ActiveSessions,
+        lost: CancelHandle,
+    }
+
+    impl TestGate {
+        /// A double sharing `active` and holding a fresh loss signal.
+        fn new(active: ActiveSessions) -> Self {
+            Self {
+                active,
+                lost: CancelHandle::new(),
+            }
+        }
+
+        /// The loss signal held by this implementation: cancelling it signals every permit it granted.
+        fn signal(&self) -> CancelHandle {
+            self.lost.clone()
+        }
+    }
+
+    impl TurnLock for TestGate {
+        fn try_begin(&self, session: SessionId) -> TurnAttempt {
+            let inserted = self
+                .active
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(session.clone());
+            if !inserted {
+                return Box::pin(std::future::ready(Err(SessionError::TurnActive(session))));
+            }
+            let active = Arc::clone(&self.active);
+            let released = session.clone();
+            let permit = TurnPermit::new(
+                session,
+                move || {
+                    let mut active = active.lock().unwrap_or_else(PoisonError::into_inner);
+                    let _released: bool = active.remove(&released);
+                },
+                self.lost.clone(),
+            );
+            Box::pin(std::future::ready(Ok(permit)))
+        }
+    }
+
+    /// A gate double that fails the way a host gate may: a typed error of its own, never a permit.
+    struct FailingGate;
+
+    impl TurnLock for FailingGate {
+        fn try_begin(&self, _session: SessionId) -> TurnAttempt {
+            Box::pin(std::future::ready(Err(SessionError::TurnLock(
+                HOST_FAILURE.to_owned(),
+            ))))
+        }
+    }
+
+    fn shared_state() -> ActiveSessions {
+        Arc::new(Mutex::new(HashSet::new()))
+    }
+
+    /// The index of the first `TurnLeaseLost` of the recorded events, for the order assertions.
+    fn lease_lost_at(parts: &Parts) -> usize {
+        kinds(parts)
+            .iter()
+            .position(|kind| matches!(kind, EventKind::TurnLeaseLost { .. }))
+            .expect("TurnLeaseLost is emitted")
+    }
+
+    /// The index of the last `TurnEnded` of the recorded events, for the order assertions.
+    fn turn_ended_at(parts: &Parts) -> usize {
+        kinds(parts)
+            .iter()
+            .rposition(|kind| matches!(kind, EventKind::TurnEnded { .. }))
+            .expect("TurnEnded is emitted")
+    }
+
     // --- builders ------------------------------------------------------------------------------------------------
 
     type Reply = Result<InferenceResponse, InferenceError>;
@@ -1316,6 +1458,7 @@ mod tests {
         replay: ReplayMode,
         summarizer_fails: bool,
         summarizer_calls: Arc<AtomicUsize>,
+        turn_lock: Option<Arc<dyn TurnLock>>,
     }
 
     impl Options {
@@ -1332,6 +1475,7 @@ mod tests {
                 replay: ReplayMode::None,
                 summarizer_fails: false,
                 summarizer_calls: Arc::new(AtomicUsize::new(0)),
+                turn_lock: None,
             }
         }
     }
@@ -1383,6 +1527,9 @@ mod tests {
         }
         if let Some(max_steps) = options.max_steps {
             config = config.with_max_steps(max_steps);
+        }
+        if let Some(turn_lock) = options.turn_lock {
+            config = config.with_turn_lock(turn_lock);
         }
         let strategy = DefaultStrategy::new(
             FixedSummarizer {
@@ -2053,6 +2200,267 @@ mod tests {
             !matches!(second, Err(SessionError::TurnActive(_))),
             "the permit was released, got {second:?}"
         );
+    }
+
+    // --- host turn gates and lease loss ----------------------------------------------------------------------------
+
+    // Scenario (turn.sdd) : une porte de l'hôte est utilisée à la place de la porte du processus
+    #[tokio::test]
+    async fn a_host_gate_stands_in_place_of_the_process_gate() {
+        let state = shared_state();
+        let id = SessionId::new("t-host-gate").expect("a session identifier");
+        let held: bool = state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(id.clone());
+        assert!(
+            held,
+            "the shared state starts with the session held by another replica"
+        );
+        let options = Options {
+            turn_lock: Some(Arc::new(TestGate::new(state))),
+            ..Options::named("t-host-gate")
+        };
+        let provider = Arc::new(ScriptedProvider::new(vec![say("never")]));
+        let (mut runner, parts) = assemble(Arc::clone(&provider), options);
+        let refused = runner.run_turn("hello", &CancelHandle::new()).await;
+        assert!(
+            matches!(&refused, Err(SessionError::TurnActive(gated)) if *gated == id),
+            "the host gate must refuse the session with TurnActive, got {refused:?}"
+        );
+        assert!(provider.requests().is_empty(), "the model was not called");
+        assert!(roles(&runner).is_empty(), "the state is unchanged");
+        assert!(kinds(&parts).is_empty(), "nothing was emitted");
+    }
+
+    // Scenario (turn.sdd) : l'échec d'une porte de l'hôte est rendu
+    #[tokio::test]
+    async fn a_failing_host_gate_is_rendered_without_change() {
+        let options = Options {
+            turn_lock: Some(Arc::new(FailingGate)),
+            ..Options::named("t-gate-failure")
+        };
+        let provider = Arc::new(ScriptedProvider::new(vec![say("never")]));
+        let (mut runner, parts) = assemble(Arc::clone(&provider), options);
+        let refused = runner.run_turn("hello", &CancelHandle::new()).await;
+        assert!(
+            matches!(&refused, Err(SessionError::TurnLock(reason)) if reason == HOST_FAILURE),
+            "the failure of the host gate must be rendered as it was, got {refused:?}"
+        );
+        assert!(
+            provider.requests().is_empty() && roles(&runner).is_empty() && kinds(&parts).is_empty(),
+            "a failed gate modifies and emits nothing"
+        );
+    }
+
+    // Scenario (turn.sdd) : un tour sans porte fournie garde la porte du processus
+    #[tokio::test]
+    async fn a_turn_without_a_gate_keeps_the_process_gate() {
+        let called = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let gated = Gated {
+            called: Arc::clone(&called),
+            release: Arc::clone(&release),
+        };
+        let (mut first, _first_parts) = assemble(gated, Options::named("t-process-gate"));
+        let task = tokio::spawn(async move { first.run_turn("first", &CancelHandle::new()).await });
+        called.notified().await;
+        let provider = Arc::new(ScriptedProvider::new(vec![say("second")]));
+        let (mut second, _second_parts) = assemble(Arc::clone(&provider), Options::named("t-process-gate"));
+        let refused = second.run_turn("second", &CancelHandle::new()).await;
+        assert!(
+            matches!(refused, Err(SessionError::TurnActive(_))),
+            "without a gate of its own, the second runner must meet the process gate, got {refused:?}"
+        );
+        assert!(provider.requests().is_empty(), "the refused turn made no call");
+        release.notify_one();
+        let output = task
+            .await
+            .expect("the first turn task")
+            .expect("the first turn runs");
+        assert_eq!(output.outcome(), Outcome::Valid, "the first turn completes");
+    }
+
+    // Scenario (turn.sdd) : le bail perdu pendant l'inférence annule le tour sans sauvegarde
+    #[tokio::test]
+    async fn a_lease_lost_during_inference_cancels_without_saving() {
+        let gate = Arc::new(TestGate::new(shared_state()));
+        let signal = gate.signal();
+        let lock: Arc<dyn TurnLock> = gate;
+        let called = Arc::new(Notify::new());
+        let hanging = Hanging {
+            called: Arc::clone(&called),
+        };
+        let options = Options {
+            turn_lock: Some(lock),
+            ..Options::named("t-lease-inference")
+        };
+        let (mut runner, parts) = assemble(hanging, options);
+        let trigger = signal;
+        let cancel = CancelHandle::new();
+        let (output, ()) = tokio::join!(runner.run_turn("hello", &cancel), async move {
+            called.notified().await;
+            trigger.cancel();
+        });
+        let output = output.expect("a lease loss is not an error of the function");
+        assert_eq!(
+            output.outcome(),
+            Outcome::Cancelled,
+            "the lost lease cancels the turn"
+        );
+        assert_eq!(output.response(), "", "no response after the loss");
+        let events = kinds(&parts);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|kind| matches!(kind, EventKind::TurnLeaseLost { .. }))
+                .count(),
+            1,
+            "TurnLeaseLost is emitted once"
+        );
+        assert!(
+            lease_lost_at(&parts) < turn_ended_at(&parts),
+            "TurnLeaseLost must precede TurnEnded"
+        );
+        assert!(
+            matches!(
+                events.get(turn_ended_at(&parts)),
+                Some(EventKind::TurnEnded {
+                    outcome: Outcome::Cancelled,
+                    ..
+                })
+            ),
+            "TurnEnded must carry the cancellation"
+        );
+        let saved = parts
+            .store
+            .load(runner.state().id())
+            .await
+            .expect("the store loads");
+        assert!(saved.is_none(), "the storage received no save for this turn");
+    }
+
+    // Scenario (turn.sdd) : le bail perdu pendant un script annule le tour sans sauvegarde
+    #[tokio::test]
+    async fn a_lease_lost_during_a_script_cancels_without_saving() {
+        let gate = Arc::new(TestGate::new(shared_state()));
+        let signal = gate.signal();
+        let lock: Arc<dyn TurnLock> = gate;
+        let losing = signal;
+        let options = Options {
+            engine: engine_with(move |engine| {
+                let _lose = engine.register_fn("lose", move || losing.cancel());
+            }),
+            turn_lock: Some(lock),
+            ..Options::named("t-lease-script")
+        };
+        let provider = Arc::new(ScriptedProvider::new(vec![Ok(InferenceResponse::new(
+            Message::assistant(
+                "",
+                None,
+                vec![
+                    ToolCall::new("c1", RHAI_PAD_TOOL, json!({"script": "lose(); loop { }"})),
+                    ToolCall::new("c2", RHAI_PAD_TOOL, json!({"script": "1"})),
+                ],
+            ),
+            None,
+        ))]));
+        let (mut runner, parts) = assemble(Arc::clone(&provider), options);
+        let output = runner
+            .run_turn("go", &CancelHandle::new())
+            .await
+            .expect("a lease loss is not an error of the function");
+        assert_eq!(
+            output.outcome(),
+            Outcome::Cancelled,
+            "the lost lease cancels the script"
+        );
+        assert!(
+            runner.state().history().pending_tool_calls().is_empty(),
+            "no call stays without a result, the second one included"
+        );
+        assert!(
+            roles(&runner).iter().any(
+                |message| matches!(message, Message::ToolResult { content, .. } if content.contains("cancel"))
+            ),
+            "a result says the call was cancelled"
+        );
+        assert_eq!(provider.requests().len(), 1, "no request after the cancellation");
+        assert!(
+            parts
+                .store
+                .load(runner.state().id())
+                .await
+                .expect("the store loads")
+                .is_none(),
+            "the storage received no save for this turn"
+        );
+    }
+
+    // Scenario (turn.sdd) : le bail perdu juste avant la sauvegarde l'omet
+    #[tokio::test]
+    async fn a_lease_lost_just_before_the_save_omits_it() {
+        let gate = Arc::new(TestGate::new(shared_state()));
+        let signal = gate.signal();
+        let lock: Arc<dyn TurnLock> = gate;
+        let options = Options {
+            turn_lock: Some(lock),
+            ..Options::named("t-lease-save")
+        };
+        let (mut runner, parts) = assemble(Losing { signal }, options);
+        let output = runner
+            .run_turn("hello", &CancelHandle::new())
+            .await
+            .expect("a lease loss is not an error of the function");
+        assert_eq!(
+            output.outcome(),
+            Outcome::Cancelled,
+            "a lost lease cancels even a finished answer"
+        );
+        assert_eq!(output.calls(), 1, "the final answer was made");
+        assert_eq!(output.response(), "", "a cancelled turn carries no response");
+        assert!(
+            kinds(&parts)
+                .iter()
+                .any(|kind| matches!(kind, EventKind::TurnLeaseLost { .. })),
+            "TurnLeaseLost is emitted"
+        );
+        assert!(
+            parts
+                .store
+                .load(runner.state().id())
+                .await
+                .expect("the store loads")
+                .is_none(),
+            "the save was omitted"
+        );
+    }
+
+    // Scenario (turn.sdd) : sans perte de bail, rien ne change
+    #[tokio::test]
+    async fn without_a_lease_loss_nothing_changes() {
+        let gate = Arc::new(TestGate::new(shared_state()));
+        let lock: Arc<dyn TurnLock> = gate;
+        let provider = Arc::new(ScriptedProvider::new(vec![say("ok")]));
+        let options = Options {
+            turn_lock: Some(lock),
+            ..Options::named("t-lease-none")
+        };
+        let (mut runner, parts) = assemble(Arc::clone(&provider), options);
+        let output = run(&mut runner, "hello").await;
+        assert_eq!(
+            output.outcome(),
+            Outcome::Valid,
+            "a gate that never signals changes nothing"
+        );
+        assert_eq!(output.response(), "ok", "the response is the answer of the model");
+        assert!(
+            kinds(&parts)
+                .iter()
+                .all(|kind| !matches!(kind, EventKind::TurnLeaseLost { .. })),
+            "no TurnLeaseLost is emitted"
+        );
+        let _saved = saved_state(&parts, "t-lease-none").await;
     }
 
     // Scenario: outil inconnu
