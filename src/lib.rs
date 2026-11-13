@@ -67,7 +67,7 @@ pub use session::{
     McpRecord, Message, ModelSnapshot, NativeTool, NullSink, Outcome, PendingEdits, Provenance, Reasoning,
     RecordingSink, Redactor, ReviewState, RunId, RunSignals, ScriptInput, ScriptRecord, Segment,
     SegmentContext, SessionEdits, SessionError, SessionId, SessionKind, SessionResult, SessionState,
-    SessionStore, SleepOutcome, TaggedValue, TokenCounters, ToolCall, TurnGate, TurnId, TurnPermit,
+    SessionStore, SleepOutcome, TaggedValue, TokenCounters, ToolCall, TurnGate, TurnId, TurnLock, TurnPermit,
     normalize_title, restore_notices, review_state, unresolved_call_notices,
 };
 pub use tools::{InspectEnv, InspectTool, InspectionHost, session_tool_definitions};

@@ -43,4 +43,4 @@ pub use state::{AgentRef, InspectionTargetRef, SessionKind, SessionState, TokenC
 pub use store::{InMemoryStore, SessionStore};
 pub use tagged_value::TaggedValue;
 pub use title::normalize_title;
-pub use turn_gate::{TurnGate, TurnPermit};
+pub use turn_gate::{TurnGate, TurnLock, TurnPermit};
