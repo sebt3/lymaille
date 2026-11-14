@@ -21,6 +21,9 @@ mod session;
 mod tools;
 mod toolsets;
 
+#[cfg(all(test, feature = "ts-rs"))]
+mod ts_contract;
+
 pub use agents::{
     AgentDefinition, AgentKind, AgentStore, AgentsError, AgentsResult, DetectedModel, ErrorClass,
     FinishReason, InMemoryCatalog, InferenceError, InferenceProvider, InferenceRequest, InferenceResponse,
