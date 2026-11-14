@@ -14,6 +14,7 @@ use crate::secret::{DefaultSecretDetector, SecretDetector};
 
 /// Level at which a toolset context lives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ContextLevel {
@@ -57,6 +58,7 @@ impl PartialEq for SharedDetector {
 
 /// Named toolset context. It holds parameters and references only: a value that looks like a secret is refused.
 #[derive(Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
 #[non_exhaustive]
 pub struct ToolsetContext {
     name: String,
@@ -164,6 +166,13 @@ impl ToolsetContext {
     /// Adds a parameter, replacing an earlier value of the same name.
     ///
     /// Returns the name of the context. Read by the storage, which keys the context by its name.
+    #[cfg_attr(
+        feature = "ts-rs",
+        expect(
+            clippy::same_name_method,
+            reason = "the `TS` derive implements the `name` associated function of `ts_rs::TS`; the accessor takes `&self` and the trait function takes `&Config`, so method resolution never sees an ambiguity"
+        )
+    )]
     pub(in crate::toolsets) fn name(&self) -> &str {
         &self.name
     }

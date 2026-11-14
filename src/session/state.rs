@@ -90,6 +90,7 @@ impl TokenCounters {
 /// It is written in lowercase, and a document written before the field existed reads as `Work`
 /// (`agent-sessions#BR-8`, `agent-sessions/session#FR-2`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
 #[non_exhaustive]
 #[serde(rename_all = "lowercase")]
 pub enum SessionKind {

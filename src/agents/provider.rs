@@ -12,6 +12,7 @@ const REFUSED: &str = "invalid provider: a name, a type or a reference is empty 
 
 /// Level at which a named entity lives.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ProviderLevel {
@@ -25,6 +26,7 @@ pub enum ProviderLevel {
 
 /// Named inference provider. It holds references only, never an address in clear with credentials nor a secret.
 #[derive(Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
 #[non_exhaustive]
 pub struct Provider {
     name: String,
@@ -88,6 +90,13 @@ impl Provider {
     }
 
     /// Returns the name of the provider.
+    #[cfg_attr(
+        feature = "ts-rs",
+        expect(
+            clippy::same_name_method,
+            reason = "the `TS` derive implements the `name` associated function of `ts_rs::TS`; the accessor takes `&self` and the trait function takes `&Config`, so method resolution never sees an ambiguity"
+        )
+    )]
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name

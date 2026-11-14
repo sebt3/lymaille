@@ -19,6 +19,7 @@ use crate::secret::SecretDetector;
 /// Parameter declared by a toolset: its name, its JSON Schema, and a generic default value when one is declared. A
 /// default never holds a value of an environment.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
 #[non_exhaustive]
 pub struct ParamDecl {
     name: String,
@@ -45,6 +46,13 @@ impl ParamDecl {
     }
 
     /// Returns the name of the parameter.
+    #[cfg_attr(
+        feature = "ts-rs",
+        expect(
+            clippy::same_name_method,
+            reason = "the `TS` derive implements the `name` associated function of `ts_rs::TS`; the accessor takes `&self` and the trait function takes `&Config`, so method resolution never sees an ambiguity"
+        )
+    )]
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
@@ -65,6 +73,7 @@ impl ParamDecl {
 
 /// MCP role that a toolset needs for itself: its name, and whether it is required or optional.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
 #[non_exhaustive]
 pub struct RoleDecl {
     name: String,
@@ -79,6 +88,13 @@ impl RoleDecl {
     }
 
     /// Returns the name of the role.
+    #[cfg_attr(
+        feature = "ts-rs",
+        expect(
+            clippy::same_name_method,
+            reason = "the `TS` derive implements the `name` associated function of `ts_rs::TS`; the accessor takes `&self` and the trait function takes `&Config`, so method resolution never sees an ambiguity"
+        )
+    )]
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
@@ -96,11 +112,13 @@ impl RoleDecl {
 /// It names a Rhai module by its identifier, and carries its source text, its skills, its requirements on a toolset
 /// context, its parameters and roles, its dependencies and its version.
 #[derive(Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
 #[non_exhaustive]
 pub struct Toolset {
     name: String,
     description: String,
     #[serde(with = "semver_text")]
+    #[cfg_attr(feature = "ts-rs", ts(type = "string"))]
     version: Semver,
     source: String,
     skills: BTreeMap<String, Skill>,
@@ -311,6 +329,13 @@ impl Toolset {
     }
 
     /// Returns the name of the toolset, which is also the name of its Rhai module.
+    #[cfg_attr(
+        feature = "ts-rs",
+        expect(
+            clippy::same_name_method,
+            reason = "the `TS` derive implements the `name` associated function of `ts_rs::TS`; the accessor takes `&self` and the trait function takes `&Config`, so method resolution never sees an ambiguity"
+        )
+    )]
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
@@ -359,6 +384,13 @@ impl Toolset {
     }
 
     /// Returns the names of the private dependencies, in order.
+    #[cfg_attr(
+        feature = "ts-rs",
+        expect(
+            clippy::same_name_method,
+            reason = "the `TS` derive implements the `dependencies` associated function of `ts_rs::TS`; the accessor takes `&self` and the trait function takes `&Config`, so method resolution never sees an ambiguity"
+        )
+    )]
     #[must_use]
     pub const fn dependencies(&self) -> &BTreeSet<String> {
         &self.dependencies

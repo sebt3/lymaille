@@ -35,6 +35,7 @@ const FIELD_NOT_TEXT: &str = "the name and the description must be text, not mis
 /// Skill: a body of instructions with its metadata and its annex documents. The body and the description are templates,
 /// rendered by the template module; a skill grants no capability.
 #[derive(Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
 #[non_exhaustive]
 pub struct Skill {
     name: String,
@@ -186,6 +187,13 @@ impl Skill {
     }
 
     /// Returns the name of the skill.
+    #[cfg_attr(
+        feature = "ts-rs",
+        expect(
+            clippy::same_name_method,
+            reason = "the `TS` derive implements the `name` associated function of `ts_rs::TS`; the accessor takes `&self` and the trait function takes `&Config`, so method resolution never sees an ambiguity"
+        )
+    )]
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name

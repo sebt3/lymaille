@@ -19,6 +19,7 @@ use crate::session::SessionKind;
 
 /// A role of a context type: its name, and whether it is required or optional.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
 #[non_exhaustive]
 pub struct RoleSpec {
     name: String,
@@ -35,10 +36,12 @@ impl RoleSpec {
 
 /// Named, versioned context type. It is an entity of the user or shared level, referred to by its name from a toolset.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
 #[non_exhaustive]
 pub struct ContextType {
     name: String,
     #[serde(with = "semver_text")]
+    #[cfg_attr(feature = "ts-rs", ts(type = "string"))]
     version: Semver,
     schema: Value,
     /// The schema compiled once, when the type is built; it is not serialized, it is rebuilt from `schema` on reading.
@@ -230,6 +233,13 @@ impl ContextType {
     }
 
     /// Returns the name of the type. Read by the storage, which keys the type by its name.
+    #[cfg_attr(
+        feature = "ts-rs",
+        expect(
+            clippy::same_name_method,
+            reason = "the `TS` derive implements the `name` associated function of `ts_rs::TS`; the accessor takes `&self` and the trait function takes `&Config`, so method resolution never sees an ambiguity"
+        )
+    )]
     pub(in crate::toolsets) fn name(&self) -> &str {
         &self.name
     }

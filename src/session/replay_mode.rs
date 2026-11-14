@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 /// How the reasoning of the assistant is sent back to the model. `AllTurns` corresponds to `preserve_thinking`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ReplayMode {

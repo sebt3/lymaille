@@ -15,6 +15,7 @@ use super::{AgentsError, AgentsResult, SamplingParams};
 /// Nature of an agent: a work agent does the work of a session, a configuration agent configures the host, and a
 /// sub-agent is delegated to by a work agent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum AgentKind {
@@ -29,15 +30,23 @@ pub enum AgentKind {
 
 /// Limits of the sandbox of an agent: the delay of a script and the render cap of an output, in characters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
 #[non_exhaustive]
 pub struct SandboxLimits {
+    // `std::time::Duration` has no `TS` implementation: the declaration mirrors the serde form, the `secs`/`nanos`
+    // struct serde writes for every serializer.
+    #[cfg_attr(feature = "ts-rs", ts(type = "{ secs: number, nanos: number }"))]
     script_timeout: Duration,
+    #[cfg_attr(feature = "ts-rs", ts(type = "number"))]
     render_cap_chars: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-rs", ts(type = "number"))]
     max_string_bytes: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-rs", ts(type = "number"))]
     max_array_len: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-rs", ts(type = "number"))]
     max_map_len: Option<u64>,
 }
 
@@ -114,6 +123,7 @@ impl SandboxLimits {
 /// Definition of an agent. When it designates its model, it does so by the name of an optional profile and never names
 /// a provider.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
 #[non_exhaustive]
 pub struct AgentDefinition {
     id: String,

@@ -18,6 +18,7 @@ const DEFAULT_TOKENIZATION_HINT: NonZeroU64 = match NonZeroU64::new(2500) {
 
 /// Sampling parameters sent to the provider. Absent fields stay absent; extra parameters are passed through as they are.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
 #[non_exhaustive]
 pub struct SamplingParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -25,6 +26,7 @@ pub struct SamplingParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     top_p: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-rs", ts(type = "number"))]
     top_k: Option<u64>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     extra: BTreeMap<String, serde_json::Value>,
@@ -125,22 +127,27 @@ impl DetectedModel {
 
 /// Named model profile. It names a provider; it holds no address and no secret.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
 #[non_exhaustive]
 pub struct ModelProfile {
     name: String,
     provider: String,
     model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-rs", ts(type = "number"))]
     context_size: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-rs", ts(type = "number"))]
     max_response: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     tools: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     sampling: Option<SamplingParams>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-rs", ts(type = "number"))]
     tokenization_hint: Option<NonZeroU64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-rs", ts(type = "number"))]
     concurrency: Option<NonZeroU64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     replay: Option<ReplayMode>,
@@ -214,6 +221,13 @@ impl ModelProfile {
     }
 
     /// Returns the name of the profile.
+    #[cfg_attr(
+        feature = "ts-rs",
+        expect(
+            clippy::same_name_method,
+            reason = "the `TS` derive implements the `name` associated function of `ts_rs::TS`; the accessor takes `&self` and the trait function takes `&Config`, so method resolution never sees an ambiguity"
+        )
+    )]
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name

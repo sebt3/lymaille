@@ -33,10 +33,12 @@ pub(in crate::toolsets) mod semver_text {
 /// Requirement on a context type: a type name and a minimal version. A requirement `cluster@1.2` is satisfied by any
 /// version of the same major that is greater than or equal to the minimum.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
 #[non_exhaustive]
 pub struct TypeRequirement {
     name: String,
     #[serde(with = "semver_text")]
+    #[cfg_attr(feature = "ts-rs", ts(type = "string"))]
     minimum: Semver,
 }
 
@@ -87,6 +89,13 @@ impl TypeRequirement {
     }
 
     /// Returns the name of the required type.
+    #[cfg_attr(
+        feature = "ts-rs",
+        expect(
+            clippy::same_name_method,
+            reason = "the `TS` derive implements the `name` associated function of `ts_rs::TS`; the accessor takes `&self` and the trait function takes `&Config`, so method resolution never sees an ambiguity"
+        )
+    )]
     pub(in crate::toolsets) fn name(&self) -> &str {
         &self.name
     }
