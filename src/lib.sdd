@@ -32,3 +32,6 @@ Must:
 
 Tasks:
   [x] #1 Ajouter les déclarations `mod` et les `pub use` au fil des specs enfants livrées.
+  [x] #2 Référence gardée `#[cfg(feature = "ts-rs")] use ts_rs as _;` (décision du développeur principal du 2026-11-13) : sous la feature,
+      le lint `unused_crate_dependencies` (dénis, harnais) refuserait la dépendance optionnelle avant que des dérives `TS` existent
+      (tâche « feature `ts-rs` » #14 de /lymaille.sdd) ; cette référence reste correcte une fois les dérives posées.

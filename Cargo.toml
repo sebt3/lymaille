@@ -185,6 +185,9 @@ fs = ["vynil-core/fs"]
 shell = ["vynil-core/shell"]
 mcp-http = ["dep:rmcp", "dep:http"]
 rig = ["dep:rig-core"]
+# TypeScript derivation of the definition types (`dsd/agent-sessions.md` NFR-4, `src/ts_contract.sdd`). Off by
+# default: without it `ts-rs` is absent from the dependency graph, and the library never writes TypeScript files.
+ts-rs = ["dep:ts-rs"]
 
 [dependencies]
 base64 = "0.23.1"
@@ -197,6 +200,7 @@ rmcp = { version = "=3.9.0", default-features = false, features = ["client", "tr
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 thiserror = "2.0.21"
+ts-rs = { version = "12.0.1", optional = true, default-features = false, features = ["serde-compat", "serde-json-impl"] }
 tokio = { version = "1.54.1", features = ["rt", "sync", "time", "macros"] }
 tokio-util = "0.7.20"
 vynil-core = { version = "0.9.1", default-features = false, features = ["rhai", "rt", "metadata"] }

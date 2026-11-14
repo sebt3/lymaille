@@ -3,6 +3,12 @@
 //! agent state, and lazily discovered MCP toolsets.
 //! See `dsd/agent-sessions.md` for the full design.
 
+// Keep the optional dependency named under its feature: the crate references the
+// `ts-rs` derive macros only once the `TS` drifts land, while `unused_crate_dependencies`
+// (denied by the harness) would otherwise reject it as soon as the feature is on.
+#[cfg(feature = "ts-rs")]
+use ts_rs as _;
+
 mod agents;
 mod clock;
 mod context;
