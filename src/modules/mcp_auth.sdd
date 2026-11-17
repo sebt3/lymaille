@@ -1,0 +1,64 @@
+Spec: mcp_auth
+
+Purpose:
+  Authentification d'un connecteur MCP : le jeu d'en-têtes que l'hôte résout et le trait qui les rend, sans dépendance au connecteur réel (`rmcp`, `http`) : ils se compilent
+    sans la feature `mcp-http` (`agent-sessions/modules#FR-13`, `agent-sessions#CON-3`, `agent-sessions#CON-5`).
+
+Owns:
+  ./mcp_auth.rs
+
+Can modify:
+  ./mcp_client.rs: retrait de @McpHeaders et de @McpAuth, des tests qui passent ici et des imports devenus inutiles ; la conversion des en-têtes propres vers les types `http` y reste, lue par @McpHeaders::custom ; aucun autre changement.
+  ./mod.rs: déclaration du module et ré-exports sans condition de feature.
+  ../lib.rs: ré-exports sans condition de feature.
+
+References:
+  ./mcp.sdd
+  ./mcp_client.sdd
+
+Exposes:
+  @McpHeaders
+  @McpAuth
+  @McpHeaders::bearer
+  @McpHeaders::custom (visibilité `pub(in crate::modules)`, lue par le connecteur réel ; hors API publique)
+
+Accepts:
+  @McpHeaders::new: aucun argument ; @McpHeaders::with_bearer: un jeton (sans le préfixe `Bearer`) ; @McpHeaders::with_header: un nom et une valeur d'en-tête. Les valeurs sont opaques.
+  @McpAuth::headers: aucun argument ; trait asynchrone de l'hôte (futur `Send`, sans macro ni boxage) qui rend les @McpHeaders courants ou une @McpError. Il est rappelé à chaque connexion et à chaque reconnexion (un jeton renouvelé est pris en compte).
+
+Returns:
+  @McpHeaders::bearer: le jeton posé par @McpHeaders::with_bearer, sans le préfixe `Bearer`, ou `None`.
+  @McpHeaders::custom: les en-têtes propres (nom, valeur) dans l'ordre des noms.
+
+Raises:
+  @McpAuth::headers: une @McpError (voir ./mcp.sdd) que le connecteur rend telle quelle.
+
+Must:
+  Se compile avec `--no-default-features` : aucune dépendance à `rmcp` ni à `http` ; les en-têtes sont des textes, leur conversion vers les types de transport est celle du connecteur réel (./mcp_client.sdd).
+  Les @McpHeaders ne se montrent jamais : leur `Debug` ne contient que les noms d'en-têtes et la présence d'un jeton, jamais une valeur. @McpHeaders::bearer est la seule lecture publique d'une valeur, offerte à l'hôte pour vérifier ce que rend sa propre @McpAuth (un test) ; la librairie ne l'appelle que pour construire la requête du connecteur, et aucune erreur, aucun événement ni aucun journal ne porte un jeton ou une valeur d'en-tête (`agent-sessions#CON-3`).
+  @McpAuth est `Send + Sync`.
+
+Forbids:
+  rmcp
+  http
+
+Depends on:
+  ./mcp.sdd
+
+Scenario: le jeton posé se relit
+  Given des @McpHeaders construits avec le jeton `tok-123`, et d'autres sans jeton
+  When bearer est lu sur chacun
+  Then le premier rend `tok-123` et le second rend `None`
+
+Scenario: les en-têtes ne se montrent pas
+  Given des @McpHeaders portant un jeton et un en-tête personnalisé
+  When ils sont formatés avec Debug
+  Then le texte contient les noms d'en-têtes et jamais leur valeur
+
+Scenario: une authentification d'hôte s'écrit sans le connecteur réel
+  Given la crate construite avec `--no-default-features` et une implémentation de @McpAuth qui rend un jeton
+  When headers est appelé
+  Then les @McpHeaders rendus portent ce jeton, lisible par bearer
+
+Tasks:
+  [ ] #1 Lot 0.3.1-A (`sebt3/lymaille#17` point 3, `#13` point 2, `agent-sessions/modules#FR-13`) : créer ./mcp_auth.rs et y déplacer @McpHeaders et @McpAuth depuis ./mcp_client.rs avec leurs tests (le Scenario « les en-têtes ne se montrent pas » compris, qui quitte ./mcp_client.sdd) ; écrire les tests de @McpHeaders::bearer et de @McpHeaders::custom, les voir échouer, puis les accesseurs. Le déplacement ne change aucun comportement du connecteur. Déclarer le module et ré-exporter @McpHeaders et @McpAuth sans condition de feature (./mod.rs, ../lib.rs) ; @McpClientConfig et @RmcpConnector restent derrière `mcp-http`. En plus de `scripts/check` : `cargo test --no-default-features --lib modules::mcp_auth` et `cargo check --no-default-features` passent.

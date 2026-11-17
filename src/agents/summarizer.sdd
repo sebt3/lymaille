@@ -1,0 +1,76 @@
+Spec: summarizer
+
+Purpose:
+  Résumeur de production : implémente @Summarizer (../context/strategy.sdd) au-dessus d'un @InferenceProvider (./inference.sdd) et d'un profil résolu, pour que l'hôte
+    ne réécrive pas l'appel au fournisseur avec le prompt de résumé (`agent-sessions/context-window#FR-11`, `FR-7`).
+
+Owns:
+  ./summarizer.rs
+
+Can modify:
+  ./mod.rs: déclaration du module et ré-export.
+  ../lib.rs: ré-export.
+
+References:
+  ./inference.sdd
+  ./profile.sdd
+  ../context/strategy.sdd
+  ../context/error.sdd
+
+Exposes:
+  @ProviderSummarizer
+  @ProviderSummarizer::new
+  @ProviderSummarizer::with_prompt
+
+Accepts:
+  @ProviderSummarizer::new: un fournisseur (`P: InferenceProvider`, le plus souvent un `Arc`, voir ./inference.sdd) et le @ResolvedProfile du modèle qui résume ; l'hôte résout le profil, ce fichier n'en résout aucun.
+  @ProviderSummarizer::with_prompt: la surcharge du prompt de résumé (texte), constructeur chaîné ; passée à @summary_prompt, une surcharge vide ou blanche retombe sur @DEFAULT_SUMMARY_PROMPT.
+  @ProviderSummarizer::summarize (trait @Summarizer) : la transcription et, optionnellement, le @Digest.
+
+Returns:
+  @ProviderSummarizer::summarize: le texte de la réponse du fournisseur, tel quel.
+
+Raises:
+  @ContextError::Summarizer: le fournisseur a échoué ; le message est celui de l'@InferenceError, sans contenu de la requête (la transcription n'y figure pas).
+
+Must:
+  La requête envoyée porte le profil donné, le prompt de résumé en prompt système, un unique message utilisateur dont le texte est la transcription exacte, aucun tool, aucun raisonnement rejoué et aucun message d'assistant.
+  Le digest n'est pas envoyé : la stratégie l'ajoute elle-même au message de résumé (../context/strategy.sdd) et il ne porte que des nombres (choix posé le 2026-11-17, à valider).
+  Un texte de réponse vide est rendu tel quel : le refus d'un résumé vide est celui de la stratégie (@ContextError::EmptySummary), pas d'ici.
+  Aucune attente, aucun réessai : le fournisseur et la boucle de tour s'en chargent (./inference.sdd).
+  Se partage entre tâches (`Send + Sync`) et n'enregistre rien du contenu qu'il résume.
+
+Depends on:
+  ./inference.sdd
+  ./profile.sdd
+  ../context/strategy.sdd
+  ../context/error.sdd
+  ../session/history.sdd
+
+Scenario: le résumeur envoie la transcription sous le prompt par défaut
+  Given un fournisseur scripté qui répond `Résumé` et un résumeur sans surcharge
+  When summarize reçoit la transcription `user: bonjour`
+  Then le texte rendu est `Résumé`, et la requête enregistrée a pour prompt système @DEFAULT_SUMMARY_PROMPT, pour unique message l'utilisateur `user: bonjour`, et aucun tool
+
+Scenario: la surcharge du prompt remplace le défaut
+  Given un résumeur avec la surcharge `Résume en une ligne`, puis un autre avec la surcharge `   `
+  When chacun résume une transcription
+  Then le premier envoie `Résume en une ligne` en prompt système, le second @DEFAULT_SUMMARY_PROMPT
+
+Scenario: l'échec du fournisseur devient l'erreur du résumeur
+  Given un fournisseur scripté dont la première réponse est une erreur transitoire
+  When summarize est appelé
+  Then l'erreur est @ContextError::Summarizer, son message ne contient pas la transcription, et le fournisseur n'a reçu qu'un appel
+
+Scenario: le fournisseur partagé sert la boucle de tour et le résumeur
+  Given un `Arc` autour d'un fournisseur scripté, donné au résumeur par un clone
+  When le résumeur résume puis l'`Arc` d'origine complète une requête
+  Then les deux requêtes sont visibles par le fournisseur partagé, dans l'ordre
+
+Scenario: la stratégie par défaut s'appuie sur le résumeur de production
+  Given une @DefaultStrategy construite sur un résumeur de production dont le fournisseur répond `Résumé`
+  When la compaction d'un historique de quelques messages est demandée
+  Then la sortie est une frontière `Compaction` suivie d'un message utilisateur qui contient `Résumé`
+
+Tasks:
+  [ ] #1 Lot 0.3.1-B (`sebt3/lymaille#17` point 2, `agent-sessions/context-window#FR-11`, `AC-7`) : créer ./summarizer.rs ; tests des cinq Scenario vus échouer, puis @ProviderSummarizer. Utiliser @summary_prompt et @InferenceRequest::new (aucun texte de prompt dupliqué), classer l'échec en @ContextError::Summarizer par le message de l'@InferenceError. Déclarer le module et ré-exporter @ProviderSummarizer (./mod.rs, ../lib.rs, sans condition de feature : le fournisseur est un trait, l'adaptateur `rig` n'est pas requis). Le sens de dépendance reste `agents` vers `context` (`context` ne connaît pas `agents`). Dépend de la tâche « `Arc` » de ./inference.sdd (4e Scenario).
