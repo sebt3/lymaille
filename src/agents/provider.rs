@@ -244,7 +244,7 @@ mod tests {
             "an address with credentials in clear must give nothing"
         );
         assert!(
-            provider("vllm-strix", Some("Bearer abc")).is_none(),
+            provider("vllm-strix", Some("Bearer-abcdefghijklmnop0123")).is_none(),
             "an auth reference holding a bearer token must give nothing"
         );
     }
@@ -316,7 +316,11 @@ mod tests {
 
     #[test]
     fn bearer_prefix_refused_in_any_case() {
-        for token in ["Bearer-abc", "bearer-abc", "BEARER-abc"] {
+        for token in [
+            "Bearer-abcdefghijklmnop0123",
+            "bearer-abcdefghijklmnop0123",
+            "BEARER-abcdefghijklmnop0123",
+        ] {
             assert!(
                 provider("vllm-strix", Some(token)).is_none(),
                 "an auth reference starting with Bearer must give nothing: {token}"

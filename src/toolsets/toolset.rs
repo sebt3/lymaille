@@ -643,7 +643,7 @@ mod tests {
         for default in [
             json!("sk-abcdef"),
             json!("https://user:pass@host/x"),
-            json!({ "token": "Bearer abc" }),
+            json!({ "token": "Bearer abcdefghijklmnop0123" }),
         ] {
             let result = toolset("grafana").with_param(
                 ParamDecl::new("endpoint".to_owned(), json!({ "type": "string" }))

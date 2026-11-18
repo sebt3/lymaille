@@ -15,6 +15,7 @@ Structure:
   ./definition.rs: définition d'agent et empreinte
   ./catalog.rs: traits de stockage du catalogue et stockage mémoire
   ./inference.rs: trait du fournisseur d'inférence, requête, réponse, classement des erreurs, fournisseur scripté
+  ./summarizer.rs: résumeur de production au-dessus d'un fournisseur d'inférence
 
 Owns:
   ./mod.rs
@@ -32,6 +33,7 @@ References:
   ./definition.sdd
   ./catalog.sdd
   ./inference.sdd
+  ./summarizer.sdd
 
 Must:
   Ne réaliser aucune E/S : détection de modèles, appels d'inférence et stockage sont des traits ou des données (`agent-sessions#CON-1`).

@@ -55,4 +55,6 @@ Scenario: aller-retour sérialisé
   Then le résultat est identique, et un document qui porte un nom ressemblant à un secret est refusé
 
 Tasks:
+  [x] #2 Lot 0.3.1-C (`src/secret.sdd` #3, décision du développeur principal du 2026-11-18) : sous le nouveau contrat du détecteur, `Bearer abc` n'est plus un secret ; dans le test du refus à la désérialisation, le document JSON portant `"providers":["Bearer abc"]` devient un littéral secret au nouveau contrat (par exemple `sk-FAKE-SECRET-1234`, déjà utilisé au-dessus, ou `Bearer` suivi d'au moins 16 caractères) : le refus testé ne change pas de sens. Aucun changement de comportement du manifeste.
+      Validé le 2026-11-18 (validator, lot 0.3.1-C groupé) : rouge `secret_like_name_is_refused` vu après changement du détecteur ; littéral adapté, refus asserté, comportement inchangé.
   [x] #1 Tests puis implémentation (lot M1), déclaration dans ./mod.rs et ré-export dans ../lib.rs.

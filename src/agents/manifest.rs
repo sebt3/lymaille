@@ -383,7 +383,7 @@ mod tests {
             ProjectManifest::new("lymaille-demo").and_then(|m| m.with_provider("sk-FAKE-SECRET-1234"));
         assert!(refused.is_none(), "a secret-like provider name gives nothing");
         let document = r#"{"name":"lymaille-demo","main_agents":[],"subagents":[],"toolsets":[],
-            "context_types":[],"contexts":[],"providers":["Bearer abc"],"profiles":[]}"#;
+            "context_types":[],"contexts":[],"providers":["Bearer abcdefghijklmnop0123"],"profiles":[]}"#;
         assert!(
             serde_json::from_str::<ProjectManifest>(document).is_err(),
             "a document holding a secret-like name must be refused on deserialization"

@@ -72,6 +72,8 @@ Scenario: replace_skill remplace un skill de même nom
   Then le toolset porte le nouveau `deploy` (l'ancien corps a disparu) et `rollback`, et un ajout ordinaire du même nom reste refusé comme doublon
 
 Tasks:
+  [x] #P8 Lot 0.3.1-C (`src/secret.sdd` #3, décision du développeur principal du 2026-11-18) : sous le nouveau contrat du détecteur, `Bearer abc` n'est plus un secret ; dans `secret_like_default_refused`, le défaut `"Bearer abc"` devient `Bearer` suivi d'un jeton plausible d'au moins 16 caractères (par exemple `Bearer abcdefghijklmnop0123`) : le refus testé ne change pas de sens. Aucun changement de comportement du toolset.
+      Validé le 2026-11-18 (validator, lot 0.3.1-C groupé) : rouge `secret_like_default_refused` vu après changement du détecteur ; littéral adapté, refus asserté, comportement inchangé.
   [x] #3 Test d'un nom de module qui est un mot réservé de Rhai (`fn`), relevé par le validateur le 2026-10-29.
       Validé le 2026-10-29 (validator, 12 mutants tués) sous `SKIP=deny scripts/check`.
   [x] #1 Tests puis implémentation.
