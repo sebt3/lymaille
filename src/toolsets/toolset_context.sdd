@@ -9,6 +9,7 @@ Owns:
 
 Exposes:
   @ToolsetContext::with_secret_detector
+  @ToolsetContext::name
   @ToolsetContext::check
   @ToolsetContext
   @ContextLevel
@@ -25,6 +26,7 @@ Accepts:
   @ToolsetContext::resolve: les valeurs par défaut déclarées par les toolsets de l'agent (nom du toolset, nom du paramètre, valeur) ; rend un @ResolvedContext.
 
 Returns:
+  @ToolsetContext::name: le nom du contexte, tel que posé à la construction (`agent-sessions/toolsets#FR-23`).
   @ResolvedContext: les paramètres résolus (table ordonnée nom vers valeur) pour chaque toolset et pour le reste, et la liste triée des noms des rôles liés. Aucune référence de secret : seuls les noms des rôles sortent.
 
 Raises:
@@ -80,7 +82,14 @@ Scenario: un détecteur de l'hôte juge paramètres, rôles et surcharges
   When with_parameter, with_role et with_override reçoivent `tok_abc`, puis `sk-abc`
   Then `tok_abc` est refusé par InvalidContext dans les trois cas et `sk-abc` accepté, et check rend les mêmes verdicts sur un contexte désérialisé
 
+Scenario: le nom d'un contexte se lit
+  Given un contexte construit avec le nom `prod` au niveau `Shared`
+  When name est lu
+  Then il rend `prod`, sans passer par la sérialisation
+
 Tasks:
+  [x] #10 Lot 0.3.1-C (`src/secret.sdd` #3, décision du développeur principal du 2026-11-18) : sous le nouveau contrat du détecteur, `Bearer abc` n'est plus un secret ; dans `credentials_in_url_and_bearer_refused_even_nested`, la valeur imbriquée devient `Bearer` suivi d'un jeton plausible d'au moins 16 caractères (par exemple `Bearer abcdefghijklmnop0123`) : le refus testé ne change pas de sens. Aucun changement de comportement du contexte.
+      Validé le 2026-11-18 (validator, lot 0.3.1-C groupé) : rouge `credentials_in_url_and_bearer_refused_even_nested` vu après changement du détecteur ; littéral adapté, refus asserté, comportement inchangé.
   [x] #7 Renommer `ContextLevel::Project` en `Shared`, alias de lecture `project` (lot 0.2-C1, `agent-sessions#Glossaire`, `sebt3/lymaille#5`) : le Scenario ci-dessus d'abord, puis le renommage, puis toutes les occurrences de la crate (tests de `native`, `template`, `config`, `compat`, `store`, `context_type` et de ../tools/inspect.sdd compris). Rupture d'API publique assumée pour la 0.2.0.
       Validé le 2026-11-04 (validation menée par l'orchestrateur après l'arrêt de la batterie du validator sur un OOM du pod : `scripts/check` complet vert, grep sans occurrence restante de ContextLevel::Project, Scenario à jour — `shared` écrit, `project` lu et jamais réécrit ; aucun mutant cible sur les lignes du diff, la production touchée étant la seule déclaration de variante ; MemoryLevel::Project intact, le TBD mémoire est exclu de la 0.2.0. Le rétablissement de Cargo.toml et Cargo.lock, modifiés hors périmètre par l'outil interrompu, est consigné dans le message du commit).
   [x] #1 Tests puis implémentation.
@@ -92,3 +101,5 @@ Tasks:
       Extraite (toolsets#6) : la détection vit dans `../secret.rs` (`looks_like_secret`, `pub(crate)`), appelée ici et par `../agents/provider.rs`.
   [x] #P5 @ToolsetContext::with_secret_detector et @ToolsetContext::check (lot P5, 2026-10-31) : la désérialisation applique @DefaultSecretDetector.
   [x] #8 `ts-rs` (`sebt3/lymaille#10`) : dériver `TS` sous la feature `ts-rs` pour @ToolsetContext et @ContextLevel. Le détecteur (`serde(skip)`) n'apparaît pas ; `ContextLevel` se déclare par les valeurs `user`, `shared`, `session` (l'alias de lecture `project` n'en est pas une). Poser `#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]` sans `#[ts(export)]` (ses tests générés écrivent des fichiers). Un entier 64 bits (`u64`, `NonZeroU64`) se sérialise en nombre JSON : `#[cfg_attr(feature = "ts-rs", ts(type = "number"))]`, jamais `bigint`. Un champ avec `skip_serializing_if` est optionnel dans la déclaration (`ts(optional)`, à vérifier dans la documentation de la version retenue de `ts-rs`). Une version `Semver` (`serde(with = "semver_text")`) se déclare `string` ; une valeur `serde_json::Value` utilise l'implémentation `serde-json-impl`. Aucun test de sérialisation existant ne change ; une erreur de compilation sous la feature est le rouge attendu. Dépend de la tâche « feature `ts-rs` » de /lymaille.sdd (elle ajoute la dépendance optionnelle) ; le contrat est vérifié par ../ts_contract.sdd.
+  [x] #9 Lot 0.3.1-A (`sebt3/lymaille#13` point 1, `agent-sessions/toolsets#FR-23`, `AC-18`) : même démarche que @ContextType::name (./context_type.sdd) : test du Scenario « le nom d'un contexte se lit » depuis l'extérieur du module `toolsets`, vu échouer, puis @ToolsetContext::name de `pub(in crate::toolsets)` à `pub`, `#[expect(...)]` conservé. Aucun autre changement.
+      Validé le 2026-11-18 (validator) : rouge E0624 vu depuis ./tests ; `#[must_use]` ajouté, commandé par le harnais pedantic ; `#[expect]` ts-rs honoré sous `--features ts-rs`. `scripts/check` vert hors `dependencies` (RUSTSEC-2026-0543 `chrono`, préexistant, précédent `SKIP=deny`). Suivi relevé, hors périmètre : un résumé de doc préexistant sur HEAD orne @ToolsetContext::name au lieu de @ToolsetContext::with_parameter (rustdoc imbriqué, ./toolset_context.rs) — à traiter en tâche dédiée, pas en rattrapage.

@@ -173,7 +173,8 @@ impl ToolsetContext {
             reason = "the `TS` derive implements the `name` associated function of `ts_rs::TS`; the accessor takes `&self` and the trait function takes `&Config`, so method resolution never sees an ambiguity"
         )
     )]
-    pub(in crate::toolsets) fn name(&self) -> &str {
+    #[must_use]
+    pub fn name(&self) -> &str {
         &self.name
     }
 
@@ -528,7 +529,10 @@ mod tests {
         );
         assert!(
             matches!(
-                context.with_parameter("headers".to_owned(), json!(["ok", { "auth": "Bearer abc" }])),
+                context.with_parameter(
+                    "headers".to_owned(),
+                    json!(["ok", { "auth": "Bearer abcdefghijklmnop0123" }])
+                ),
                 Err(ToolsetsError::InvalidContext { .. })
             ),
             "a bearer token nested in an array and an object is refused"

@@ -240,7 +240,8 @@ impl ContextType {
             reason = "the `TS` derive implements the `name` associated function of `ts_rs::TS`; the accessor takes `&self` and the trait function takes `&Config`, so method resolution never sees an ambiguity"
         )
     )]
-    pub(in crate::toolsets) fn name(&self) -> &str {
+    #[must_use]
+    pub fn name(&self) -> &str {
         &self.name
     }
 

@@ -2,7 +2,7 @@
 //! URL and for authentication headers that the host resolves (`agent-sessions/modules#FR-6`, `agent-sessions/modules#FR-9`,
 //! `agent-sessions#CON-5`). Everything here exists only with the `mcp-http` Cargo feature, and `rmcp` appears nowhere else.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::fmt;
 use std::sync::Arc;
@@ -32,70 +32,7 @@ use tokio::sync::{Mutex, mpsc};
 use tokio::time::timeout;
 
 use super::mcp::{McpConnector, McpError, McpLister, McpNotification, McpTool};
-
-/// Authentication headers of a server, as the host resolves them. The values are opaque and never shown.
-#[derive(Clone, Default)]
-pub struct McpHeaders {
-    bearer: Option<String>,
-    extra: BTreeMap<String, String>,
-}
-
-impl McpHeaders {
-    /// Builds an empty set of headers.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Adds a bearer token, given without the `Bearer` prefix.
-    #[must_use]
-    pub fn with_bearer(mut self, token: &str) -> Self {
-        self.bearer = Some(token.to_owned());
-        self
-    }
-
-    /// Adds a header with its name and its value.
-    #[must_use]
-    pub fn with_header(mut self, name: &str, value: &str) -> Self {
-        let _previous = self.extra.insert(name.to_owned(), value.to_owned());
-        self
-    }
-
-    /// Converts the custom headers for the transport. An invalid header is refused without showing its value.
-    fn custom_headers(&self) -> Result<HashMap<HeaderName, HeaderValue>, McpError> {
-        let mut headers = HashMap::new();
-        for (name, value) in &self.extra {
-            let header_name = HeaderName::from_bytes(name.as_bytes())
-                .map_err(|_error| McpError::Failed(format!("invalid header name `{name}`")))?;
-            let mut header_value = HeaderValue::from_str(value)
-                .map_err(|_error| McpError::Failed(format!("invalid value for the header `{name}`")))?;
-            header_value.set_sensitive(true);
-            let _previous = headers.insert(header_name, header_value);
-        }
-        Ok(headers)
-    }
-}
-
-impl fmt::Debug for McpHeaders {
-    // Only the names and the presence of a token: a value never shows (`agent-sessions#CON-3`).
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("McpHeaders")
-            .field("bearer", &self.bearer.is_some())
-            .field("headers", &self.extra.keys().collect::<Vec<_>>())
-            .finish()
-    }
-}
-
-/// Source of the authentication headers, implemented by the host. It is called at each connection and at each
-/// reconnection, so that a renewed token is taken into account.
-pub trait McpAuth: Send + Sync {
-    /// Returns the current headers.
-    ///
-    /// # Errors
-    ///
-    /// Returns the [`McpError`] of the host when it cannot resolve the headers; the connector gives it back as is.
-    fn headers(&self) -> impl Future<Output = Result<McpHeaders, McpError>> + Send;
-}
+use super::mcp_auth::{McpAuth, McpHeaders};
 
 /// Configuration of a [`RmcpConnector`]: the URL of the server and the time limits.
 #[derive(Clone)]
@@ -271,9 +208,9 @@ impl<A: McpAuth> RmcpConnector<A> {
         }
         let headers = self.auth.headers().await?;
         let mut transport_config = StreamableHttpClientTransportConfig::with_uri(self.config.url.as_str())
-            .custom_headers(headers.custom_headers()?);
-        if let Some(token) = &headers.bearer {
-            transport_config = transport_config.auth_header(token.as_str());
+            .custom_headers(custom_headers(&headers)?);
+        if let Some(token) = headers.bearer() {
+            transport_config = transport_config.auth_header(token);
         }
         let transport = StreamableHttpClientTransport::from_config(transport_config);
         let opened = timeout(
@@ -312,6 +249,21 @@ impl<A> fmt::Debug for RmcpConnector<A> {
             .field("connect_timeout", &self.config.connect_timeout)
             .finish_non_exhaustive()
     }
+}
+
+/// Converts the custom headers for the transport, read through [`McpHeaders::custom`]. An invalid header is refused
+/// without showing its value.
+fn custom_headers(headers: &McpHeaders) -> Result<HashMap<HeaderName, HeaderValue>, McpError> {
+    let mut converted = HashMap::new();
+    for (name, value) in headers.custom() {
+        let header_name = HeaderName::from_bytes(name.as_bytes())
+            .map_err(|_error| McpError::Failed(format!("invalid header name `{name}`")))?;
+        let mut header_value = HeaderValue::from_str(value)
+            .map_err(|_error| McpError::Failed(format!("invalid value for the header `{name}`")))?;
+        header_value.set_sensitive(true);
+        let _previous = converted.insert(header_name, header_value);
+    }
+    Ok(converted)
 }
 
 /// Converts a tool of `rmcp`.
@@ -1167,24 +1119,6 @@ mod tests {
         assert_eq!(initializations, 1, "a single session serves the concurrent calls");
     }
 
-    // Scenario: les en-têtes ne se montrent pas
-    #[test]
-    fn headers_debug_shows_names_and_never_values() {
-        let headers = McpHeaders::new()
-            .with_bearer("tok-secret")
-            .with_header("x-api-key", "key-secret");
-        let text = format!("{headers:?}");
-        assert!(text.contains("x-api-key"), "the header name is shown: {text}");
-        assert!(
-            text.contains("bearer"),
-            "the presence of a token is shown: {text}"
-        );
-        assert!(!text.contains("tok-secret"), "the token is never shown: {text}");
-        assert!(!text.contains("key-secret"), "a value is never shown: {text}");
-        let bare = format!("{:?}", McpHeaders::new());
-        assert!(!bare.contains("true"), "no token, none announced: {bare}");
-    }
-
     // Scenario: aucune connexion à la construction
     #[tokio::test]
     async fn construction_does_not_connect() {
@@ -1318,9 +1252,8 @@ mod tests {
     }
 
     #[test]
-    fn connector_and_headers_are_send_and_sync() {
+    fn connector_and_config_are_send_and_sync() {
         assert_send_sync::<RmcpConnector<StaticAuth>>();
-        assert_send_sync::<McpHeaders>();
         assert_send_sync::<McpClientConfig>();
     }
 

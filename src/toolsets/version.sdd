@@ -8,6 +8,7 @@ Owns:
 
 Exposes:
   @TypeRequirement
+  @TypeRequirement::minimum
   @Bump
 
 Accepts:
@@ -15,6 +16,7 @@ Accepts:
   @TypeRequirement::is_satisfied_by: une version.
 
 Returns:
+  @TypeRequirement::minimum: la version minimale (@vynil_core::Semver) posée par `new` ou lue par `parse` (`cluster@1.2` rend `1.2.0`), en lecture seule, pour qu'un hôte affiche ce qu'un toolset exige (`agent-sessions/toolsets#FR-23`).
   @TypeRequirement::is_satisfied_by: vrai si la version a la même majeure que le minimum et lui est supérieure ou égale.
   @Bump: `None`, `Minor` ou `Major` (ordre croissant, `Ord`).
 
@@ -46,8 +48,15 @@ Scenario: exigence mal formée
   When chacun est analysé
   Then chacun échoue avec InvalidToolset
 
+Scenario: la version minimale se lit
+  Given les exigences `cluster@1.2` et `cluster@1.2.3`
+  When minimum est lu sur chacune
+  Then il rend 1.2.0 puis 1.2.3, et la sérialisation de l'exigence est inchangée
+
 Tasks:
   [x] #1 Tests puis implémentation.
       Validé le 2026-10-29 (validator, mutations manuelles) sous `SKIP=deny scripts/check`.
   [x] #2 `vynil_core::Semver` est réutilisé tel quel : son champ public `version` donne la majeure, la mineure et la préversion sans dépendre de la crate `semver` (constaté dans `vynil-core` 0.9.0).
   [x] #3 `ts-rs` (`sebt3/lymaille#10`) : dériver `TS` sous la feature `ts-rs` pour @TypeRequirement. Poser `#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]` sans `#[ts(export)]` (ses tests générés écrivent des fichiers). Un entier 64 bits (`u64`, `NonZeroU64`) se sérialise en nombre JSON : `#[cfg_attr(feature = "ts-rs", ts(type = "number"))]`, jamais `bigint`. Un champ avec `skip_serializing_if` est optionnel dans la déclaration (`ts(optional)`, à vérifier dans la documentation de la version retenue de `ts-rs`). Une version `Semver` (`serde(with = "semver_text")`) se déclare `string` ; une valeur `serde_json::Value` utilise l'implémentation `serde-json-impl`. Aucun test de sérialisation existant ne change ; une erreur de compilation sous la feature est le rouge attendu. Dépend de la tâche « feature `ts-rs` » de /lymaille.sdd (elle ajoute la dépendance optionnelle) ; le contrat est vérifié par ../ts_contract.sdd.
+  [x] #4 Lot 0.3.1-A (`sebt3/lymaille#13` point 5, `agent-sessions/toolsets#FR-23`, `AC-18`) : test du Scenario « la version minimale se lit », vu échouer, puis l'accesseur @TypeRequirement::minimum (`pub`, `#[must_use]`, rustdoc anglaise). Aucun changement de sérialisation ni de la déclaration TypeScript.
+      Validé le 2026-11-18 (validator) : l'accesseur existait en `pub(in crate::toolsets)` ; le rouge de portée est porté par le test d'intégration de ./tests (E0624 vu par rétrogradation temporaire de visibilité, rétablie sans résidu), le test en module garde seul l'assertion « sérialisation inchangée » du Scenario. `scripts/check` vert hors `dependencies` (RUSTSEC-2026-0543 `chrono`, préexistant, précédent `SKIP=deny`).

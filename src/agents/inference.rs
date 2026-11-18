@@ -259,6 +259,29 @@ pub trait InferenceProvider: Send + Sync {
     }
 }
 
+/// Any `Arc<P>` implements the provider when `P` does (`agent-sessions/agents#FR-11`): `complete` and `stream` delegate
+/// to `P` and return the same response, the same error and the same fragments, so a host can share one provider between
+/// the turn loop and a summarizer without a wrapper.
+impl<P: InferenceProvider + ?Sized> InferenceProvider for std::sync::Arc<P> {
+    fn complete(
+        &self,
+        request: InferenceRequest,
+    ) -> impl Future<Output = Result<InferenceResponse, InferenceError>> + Send {
+        <P as InferenceProvider>::complete(&**self, request)
+    }
+
+    fn stream<F>(
+        &self,
+        request: InferenceRequest,
+        fragments: F,
+    ) -> impl Future<Output = Result<InferenceResponse, InferenceError>> + Send
+    where
+        F: FnMut(&str) + Send,
+    {
+        <P as InferenceProvider>::stream(&**self, request, fragments)
+    }
+}
+
 /// Emits the text of the assistant message of `response` as one fragment. An empty text emits nothing.
 fn emit_whole<F: FnMut(&str)>(response: &InferenceResponse, fragments: &mut F) {
     let text = match response.message() {
@@ -902,6 +925,81 @@ mod tests {
             reasoned,
             answer("text"),
             "a response without the reasoning must differ"
+        );
+    }
+
+    /// Completes `request` through the trait, the way the turn loop uses a shared provider.
+    async fn complete_through<P: super::InferenceProvider + ?Sized>(
+        provider: &P,
+        request: InferenceRequest,
+    ) -> Result<InferenceResponse, InferenceError> {
+        provider.complete(request).await
+    }
+
+    /// Streams `request` through the trait, collecting the fragments the caller receives.
+    async fn stream_through<P: super::InferenceProvider + ?Sized>(
+        provider: &P,
+        request: InferenceRequest,
+    ) -> (Vec<String>, Result<InferenceResponse, InferenceError>) {
+        let mut received: Vec<String> = Vec::new();
+        let result = provider
+            .stream(request, |fragment: &str| received.push(fragment.to_owned()))
+            .await;
+        (received, result)
+    }
+
+    // Scenario : un fournisseur partagé par `Arc` se comporte comme le fournisseur nu
+    #[tokio::test]
+    async fn arc_provider_behaves_like_the_bare_provider() {
+        let shared = Arc::new(
+            ScriptedProvider::new(vec![Ok(answer("Bonjour")), Err(transient("later"))])
+                .with_fragments(vec![vec!["Bon".to_owned(), "jour".to_owned()]]),
+        );
+        let alias = Arc::clone(&shared);
+        let first = request("arc");
+        let response = complete_through(&shared, first.clone())
+            .await
+            .expect("the Arc must give the scripted response like the bare provider");
+        assert_eq!(
+            response,
+            answer("Bonjour"),
+            "complete called through the Arc must return the scripted response"
+        );
+        let second = request("arc clone");
+        let (received, result) = stream_through(&alias, second.clone()).await;
+        assert!(
+            matches!(&result, Err(error) if error.class() == ErrorClass::Transient),
+            "stream called through the Arc clone must return the scripted error, got {result:?}"
+        );
+        assert!(
+            received.is_empty(),
+            "a failed stream through the Arc clone must emit no fragment, got {received:?}"
+        );
+        assert_eq!(
+            shared.requests(),
+            vec![first, second],
+            "the shared provider must record both requests, in the order they were received"
+        );
+    }
+
+    // Scenario : le flux d'un `Arc` garde les fragments du fournisseur
+    #[tokio::test]
+    async fn arc_stream_keeps_the_provider_fragments() {
+        let shared = Arc::new(
+            ScriptedProvider::new(vec![Ok(answer("Bonjour"))])
+                .with_fragments(vec![vec!["Bon".to_owned(), "jour".to_owned()]]),
+        );
+        let (received, result) = stream_through(&shared, request("arc fragments")).await;
+        let response = result.expect("the Arc must give the scripted response");
+        assert_eq!(
+            received,
+            vec!["Bon", "jour"],
+            "the stream of an Arc must keep the provider fragments, not the whole text as one fragment"
+        );
+        assert_eq!(
+            response,
+            answer("Bonjour"),
+            "the response of the stream must be the one the provider returns"
         );
     }
 }

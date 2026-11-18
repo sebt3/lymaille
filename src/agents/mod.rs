@@ -13,6 +13,7 @@ mod profile;
 mod provider;
 #[cfg(feature = "rig")]
 mod rig;
+mod summarizer;
 
 pub use catalog::{AgentStore, InMemoryCatalog, Layered, ProfileStore, ProviderStore};
 pub use definition::{AgentDefinition, AgentKind, SandboxLimits};
@@ -26,3 +27,4 @@ pub use profile::{DetectedModel, ModelProfile, ResolvedProfile, SamplingParams};
 pub use provider::{Provider, ProviderLevel};
 #[cfg(feature = "rig")]
 pub use rig::{RigConfig, RigProvider, detect_models};
+pub use summarizer::ProviderSummarizer;

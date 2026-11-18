@@ -12,6 +12,7 @@ Structure:
   ./memory_module.rs: modules Rhai `memory_user`, `memory_shared` et `memory_session`
   ./mcp_name.rs: nom d'une fonction Rhai dérivé du nom d'un tool MCP
   ./mcp.rs: trait du connecteur MCP, tools, erreurs de connexion et connecteur scripté
+  ./mcp_auth.rs: jeu d'en-têtes d'authentification et trait @McpAuth de l'hôte, sans la feature `mcp-http`
   ./mcp_client.rs: connecteur MCP réel (HTTP streamable, `rmcp`), derrière la feature `mcp-http`
   ./mcp_module.rs: génération du module Rhai d'un rôle MCP (réel ou coquille), validation des arguments, reconnexion
   ./session_module.rs: module Rhai `session` (titre, signalement pour analyse)
@@ -34,6 +35,7 @@ References:
   ./mcp_module.sdd
   ./session_module.sdd
   ./mcp_client.sdd
+  ./mcp_auth.sdd
 
 Must:
   Ne réaliser aucune E/S propre : le stockage des Memory est un trait que l'hôte implémente (`agent-sessions#CON-1`), le transport MCP est un trait de connecteur que l'hôte (ou un connecteur ultérieur) implémente.

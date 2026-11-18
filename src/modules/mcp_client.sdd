@@ -10,16 +10,13 @@ Owns:
 References:
   ./mcp.sdd
   ./mcp_module.sdd
+  ./mcp_auth.sdd: @McpHeaders et @McpAuth, que ce connecteur consomme (hors feature `mcp-http`)
 
 Exposes:
-  @McpHeaders
-  @McpAuth
   @McpClientConfig
   @RmcpConnector
 
 Accepts:
-  @McpHeaders::new: aucun argument ; @McpHeaders::with_bearer: un jeton (sans le préfixe `Bearer`) ; @McpHeaders::with_header: un nom et une valeur d'en-tête. Les valeurs sont opaques.
-  @McpAuth::headers: aucun argument ; trait asynchrone de l'hôte (futur `Send`, sans macro ni boxage) qui rend les @McpHeaders courants ou une @McpError. Il est rappelé à chaque connexion et à chaque reconnexion (un jeton renouvelé est pris en compte).
   @McpClientConfig::new: l'URL du serveur ; @McpClientConfig::with_request_timeout: une durée (défaut 30 s) ; @McpClientConfig::with_connect_timeout: une durée (défaut 10 s).
   @RmcpConnector::new: un @McpClientConfig et un @McpAuth partagé ; ne se connecte pas (la connexion est paresseuse, au premier listage ou appel).
 
@@ -30,13 +27,13 @@ Returns:
 Raises:
   @McpError::Unreachable: échec de connexion ou de transport (résolution, TLS, délai de connexion ou de requête dépassé, flux coupé, HTTP 5xx, session expirée non récupérable).
   @McpError::Failed: le serveur répond mais refuse ou échoue (`isError` du résultat, tool inconnu, HTTP 401 ou 403, réponse illisible) ; le texte est celui du serveur sans en-tête ni jeton.
-  Un échec de @McpAuth::headers est rendu tel quel (@McpError::Failed ou Unreachable selon l'hôte).
+  Un échec de @McpAuth::headers (./mcp_auth.sdd) est rendu tel quel (@McpError::Failed ou Unreachable selon l'hôte).
 
 Must:
   Notifications (Décision du 2026-11-01 (accord du développeur principal)) : `RmcpConnector::next_notification` livre les notifications du serveur par un canal borné de 256 ; si le canal est plein les nouvelles sont perdues (le gestionnaire de `rmcp` n'attend pas l'hôte) ; le nom du serveur est celui de son `serverInfo`, sinon `unknown` (l'URL peut porter un secret) ; les notifications de comptabilité de protocole de nos propres requêtes (`cancelled`, `progress`, `subscriptions/acknowledged`) ne sont pas relayées ; aucune URL, jeton ni en-tête n'entre dans une notification.
   Tout le code de ce fichier compile seulement avec la feature Cargo `mcp-http` (activée par défaut, décision du 2026-10-30) ; la dépendance à `rmcp` reste confinée à ce fichier : le reste de la crate ne voit que @McpConnector.
   Aucun fichier, aucun processus, aucun transport stdio : seules les features `client`, `transport-streamable-http-client-reqwest` et `reqwest-tls-no-provider` de `rmcp` sont activées, avec `default-features = false` (la feature `reqwest` de `rmcp` tire `aws-lc` et est proscrite). Le fournisseur TLS de rustls n'est pas choisi par la librairie : l'hôte installe le sien (`reqwest-tls-no-provider`, décision du 2026-10-30), ce qui est documenté.
-  Les @McpHeaders ne se montrent jamais : leur `Debug` ne contient que les noms d'en-têtes et la présence d'un jeton, jamais une valeur ; aucune erreur, aucun événement ni aucun journal ne porte un jeton ou une valeur d'en-tête (`agent-sessions#CON-3`). Les erreurs de transport rendues ne citent pas les en-têtes.
+  Aucune erreur, aucun événement ni aucun journal ne porte un jeton ou une valeur d'en-tête (`agent-sessions#CON-3`) ; les @McpHeaders ne se montrent jamais (./mcp_auth.sdd). Les erreurs de transport rendues ne citent pas les en-têtes.
   La connexion est paresseuse et partagée entre les appels concurrents du même connecteur (une seule session à la fois) ; `reconnect` ne se connecte pas lui-même.
   Chaque requête est bornée par le délai de requête, la connexion par le délai de connexion (`tokio::time::timeout`) ; un dépassement est @McpError::Unreachable.
   Sans fournisseur TLS installé, `rmcp` panique à la construction de son client HTTP, et le connecteur ne peut pas l'éviter : la rustdoc de @RmcpConnector::new dit que l'hôte DOIT avoir installé un fournisseur rustls avant (les tests installent `ring`).
@@ -47,6 +44,7 @@ Must:
 
 Depends on:
   ./mcp.sdd
+  ./mcp_auth.sdd
   ./error.sdd
   rmcp
   http
@@ -98,11 +96,6 @@ Scenario: reconnexion et nouveau jeton
   Given un connecteur déjà utilisé et un @McpAuth dont le jeton change
   When reconnect est appelé puis list_tools
   Then le serveur reçoit le nouveau jeton
-
-Scenario: les en-têtes ne se montrent pas
-  Given des @McpHeaders portant un jeton et un en-tête personnalisé
-  When ils sont formatés avec Debug
-  Then le texte contient les noms d'en-têtes et jamais leur valeur
 
 Scenario: aucune connexion à la construction
   Given une URL injoignable

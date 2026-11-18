@@ -100,8 +100,10 @@ impl TypeRequirement {
         &self.name
     }
 
-    /// Returns the minimal version of the requirement. Read by the compatibility check, to name the version in a gap.
-    pub(in crate::toolsets) const fn minimum(&self) -> &Semver {
+    /// Returns the minimal version of the requirement, in read only: `cluster@1.2` reads `1.2.0`. A host displays what
+    /// a toolset requires through it (`agent-sessions/toolsets#FR-23`); the compatibility check names the version in a gap.
+    #[must_use]
+    pub const fn minimum(&self) -> &Semver {
         &self.minimum
     }
 
@@ -169,6 +171,28 @@ mod tests {
         assert!(
             !requirement.is_satisfied_by(&version("2.0.0")),
             "2.0.0 does not satisfy cluster@1.2"
+        );
+    }
+
+    // Scenario: la version minimale se lit
+    #[test]
+    fn minimum_version_is_readable() {
+        let minor = TypeRequirement::parse("cluster@1.2").expect("a two-part requirement must parse");
+        let patch = TypeRequirement::parse("cluster@1.2.3").expect("a three-part requirement must parse");
+        assert_eq!(
+            minor.minimum(),
+            &version("1.2.0"),
+            "a two-part requirement reads with patch 0"
+        );
+        assert_eq!(
+            patch.minimum(),
+            &version("1.2.3"),
+            "a three-part requirement reads exactly"
+        );
+        let text = serde_json::to_string(&minor).expect("a requirement must serialize");
+        assert_eq!(
+            text, r#"{"name":"cluster","minimum":"1.2.0"}"#,
+            "reading the minimum must not change the serialization of the requirement"
         );
     }
 

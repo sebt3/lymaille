@@ -8,7 +8,7 @@ Owns:
   ./inference.rs
 
 Exposes:
-  @InferenceProvider
+  @InferenceProvider (implémenté aussi pour `Arc<P>` quand `P` l'implémente)
   @InferenceRequest
   @InferenceResponse
   @FinishReason (`Stop`, `Length`, `ToolCalls`, `Other`)
@@ -37,6 +37,7 @@ Raises:
 Must:
   @classify_status : 429 et 5xx → `Transient` ; 400, 401, 403, 404 → `Permanent` ; 400 dont le corps signale un dépassement de contexte → `ContextOverflow` ; tout autre 4xx → `Permanent` ; 2xx n'est pas une erreur (@classify_status rend `None`) ; les erreurs de réseau et de délai sont rapportées par l'adaptateur comme `Transient` (pas de code).
   @InferenceProvider est `Send + Sync`, à futur `Send`, sans macro ni objet dynamique.
+  Pour tout `P` qui implémente @InferenceProvider, `Arc<P>` l'implémente aussi (`agent-sessions/agents#FR-11`) : `complete` et `stream` délèguent à `P`, et rendent la même réponse, la même erreur et les mêmes fragments. L'hôte partage ainsi un fournisseur entre la boucle de tour et un résumeur sans enveloppe.
   @InferenceProvider::stream a une implémentation par défaut : elle appelle `complete`, puis, si le message de l'assistant a un texte non vide, émet ce texte comme un seul fragment. Un texte vide n'émet aucun fragment. Si `complete` échoue, aucun fragment n'est émis et l'erreur est rendue telle quelle.
   Le texte des fragments émis par un appel réussi est, par construction, le texte de la réponse finale pour le fournisseur par défaut ; pour le fournisseur scripté, la concaténation des fragments scriptés est la responsabilité du script et n'est pas vérifiée.
   @ScriptedProvider::stream émet les fragments scriptés du résultat consommé, dans l'ordre, puis rend ce résultat ; il enregistre la requête comme `complete`. Un résultat d'erreur n'émet aucun fragment.
@@ -111,6 +112,16 @@ Scenario: la raison de fin et les jetons de raisonnement se portent
   When on les relit
   Then finish_reason vaut Length, reasoning vaut 15, et une réponse sans les poser rend None pour les deux
 
+Scenario: un fournisseur partagé par `Arc` se comporte comme le fournisseur nu
+  Given un `Arc` autour d'un fournisseur scripté (une réponse puis une erreur transitoire, la réponse scriptée avec les fragments `Bon` et `jour`) et un clone de cet `Arc`
+  When complete est appelé par l'`Arc`, puis stream par son clone avec un récepteur qui collecte les fragments
+  Then complete rend la réponse, stream rend l'erreur sans fragment, et requests, lu par le fournisseur partagé, rend les deux requêtes dans l'ordre
+
+Scenario: le flux d'un `Arc` garde les fragments du fournisseur
+  Given un `Arc` autour d'un fournisseur scripté dont la réponse est scriptée avec les fragments `Bon` et `jour`
+  When stream est appelé par l'`Arc` avec un récepteur qui collecte les fragments
+  Then le récepteur a reçu `Bon` puis `jour`, et non le texte entier en un seul fragment
+
 Tasks:
   [x] #14 Message `Discarded` (../session/history.sdd) : la réponse par défaut de `stream` n'émet aucun fragment pour une réponse dont le message n'est pas un message d'assistant (lot 0.2-A1) ; la correspondance de `emit_whole` traite la nouvelle variante comme les autres variantes sans texte. Aucun Scenario nouveau : un test de non-régression.
       Validé le 2026-11-04 (validator, mutants sans survivant).
@@ -129,3 +140,6 @@ Tasks:
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
   [x] #4 Sortie structurée du sous-agent : résolue par `delegation` (DSD FR-4) : le sous-agent rend son résultat par la fonction Rhai `result::submit`, validée contre le schéma de sa définition avec corrections (../delegation/result.sdd) ; la requête d'inférence ne porte donc pas de schéma de sortie.
   [x] #13 @FinishReason, `InferenceResponse::finish_reason` et `ReportedUsage::reasoning` (Décision du 2026-11-01 (accord du développeur principal, relevé du spike R2), lot R3) : tests puis implémentation, ré-exports dans ../lib.rs.
+  [x] #15 Lot 0.3.1-A (`sebt3/lymaille#17` point 1, `agent-sessions/agents#FR-11`) : écrire les tests des deux Scenario « `Arc` », les voir échouer (à la compilation : `Arc<ScriptedProvider>` n'implémente pas @InferenceProvider), puis l'implémentation par délégation de `complete` et de `stream` (sans la délégation de `stream`, le défaut du trait ne rendrait qu'un fragment : c'est ce que le second Scenario attrape). Aucun autre changement dans ce fichier.
+      Part hors périmètre régularisée : le retrait du double de test `Arc<ScriptedProvider>` de ../runtime/turn.rs (conflit E0119 avec le blanket), inscrit dans ../runtime/turn.sdd #12.
+      Validé le 2026-11-17 (validator) : deux tests vus rouges à la compilation une fois le double neutralisé, blanket `impl<P: InferenceProvider + ?Sized> InferenceProvider for Arc<P>` avec délégation explicite des deux méthodes, mutant « `stream` non délégué » tué par le second Scenario, harnais intact, 1416 tests verts. `scripts/check` vert hors `dependencies` : `RUSTSEC-2026-0543` (`chrono`, préexistant sur HEAD, manifests et `deny.toml` intacts) ; validation consignée sous le précédent `SKIP=deny` du projet.

@@ -28,8 +28,8 @@ pub use agents::{
     AgentDefinition, AgentKind, AgentStore, AgentsError, AgentsResult, DetectedModel, ErrorClass,
     FinishReason, InMemoryCatalog, InferenceError, InferenceProvider, InferenceRequest, InferenceResponse,
     Layered, ManifestGap, ManifestView, ModelProfile, ProfileStore, ProjectManifest, Provider, ProviderLevel,
-    ProviderStore, ReportedUsage, ResolvedProfile, SamplingParams, SandboxLimits, ScriptedProvider,
-    classify_status,
+    ProviderStore, ProviderSummarizer, ReportedUsage, ResolvedProfile, SamplingParams, SandboxLimits,
+    ScriptedProvider, classify_status,
 };
 #[cfg(feature = "rig")]
 pub use agents::{RigConfig, RigProvider, detect_models};
@@ -47,13 +47,14 @@ pub use delegation::{
     workspace_notification,
 };
 pub use modules::{
-    InMemoryMemoryStore, McpConnector, McpEnv, McpError, McpLister, McpNotification, McpRetryPolicy, McpTool,
-    Memory, MemoryLevel, MemoryScope, MemoryScopes, MemoryStore, MemorySummary, ModulesError, ModulesResult,
-    ScriptedConnector, TodoItem, TodoList, TodoStatus, function_name, mcp_module, mcp_shell_descriptor,
-    memory_module, memory_module_name, name_tools, session_module, todo_module,
+    InMemoryMemoryStore, McpAuth, McpConnector, McpEnv, McpError, McpHeaders, McpLister, McpNotification,
+    McpRetryPolicy, McpTool, Memory, MemoryLevel, MemoryScope, MemoryScopes, MemoryStore, MemorySummary,
+    ModulesError, ModulesResult, ScriptedConnector, TodoItem, TodoList, TodoStatus, function_name,
+    mcp_module, mcp_shell_descriptor, memory_module, memory_module_name, name_tools, session_module,
+    todo_module,
 };
 #[cfg(feature = "mcp-http")]
-pub use modules::{McpAuth, McpClientConfig, McpHeaders, RmcpConnector};
+pub use modules::{McpClientConfig, RmcpConnector};
 pub use runtime::{
     RHAI_PAD_TOOL, RestoredSession, TurnConfig, TurnOutput, TurnRunner, UserInbox, restore_session,
     rhai_pad_definition,
