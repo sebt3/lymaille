@@ -77,6 +77,14 @@ raison d'être de `agent-sessions#BO-4`.
       https://docs.fireworks.ai/guides/reasoning.md
     - **Verified by:** `AC-5`
 
+- **FR-11 - SHOULD:** La librairie fournit un résumeur de production au-dessus d'un fournisseur d'inférence (FR-3, FR-7) : il envoie
+  le texte de transcription à un profil résolu que l'hôte lui donne, avec le prompt de résumé (celui de FR-7 ou la surcharge de
+  l'agent ou de l'hôte), sans tool, et rend le texte de la réponse. Un échec du fournisseur est une erreur du résumeur ; un
+  résumé vide reste refusé par la stratégie. L'hôte n'a plus à réécrire ce même appel ; il garde la liberté d'implémenter son
+  propre résumeur.
+    - **Source:** `sebt3/lymaille#17` point 2, 2026-11-17
+    - **Verified by:** `AC-7`
+
 ## Questions ouvertes
 
 - **Décidé:** la librairie fournit un prompt de résumé par défaut, surchargeable par l'agent ou l'hôte, qui impose au résumeur de
@@ -113,6 +121,11 @@ raison d'être de `agent-sessions#BO-4`.
 - **AC-6:** Un message utilisateur trop gros pour tenir avec `SYS` seul est refusé avec une erreur explicite, sans requête au
   fournisseur simulé, et la session reste intacte.
 
+- **AC-7:** Avec un fournisseur scripté, le résumeur de production envoie une requête sans tool dont le prompt système est le prompt de
+  résumé (défaut ou surcharge) et dont l'unique message utilisateur est la transcription, puis rend le texte de la réponse ; une
+  erreur du fournisseur devient l'erreur du résumeur et ne porte aucun contenu de la requête ; la stratégie par défaut l'utilise de
+  bout en bout.
+
 ## Réalisation SpecDD
 
 Specs dans `src/context/`, implémentées (des tâches de durcissement restent listées dans les `Tasks` de certaines specs) :
@@ -121,7 +134,7 @@ Specs dans `src/context/`, implémentées (des tâches de durcissement restent l
 - `budget.sdd` : seuils de compaction et de démarrage, refus d'un prompt ou d'un message trop gros (FR-1, FR-2, AC-1).
 - `usage.sdd` : suivi des tokens, taux de remplissage, usage cumulé, estimation locale (FR-3).
 - `replay.sdd` : mode de rejeu du raisonnement et sélection du raisonnement renvoyé (FR-9, AC-5).
-- `strategy.sdd` : traits remplaçables du résumé et du choix de ce qui est compacté, stratégie par défaut (FR-4 à FR-8).
+- `strategy.sdd` : traits remplaçables du résumé et du choix de ce qui est compacté, stratégie par défaut (FR-4 à FR-8) ; le résumeur de production (FR-11) vit dans `src/agents/summarizer.sdd`, qui dépend de ce module et non l'inverse.
 - `error.sdd` : erreur typée du module.
 
 État au 2026-11-01 : tout est livré. L'**intégration à la boucle de tour** (`context.sdd` #2) est réalisée par `src/runtime/turn.rs` (refus d'un message trop gros avant tout appel, compaction décidée avant chaque requête) ; le **prompt de résumé par défaut** est livré (`context.sdd` #3, `strategy.sdd` #7, texte validé le 2026-10-31) ; l'**essai de bout en bout du rejeu du raisonnement** (AC-5) est clos par la décision ci-dessus, sur les mesures de `spikes/rig-e2e`.

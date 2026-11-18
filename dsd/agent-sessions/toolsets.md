@@ -166,6 +166,19 @@ uniquement) s'appliquent.
     - **Source:** `sebt3/lymaille#10`, 2026-11-13 ; `agent-sessions#NFR-4`
     - **Verified by:** `AC-17`
 
+- **FR-23 - SHOULD:** Un hôte lit, sans passer par la sérialisation, le nom d'un type de contexte et celui d'un contexte, la
+  version minimale d'une exigence de type (pour afficher à un humain ce qu'un toolset exige avant sa promotion), et le niveau
+  (utilisateur ou partagé) d'un brouillon que son stockage connaît. Ces accès sont en lecture seule, sans changement de
+  sérialisation ; le niveau d'un brouillon est facultatif (un stockage qui ne le distingue pas ne le pose pas).
+    - **Source:** `sebt3/lymaille#13` points 1, 4 et 5, 2026-11-17
+    - **Verified by:** `AC-18`
+
+- **FR-24 - SHOULD:** Un skill se rend en texte `SKILL.md` (frontmatter puis corps) de façon symétrique à sa lecture (FR-7) :
+  relire le texte rendu d'un skill sans document annexe rend un skill identique. Les documents annexes ne font pas partie du texte :
+  ils vivent à côté de lui.
+    - **Source:** `sebt3/lymaille#13` point 3, 2026-11-17
+    - **Verified by:** `AC-19`
+
 ## Questions ouvertes
 
 - **Question (non bloquante):** un nom d'agent par défaut à espace de bord (`ops `) est accepté tel quel par le ContextType (seuls le vide et le blanc sont refusés, FR-21) ; la résolution contre le catalogue échoue alors avec une erreur explicite (agent absent). Faut-il le normaliser ou le refuser plus tôt ? Cas limite relevé à la validation du 2026-11-04, volontairement non traité : aucun hôte ne l'a rencontré (approche XP). À reprendre en issue si un hôte le rencontre ; ne bloque pas la livraison.
@@ -215,6 +228,12 @@ uniquement) s'appliquent.
 - **AC-17:** Avec la feature `ts-rs`, un test de contrat atteste que la déclaration TypeScript de `Toolset`, `Skill`, `TypeRequirement`,
   `ParamDecl`, `RoleDecl`, `ContextType`, `RoleSpec`, `ToolsetContext` et `ContextLevel` décrit exactement les clés de la sérialisation
   serde d'une valeur complète et d'une valeur minimale ; la sérialisation est inchangée avec et sans la feature.
+
+- **AC-18:** Un type de contexte et un contexte rendent leur nom ; une exigence `cluster@1.2` rend la version
+  minimale `1.2.0` ; une entrée de brouillon construite avec un niveau le rend, et sans niveau rend rien ; aucune sérialisation
+  n'a changé.
+- **AC-19:** Pour un skill sans document annexe, relire le texte qu'il rend donne un skill égal, y compris quand le corps contient une
+  ligne `---` ou des fins de ligne CRLF ; un champ facultatif absent n'apparaît pas dans le texte.
 
 ## Réalisation SpecDD
 

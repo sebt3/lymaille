@@ -115,6 +115,19 @@ et closures. `agent-sessions#CON-2` place le moteur dans `vynil-core`.
       de script pour une tâche de 9-10 appels)
     - **Verified by:** `AC-14`
 
+- **FR-15 - MUST:** Un run qui échoue rend à l'appelant la classe de l'erreur et, quand Rhai la fournit, sa position (ligne et colonne),
+  pour toute classe d'erreur d'exécution : variable introuvable comme erreur levée par le script ou par une fonction native.
+  L'appelant n'a plus à relire le texte rendu au LLM pour retrouver la position.
+    - **Source:** `sebt3/lymaille#14` point 2, 2026-11-17 ; à vérifier d'abord par un test (le classement de `from_rhai` porte déjà la
+      position : la perte se situe peut-être dans le transport vers l'appelant, et non dans le classement)
+    - **Verified by:** `AC-15`
+
+- **FR-16 - SHOULD:** Un hôte qui exécute un script hors session (commande batch) pose, pour ce run seulement, des constantes
+  Rhai en lecture seule : leurs valeurs ne figurent ni dans le texte du script, ni dans son enregistrement d'audit, ni dans l'instantané
+  du pad ; elles ne décalent aucune position d'erreur ; le script ne peut pas les réaffecter.
+    - **Source:** `sebt3/lymaille#15`, 2026-11-17
+    - **Verified by:** `AC-16`
+
 ## Décisions
 
 - **DEC-1 - Persistance par source des définitions, pas par rejeu**
@@ -262,6 +275,12 @@ Source: user instruction, 2026-10-30
 - **AC-14:** Un script qui appelle `sandbox::read_file("path")`, fonction MCP dont le schéma exige le champ texte `path`, reçoit une
   erreur qui contient `read_file(#{ path: "…" })` ; le skill intégré sur `rhai_pad` contient les trois règles de FR-9, et chacune
   de ses affirmations est vraie quand on l'exécute.
+
+- **AC-15:** Un script dont la ligne 3 lit une variable absente, un script qui échoue par `throw` et un script qui appelle une fonction
+  native en échec rendent chacun un statut `Failed` dont la classe et la position (ligne et colonne) sont celles de Rhai.
+- **AC-16:** Un run auquel l'hôte pose une constante `env_name` lit sa valeur, ne peut pas la réaffecter, et son enregistrement d'audit
+  comme l'instantané du pad ne contiennent ni le nom ni la valeur de la constante ; l'erreur d'un script de trois lignes est rendue à
+  la même ligne qu'un run sans constante.
 
 ## Réalisation SpecDD
 

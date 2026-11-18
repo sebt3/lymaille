@@ -534,6 +534,9 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
   `allowed-duplicate-crates` avec une raison, et `scripts/mutants` (mutation reproductible avec autotest à canaris, report du mécanisme de
   `spikes/lint-harness`) est livré. `cargo-mutants` reste installé sur la machine de développement ; `scripts/mutants` est l'alternative cadrée par le harnais.
 
+- **Décidé 2026-11-18:** contrat du détecteur de secrets par défaut (`CON-3`, `toolsets` FR-3), option (b) : détection à toute position sur frontière de mot, `sk-` et `Bearer` suivis d'un jeton plausible (≥ 16 caractères) ; `sk-` en début de texte garde la règle d'origine sans minimum (asymétrie connue et assumée). Frontières non figées, sans hôte demandeur : préfixe collé à une lettre non-ASCII, tabulation après `Bearer`. Le détecteur est une barrière de sécurité : aucune extension sans décision. Contrat dans `src/secret.sdd`, tâches #3 et #4.
+    - **Source:** `sebt3/lymaille#16`, 2026-11-17
+
 ## Références
 
 - Méthode : https://specdd.ai/llms.txt et le plugin DSD (`.specdd/plugins/github.com/specdd/specdd/dsd/plugin.md`).

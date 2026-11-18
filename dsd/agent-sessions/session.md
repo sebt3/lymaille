@@ -128,6 +128,13 @@ non-interruption sur le temps.
       bail (signal, tour annulé, pas de sauvegarde), user instruction, 2026-11-13 ; agent-sessions#DEC-14
     - **Verified by:** `AC-13`, `AC-14`
 
+- **FR-18 - MUST:** L'enregistrement d'un script exécuté (événement `Script`) porte, quand le script a échoué, la classe de l'erreur
+  (`scratchpad` FR-15) et la position (ligne, colonne) que Rhai a fournie, en plus du texte masqué. Les deux sont facultatifs : un
+  script réussi, ou une erreur sans position, ne les pose pas, et un événement écrit avant ce changement se relit sans eux. Un hôte
+  qui indexe les erreurs de script n'a plus à les reconstituer.
+    - **Source:** `sebt3/lymaille#14` point 1, 2026-11-17
+    - **Verified by:** `AC-15`
+
 ## Décisions
 
 - **DEC-1 - Collisions d'écriture laissées au stockage**
@@ -207,6 +214,10 @@ Source: user instruction, 2026-10-24
 - **AC-14:** Avec une porte de test dont le permis déclenche son signal de perte pendant un tour (inférence ou script en cours),
   le tour se termine `Cancelled`, l'événement `TurnLeaseLost` précède `TurnEnded`, aucun appel d'outil n'est laissé sans
   résultat dans l'historique en mémoire, et le stockage n'a reçu aucune sauvegarde pour ce tour.
+
+- **AC-15:** Un script qui échoue à la ligne 3, colonne 5 produit un événement `Script` dont la classe et la position sont celles de
+  l'erreur ; un script réussi n'en porte aucune ; un événement `Script` sérialisé sans ces champs se relit, et les champs absents ne
+  sont pas écrits ; ni la position ni la classe ne révèlent un secret.
 
 ## Réalisation SpecDD
 

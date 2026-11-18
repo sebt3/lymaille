@@ -83,6 +83,11 @@ et ce que l'agent consomme.
       `agent-sessions#NFR-4`
     - **Verified by:** `AC-4`
 
+- **FR-11 - MUST:** Un fournisseur d'inférence partagé par `Arc` est lui-même un fournisseur d'inférence : l'hôte partage un même
+  fournisseur entre la boucle de tour et un résumeur (`context-window` FR-11) sans écrire d'enveloppe.
+    - **Source:** `sebt3/lymaille#17` point 1, 2026-11-17
+    - **Verified by:** `AC-5`
+
 ## Questions ouvertes
 
 - **Résolu (2026-11-01):** détection des modèles : `rig` ne reporte pas `max_model_len` dans `context_length` (mesuré, `spikes/rig-probe`) ; `detect_models` de l'adaptateur (`rig.sdd`) lit `GET <base>/models` lui-même (vLLM : `max_model_len` 262144 pour `qwen3.8-flash-next`, `spikes/rig-e2e`). La passerelle annonce 8192 à tort (`kydah/kydah-ai-proxy#113`) : la surcharge du profil est nécessaire. Texte d'origine : détection des modèles (à vérifier : report de `max_model_len` par `rig`). `list_models` existe dans `rig` 0.43 sur les clients OpenAI, Anthropic, Ollama, Copilot et
@@ -110,6 +115,10 @@ et ce que l'agent consomme.
   et `Provider` (et des types qu'ils contiennent) décrit exactement les clés de la sérialisation serde d'une valeur complète et
   d'une valeur minimale ; sans la feature, `ts-rs` est absent du graphe de dépendances et la sérialisation est inchangée.
 
+- **AC-5:** Un `Arc` autour d'un fournisseur scripté, utilisé comme fournisseur d'inférence, rend les mêmes réponses et les mêmes
+  erreurs que le fournisseur nu, et les requêtes restent lisibles par le fournisseur partagé ; le flux de fragments passe aussi par
+  l'`Arc`.
+
 ## Réalisation SpecDD
 
 Specs dans `src/agents/`, implémentées (des tâches de durcissement restent listées dans les `Tasks` de certaines specs) :
@@ -119,7 +128,8 @@ Specs dans `src/agents/`, implémentées (des tâches de durcissement restent li
 - `provider.sdd` : fournisseur d'inférence, adresse et authentification par références (FR-6, FR-10).
 - `profile.sdd` : profil de modèle, surcharge de ce que le fournisseur détecte (FR-7, FR-10).
 - `catalog.sdd` : traits de stockage, stockage mémoire et cascade `Layered` par niveau (FR-5).
-- `inference.sdd` : trait du fournisseur d'inférence, classement des erreurs, streaming de fragments, fournisseur scripté.
+- `inference.sdd` : trait du fournisseur d'inférence, classement des erreurs, streaming de fragments, fournisseur scripté, partage par `Arc` (FR-11).
+- `summarizer.sdd` : résumeur de production au-dessus d'un fournisseur d'inférence (`context-window` FR-11).
 - `error.sdd` : erreur typée du module.
 
 État au 2026-11-01 : tout est livré. La **sérialisation frontmatter + corps** d'une définition (FR-3, `agents.sdd` #5, `definition.sdd` #18 et #19, `yaml_serde`) ; le **manifeste de projet** (FR-4, `agents.sdd` #3, `manifest.sdd`, lot M1) ; l'**adaptateur `rig`** (`rig.sdd`, lots R0 à R3, derrière la feature Cargo `rig`) : clients OpenAI compatibles, `list_models` et détection des modèles, décodage et rejeu du raisonnement. Le TBD de détection des modèles est levé par les mesures de `spikes/rig-probe` et `spikes/rig-e2e`.

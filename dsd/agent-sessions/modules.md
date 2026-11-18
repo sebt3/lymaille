@@ -81,6 +81,14 @@ d'extension pour les modules fournis par l'hôte.
     - **Source:** `sebt3/lymaille#3`, 2026-11-03
     - **Verified by:** `AC-8`
 
+- **FR-13 - MUST:** Le trait d'authentification d'un connecteur MCP et les en-têtes qu'il rend se compilent sans la feature Cargo
+  `mcp-http` : un hôte qui n'écrit que son implémentation d'authentification, ou qui teste la sienne, n'active pas le connecteur
+  réel (`rmcp`, `http`). Le jeton d'un jeu d'en-têtes se lit par un accesseur en lecture seule, pour qu'un hôte vérifie ce que sa
+  propre authentification rend ; le jeton ne se montre toujours ni dans `Debug`, ni dans une erreur, ni dans un événement
+  (`agent-sessions#CON-3`).
+    - **Source:** `sebt3/lymaille#17` point 3 et `sebt3/lymaille#13` point 2, 2026-11-17
+    - **Verified by:** `AC-9`
+
 ## Extension réservée : connaissance
 
 Hors du premier jalon et sans exigence, le besoin n'étant pas avéré. Principe consigné : un module Rhai optionnel de
@@ -112,6 +120,10 @@ Source: user instruction, 2026-10-24
 - **AC-8:** Avec un serveur MCP simulé dont un tool exige le champ texte `path` et accepte l'entier facultatif `limit`, la documentation de la
   fonction contient la ligne d'usage `read_file(#{ path: "…" })` suivie du champ facultatif `limit`.
 
+- **AC-9:** Avec `--no-default-features`, une authentification d'hôte qui rend un jeu d'en-têtes compile et se teste : le jeton
+  rendu est lisible par l'accesseur et le `Debug` du jeu d'en-têtes ne contient aucune valeur ; avec la feature `mcp-http`, le
+  connecteur réel accepte la même authentification.
+
 ## Réalisation SpecDD
 
 Specs dans `src/modules/`, implémentées (des tâches de durcissement restent listées dans les `Tasks` de certaines specs) :
@@ -121,6 +133,7 @@ Specs dans `src/modules/`, implémentées (des tâches de durcissement restent l
 - `todo.sdd` : liste de tâches et module Rhai `todo` (FR-1, AC-1).
 - `memory.sdd`, `memory_module.sdd` : Memory par niveau, trait de stockage, modules `memory_user`, `memory_shared`, `memory_session` (FR-2 à FR-5, AC-2).
 - `mcp_name.sdd`, `mcp.sdd`, `mcp_module.sdd` : nommage des fonctions, traits de connecteur, génération du module en mode réel et coquille, validation JSON Schema, reconnexion, ligne d'usage (FR-6, FR-9 à FR-12, AC-3 à AC-8).
+- `mcp_auth.sdd` : en-têtes d'authentification et trait `McpAuth` de l'hôte, sans la feature `mcp-http` (FR-13, AC-9).
 - `mcp_client.sdd` : connecteur MCP réel HTTP streamable sur `rmcp`, derrière la feature `mcp-http` (FR-6, CON-5).
 
 État au 2026-11-01 : tout est livré, y compris `FR-7` (notifications MCP vers les watchers) : le connecteur MCP appelle `notify` sur la source `mcp` (`delegation/sources.sdd` #2, confirmé par le validateur le 2026-11-01 ; tests de notifications et d'annulation ajoutés). FR-8 (modules de l'hôte) ne demande aucun code : un module construit par l'hôte entre dans `Grants`.
