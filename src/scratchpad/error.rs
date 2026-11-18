@@ -5,11 +5,30 @@
 use rhai::{Dynamic, EvalAltResult, ParseErrorType, Position};
 
 /// Position of a script error, one-based: line and column.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[non_exhaustive]
 pub struct ScriptPosition {
     line: usize,
     column: usize,
+}
+
+impl<'de> serde::Deserialize<'de> for ScriptPosition {
+    /// Reads a position back through `ScriptPosition::new`, so that a zero line or column fails like it does.
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        /// Wire form of a position: the two numbers as they are written, before the one-based check.
+        #[derive(serde::Deserialize)]
+        struct Wire {
+            line: usize,
+            column: usize,
+        }
+
+        let wire = <Wire as serde::Deserialize>::deserialize(deserializer)?;
+        Self::new(wire.line, wire.column)
+            .ok_or_else(|| serde::de::Error::custom("line and column must each start at one"))
+    }
 }
 
 impl ScriptPosition {
@@ -94,7 +113,8 @@ impl std::fmt::Display for LimitKind {
 }
 
 /// Class of a scratchpad error, for the quality signals and the audit: no text is kept with it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ScriptErrorClass {
     /// The script does not compile.
@@ -925,6 +945,61 @@ mod tests {
                 position: None,
             };
             assert_eq!(error.to_string(), expected, "the text of {kind:?}");
+        }
+    }
+
+    // Scenario: la classe et la position font l'aller-retour JSON
+    #[test]
+    fn class_and_position_round_trip_through_json() {
+        let class = ScriptErrorClass::NotFound;
+        let class_json = serde_json::to_string(&class).expect("the class serializes");
+        assert_eq!(class_json, "\"not_found\"", "the text of the class");
+        assert_eq!(
+            serde_json::from_str::<ScriptErrorClass>(&class_json).expect("the class deserializes"),
+            class,
+            "the class read back equals the one written"
+        );
+        let position = ScriptPosition::new(3, 5).expect("a one-based position is built");
+        let position_json = serde_json::to_string(&position).expect("the position serializes");
+        assert_eq!(
+            position_json, r#"{"line":3,"column":5}"#,
+            "the text of the position"
+        );
+        assert_eq!(
+            serde_json::from_str::<ScriptPosition>(&position_json).expect("the position deserializes"),
+            position,
+            "the position read back equals the one written"
+        );
+        assert!(
+            serde_json::from_str::<ScriptPosition>(r#"{"line":0,"column":5}"#).is_err(),
+            "a zero line is refused on re-reading"
+        );
+        assert!(
+            serde_json::from_str::<ScriptPosition>(r#"{"line":3,"column":0}"#).is_err(),
+            "a zero column is refused on re-reading"
+        );
+    }
+
+    // Scenario: la classe et la position font l'aller-retour JSON — les sept textes de la classe
+    #[test]
+    fn each_class_round_trips_through_its_text() {
+        let cases = [
+            (ScriptErrorClass::Syntax, "\"syntax\""),
+            (ScriptErrorClass::Runtime, "\"runtime\""),
+            (ScriptErrorClass::NotFound, "\"not_found\""),
+            (ScriptErrorClass::Limit, "\"limit\""),
+            (ScriptErrorClass::Cancelled, "\"cancelled\""),
+            (ScriptErrorClass::Engine, "\"engine\""),
+            (ScriptErrorClass::Internal, "\"internal\""),
+        ];
+        for (class, text) in cases {
+            let written = serde_json::to_string(&class).expect("the class serializes");
+            assert_eq!(written, text, "the text of {class:?}");
+            assert_eq!(
+                serde_json::from_str::<ScriptErrorClass>(text).expect("the class deserializes"),
+                class,
+                "the class read back from {text}"
+            );
         }
     }
 

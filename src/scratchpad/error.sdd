@@ -40,7 +40,7 @@ Raises:
   @ScratchpadError::Cancelled: exécution interrompue par l'annulation du run.
   @ScratchpadError::InspectionOnly: appel d'une fonction de coquille dans le pad d'inspection (`./inspect.sdd`) ; porte le nom de la fonction (l'écriture d'une variable de la cible échoue par l'erreur de constante de Rhai, classe `Runtime`). Sa @ScriptErrorClass est `Runtime`. Texte `Display` : « {name} is not executed: the inspection does not run it ». Elle traverse Rhai comme valeur d'un `ErrorRuntime` et @ScratchpadError::from_rhai la restitue telle quelle (exception à la table du `Must`, qui range sinon toute erreur de fonction native en `Runtime`).
   @ScratchpadError::Engine: construction du moteur impossible (groupe non accordable, enregistrement refusé), message texte.
-  @ScratchpadError::Internal: défaut interne (tâche bloquante interrompue par une panique, verrou empoisonné irrécupérable), message texte.
+  @ScratchpadError::Internal: défaut interne (tâche bloquante interrompue par une panique, verrou empoisonné irrécupérable, thread d'évaluation du script qui n'a pas pu démarrer ou n'a pas répondu), message texte. Décision du 2026-11-18 : ce dernier cas est assumé en classe `Internal` ; l'hôte n'a aucune cause exploitable ni rien à corriger côté script.
 
 Must:
   @ScratchpadError est `#[non_exhaustive]`, dérive `thiserror::Error`, `Debug`, `Clone`, `PartialEq` et `Eq` ; @ScratchpadResult est l'alias `Result<T, ScratchpadError>`. @ScriptPosition, @NotFoundKind, @LimitKind et @ScriptErrorClass sont `#[non_exhaustive]` ; la structure @ScriptPosition a un constructeur.
@@ -53,6 +53,7 @@ Must:
   Une erreur enveloppée par Rhai dans un appel de fonction du script (`ErrorInFunctionCall`) ou de module (`ErrorInModule`) est dépliée jusqu'à sa cause : la classe et la position retenues sont celles de la cause (la plus interne qui a une position), et le nom de la fonction du script qui l'a appelée est conservé pour les erreurs `NotFound` ; pour les autres classes il préfixe le message par `in function {name}: `.
   La position est celle de Rhai (@rhai::Position) : ligne et colonne à partir de 1, absente quand Rhai ne la connaît pas. Le message ne répète pas la position (Rhai la suffixe à son propre texte ; elle est retirée du message).
   Aucune panique : une variante inconnue de Rhai tombe dans `Runtime` avec le texte de Rhai.
+  @ScriptPosition et @ScriptErrorClass sont sérialisables et désérialisables : ils entrent dans @ScriptRecord (../session/audit.sdd, `agent-sessions/session#FR-18`). La classe s'écrit en minuscules avec soulignés (`syntax`, `runtime`, `not_found`, `limit`, `cancelled`, `engine`, `internal`) ; la position s'écrit `{"line": L, "column": C}` et sa relecture refuse un zéro, comme @ScriptPosition::new.
   Le texte d'une erreur peut contenir des noms et des fragments du script du LLM : l'appelant (./run.sdd) masque les secrets avant de le rendre ou de l'enregistrer ; ce type ne les connaît pas.
 
 Scenario: les textes d'affichage sont stables
@@ -131,6 +132,11 @@ Scenario: chaque genre de limite a son propre texte
   When chaque erreur est affichée
   Then chaque texte est `limit exceeded (kind): message`, avec les genres `call depth`, `expression depth`, `string size`, `array size`, `map size` et `other`
 
+Scenario: la classe et la position font l'aller-retour JSON
+  Given la classe `NotFound` et la position ligne 3, colonne 5
+  When chacune est sérialisée puis relue
+  Then les textes sont `"not_found"` et `{"line":3,"column":5}`, les valeurs relues sont égales, et la relecture d'une position à la ligne 0 ou à la colonne 0 échoue
+
 Tasks:
   [x] #1 Tests des textes `Display`, des classements de `from_rhai` (un test par variante de Rhai listée) et du dépliage des erreurs enveloppées, puis l'énumération.
   [x] #2 Posé : @ScratchpadError::class et @ScriptErrorClass existent pour que le signal de qualité « nombre d'erreurs Rhai » (`agent-sessions/session#FR-13`) et l'audit comptent par classe sans retenir de texte ; la boucle de tour (domaine `session`) les consomme.
@@ -152,3 +158,5 @@ Tasks:
       scope variables » de ./suggest.sdd passe par ce champ plutôt que par les suggestions, pour que « Closest candidates »
       ne liste que des candidats. `with_hint` n'est pas dans `Exposes` : à ajouter si un appelant hors du module en a besoin.
       Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #9 Lot 0.3.1-B (`sebt3/lymaille#14` point 1, `agent-sessions/session#FR-18`) : test du Scenario « la classe et la position font l'aller-retour JSON », vu échouer, puis `Serialize` et `Deserialize` sur @ScriptErrorClass et @ScriptPosition (la relecture de la position passe par @ScriptPosition::new, ou un `try_from`, pour refuser un zéro). Précède la tâche « classe et position » de ../session/audit.sdd.
+      Validé le 2026-11-18 (validator) : rouge E0277 vu, `ScriptErrorClass` dérivé `rename_all = "snake_case"` (sept variantes, `InspectionOnly` hors jeu), `ScriptPosition` en `Deserialize` manuel par structure-wire privée passant par @ScriptPosition::new — refus ligne 0 et colonne 0 assertés, aucun dérivé parallèle. `scripts/check` vert hors `dependencies` (RUSTSEC-2026-0543 `chrono`, préexistant, précédent `SKIP=deny`), 1423 tests.

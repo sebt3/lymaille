@@ -10,6 +10,8 @@ Owns:
 
 Exposes:
   @ScriptRecord
+  @ScriptRecord::error_class
+  @ScriptRecord::error_position
   @McpRecord
   @ScriptInput
   @McpInput
@@ -20,12 +22,12 @@ Exposes:
 
 Accepts:
   @ScriptRecord::new: un @Redactor, le plafond de rendu en caractères, une @ScriptInput.
-  @ScriptInput::new: le nom de l'agent, le texte du script, le résultat, la durée. @ScriptInput::with_error: l'erreur éventuelle.
+  @ScriptInput::new: le nom de l'agent, le texte du script, le résultat, la durée. @ScriptInput::with_error: l'erreur éventuelle. @ScriptInput::with_error_class: la @ScriptErrorClass de l'erreur ; @ScriptInput::with_error_position: sa @ScriptPosition (../scratchpad/error.sdd). Les deux sont facultatives et indépendantes de `with_error`.
   @McpRecord::new: un @Redactor, une @McpInput.
   @McpInput::new: le rôle MCP, le nom de la fonction, les arguments JSON, le statut, la durée.
 
 Returns:
-  @ScriptRecord: agent, script masqué complet, résultat masqué et tronqué, `original_len` (nombre de caractères du résultat masqué avant troncature), `truncated`, durée en millisecondes, erreur masquée.
+  @ScriptRecord: agent, script masqué complet, résultat masqué et tronqué, `original_len` (nombre de caractères du résultat masqué avant troncature), `truncated`, durée en millisecondes, erreur masquée, classe de l'erreur et position de l'erreur (@ScriptRecord::error_class et @ScriptRecord::error_position : `Option`, absentes pour un script réussi ou quand Rhai ne donne pas de position).
   @McpRecord: rôle, fonction, arguments masqués, statut, durée en millisecondes.
 
 Must:
@@ -35,6 +37,7 @@ Must:
   Le texte du script n'est jamais tronqué.
   Un plafond de zéro tronque tout le résultat.
   Les enregistrements se sérialisent (ils entrent dans @Event), sans champ secret.
+  La classe et la position de l'erreur (`agent-sessions/session#FR-18`) sont des données de structure, jamais un extrait du script ni du message : elles ne passent pas par le @Redactor. Absentes, elles ne sont pas écrites dans la sérialisation, et un @ScriptRecord sérialisé sans elles se relit : un événement `Script` écrit avant ce changement reste lisible.
 
 Depends on:
   ./redact.sdd
@@ -66,8 +69,25 @@ Scenario: les arguments MCP sont masqués
   When un @McpRecord est construit
   Then les arguments valent `{"auth": "*redacted secret*"}`
 
+Scenario: la classe et la position de l'erreur sont portées
+  Given une @ScriptInput avec une erreur, la classe `NotFound` et la position ligne 3, colonne 5
+  When un @ScriptRecord est construit
+  Then error_class rend `NotFound` et error_position rend la ligne 3, colonne 5, et le texte de l'erreur reste masqué
+
+Scenario: un script réussi ne porte ni classe ni position
+  Given une @ScriptInput sans erreur
+  When un @ScriptRecord est construit puis sérialisé
+  Then error_class et error_position rendent `None` et la sérialisation ne contient ni `error_class` ni `error_position`
+
+Scenario: un enregistrement écrit avant ce changement se relit
+  Given le JSON d'un @ScriptRecord sans `error_class` ni `error_position`
+  When il est relu
+  Then la relecture réussit et les deux accesseurs rendent `None`
+
 Tasks:
   [x] #1 Tests puis implémentation.
   [x] #2 @ScriptRecord::new (7 paramètres) et @McpRecord::new (6) portent un `#[expect(clippy::too_many_arguments)]` ; décidé le 2026-10-27 : regrouper en structure d'entrée nommée (nouveau type public), sans exception de lint.
       Fait (voir #3).
   [x] #3 Regrouper les paramètres de @ScriptRecord::new et @McpRecord::new en structures d'entrée nommées et retirer les `#[expect]`.
+  [x] #4 Lot 0.3.1-B (`sebt3/lymaille#14` point 1, `agent-sessions/session#FR-18`, `AC-15`) : tests des trois Scenario, vus échouer, puis @ScriptInput::with_error_class, @ScriptInput::with_error_position (@ScriptInput reste `Copy`), les deux champs optionnels de @ScriptRecord (`#[serde(default, skip_serializing_if = "Option::is_none")]`) et leurs accesseurs. Dépend de la tâche « aller-retour JSON » de ../scratchpad/error.sdd. Les appelants de @ScriptInput::new n'ont pas à changer (constructeurs chaînés).
+      Validé le 2026-11-18 (validator) : rouge E0599/E0609 vu, trois Scenario testés dont le relit du format d'avant changement (littéral JSON sur les noms serde réels), classe et position jamais dérivées du texte ni masquées. Les deux nouveaux champs sont `pub` comme les champs voisins de @ScriptRecord (`#[non_exhaustive]`) : conséquence contrainte de `clippy::partial_pub_fields` (harnais), validée par le validator. `scripts/check` vert hors `dependencies` (RUSTSEC-2026-0543 `chrono`, préexistant, précédent `SKIP=deny`).

@@ -1198,26 +1198,6 @@ mod tests {
 
     // --- doubles -------------------------------------------------------------------------------------------------
 
-    impl InferenceProvider for Arc<ScriptedProvider> {
-        fn complete(
-            &self,
-            request: InferenceRequest,
-        ) -> impl Future<Output = Result<InferenceResponse, InferenceError>> + Send {
-            self.as_ref().complete(request)
-        }
-
-        fn stream<F>(
-            &self,
-            request: InferenceRequest,
-            fragments: F,
-        ) -> impl Future<Output = Result<InferenceResponse, InferenceError>> + Send
-        where
-            F: FnMut(&str) + Send,
-        {
-            self.as_ref().stream(request, fragments)
-        }
-    }
-
     impl SessionStore for Arc<InMemoryStore> {
         fn load(&self, id: &SessionId) -> impl Future<Output = SessionResult<Option<SessionState>>> + Send {
             self.as_ref().load(id)

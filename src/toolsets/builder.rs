@@ -14,8 +14,8 @@ use vynil_core::rt::block_on;
 
 use super::toolset_context::value_looks_like_secret;
 use super::{
-    ContextType, ParamDecl, RoleDecl, RoleSpec, Skill, Toolset, ToolsetStore, ToolsetsError, ToolsetsResult,
-    TypeRequirement, check_template, extract_contract,
+    ContextLevel, ContextType, ParamDecl, RoleDecl, RoleSpec, Skill, Toolset, ToolsetStore, ToolsetsError,
+    ToolsetsResult, TypeRequirement, check_template, extract_contract,
 };
 use crate::scratchpad::ScratchpadResult;
 use crate::secret::SecretDetector;
@@ -31,19 +31,34 @@ pub enum DraftKind {
     ContextType,
 }
 
-/// A draft as a listing shows it: its kind and its name.
+/// A draft as a listing shows it: its kind, its name, and the [`ContextLevel`] it lives at when the host storage tells
+/// levels apart (`agent-sessions/toolsets#FR-23`).
+///
+/// The level is carried in the entry only: it is not serialized and the Rhai module does not expose it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct DraftEntry {
     kind: DraftKind,
     name: String,
+    level: Option<ContextLevel>,
 }
 
 impl DraftEntry {
-    /// Builds the entry of the draft of kind `kind` named `name`.
+    /// Builds the entry of the draft of kind `kind` named `name`, with no level.
     #[must_use]
     pub const fn new(kind: DraftKind, name: String) -> Self {
-        Self { kind, name }
+        Self {
+            kind,
+            name,
+            level: None,
+        }
+    }
+
+    /// Sets the level of the draft. The library does not check that it is `User` or `Shared`: the host sets them.
+    #[must_use]
+    pub const fn with_level(mut self, level: ContextLevel) -> Self {
+        self.level = Some(level);
+        self
     }
 
     /// The kind of the draft.
@@ -56,6 +71,13 @@ impl DraftEntry {
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// The level set by [`DraftEntry::with_level`], or `None` when the host storage does not tell levels apart
+    /// (`agent-sessions/toolsets#FR-23`).
+    #[must_use]
+    pub const fn level(&self) -> Option<ContextLevel> {
+        self.level
     }
 }
 
@@ -1211,5 +1233,47 @@ mod tests {
             outcome.text()
         );
         assert!(!outcome.text().contains("disk gone"), "{}", outcome.text());
+    }
+
+    // Scenario: le niveau d'une entrée de brouillon se porte (builder.sdd #5, FR-23)
+    #[test]
+    fn a_draft_entry_carries_its_level() {
+        let plain = DraftEntry::new(DraftKind::Toolset, "grafana".to_owned());
+        assert_eq!(plain.level(), None, "an entry built by new carries no level");
+        let leveled =
+            DraftEntry::new(DraftKind::ContextType, "cluster".to_owned()).with_level(ContextLevel::Shared);
+        assert_eq!(
+            leveled.level(),
+            Some(ContextLevel::Shared),
+            "the level set by with_level is read back"
+        );
+        assert_eq!(
+            leveled.kind(),
+            DraftKind::ContextType,
+            "with_level keeps the kind"
+        );
+        assert_eq!(leveled.name(), "cluster", "with_level keeps the name");
+    }
+
+    // Scenario: le niveau d'une entrée de brouillon se porte (the Rhai module never exposes it)
+    #[tokio::test(flavor = "multi_thread")]
+    async fn list_drafts_maps_do_not_carry_the_level() {
+        let host = Host::default();
+        host.seed_draft(stored_toolset("grafana", "fn a() { 1 }"));
+        let outcome = run(&pad(&host), "toolset_builder::list_drafts()").await;
+        assert_eq!(outcome.status(), RunStatus::Ok, "{}", outcome.text());
+        let text = outcome.text();
+        assert!(
+            text.contains("toolset") && text.contains("grafana"),
+            "the map carries kind and name: {text}"
+        );
+        assert!(
+            !text.to_lowercase().contains("level"),
+            "the map carries no level: {text}"
+        );
+        assert!(
+            !text.to_lowercase().contains("shared"),
+            "the map carries no level: {text}"
+        );
     }
 }

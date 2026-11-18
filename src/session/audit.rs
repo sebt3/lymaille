@@ -9,9 +9,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::Redactor;
+use crate::scratchpad::{ScriptErrorClass, ScriptPosition};
 
-/// Inputs of a script record, grouped so that [`ScriptRecord::new`] keeps a short signature. Built with
-/// [`ScriptInput::new`] and, when the script raised an error, [`ScriptInput::with_error`].
+/// Inputs of a script record, grouped so that [`ScriptRecord::new`] keeps a short signature.
+///
+/// Build it with [`ScriptInput::new`] and, when the script raised an error, [`ScriptInput::with_error`], optionally
+/// with [`ScriptInput::with_error_class`] and [`ScriptInput::with_error_position`].
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct ScriptInput<'input> {
@@ -25,6 +28,10 @@ pub struct ScriptInput<'input> {
     duration: Duration,
     /// Error raised by the script, when there was one.
     error: Option<&'input str>,
+    /// Class of the error, structural data that never goes through the redactor.
+    error_class: Option<ScriptErrorClass>,
+    /// Position of the error, structural data that never goes through the redactor.
+    error_position: Option<ScriptPosition>,
 }
 
 impl<'input> ScriptInput<'input> {
@@ -42,6 +49,8 @@ impl<'input> ScriptInput<'input> {
             result,
             duration,
             error: None,
+            error_class: None,
+            error_position: None,
         }
     }
 
@@ -51,9 +60,24 @@ impl<'input> ScriptInput<'input> {
         self.error = Some(error);
         self
     }
+
+    /// Sets the class of the error, independently of [`ScriptInput::with_error`].
+    #[must_use]
+    pub const fn with_error_class(mut self, class: ScriptErrorClass) -> Self {
+        self.error_class = Some(class);
+        self
+    }
+
+    /// Sets the position of the error, independently of [`ScriptInput::with_error`].
+    #[must_use]
+    pub const fn with_error_position(mut self, position: ScriptPosition) -> Self {
+        self.error_position = Some(position);
+        self
+    }
 }
 
-/// Audit record of one executed script. Every text is masked; the result is also truncated to the rendering cap.
+/// Audit record of one executed script. Every text is masked; the result is also truncated to the rendering cap. The
+/// error's class and position ride along as structural data, never masked.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ScriptRecord {
@@ -71,6 +95,12 @@ pub struct ScriptRecord {
     pub duration_ms: u64,
     /// Error raised by the script, masked, when there was one.
     pub error: Option<String>,
+    /// Class of the error, structural data that never goes through the redactor. Absent for a successful script.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_class: Option<ScriptErrorClass>,
+    /// Position of the error, structural data that never goes through the redactor. Absent when Rhai gives no position.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_position: Option<ScriptPosition>,
 }
 
 impl ScriptRecord {
@@ -88,7 +118,23 @@ impl ScriptRecord {
             truncated: original_len > render_cap,
             duration_ms: duration_millis(input.duration),
             error: input.error.map(|text| redactor.redact(text)),
+            // The class and the position are structural data, taken straight from the input, never from the script
+            // nor from the error text, so they never pass through the redactor.
+            error_class: input.error_class,
+            error_position: input.error_position,
         }
+    }
+
+    /// Class of the error, when the input carried one.
+    #[must_use]
+    pub const fn error_class(&self) -> Option<ScriptErrorClass> {
+        self.error_class
+    }
+
+    /// Position of the error, when the input carried one.
+    #[must_use]
+    pub const fn error_position(&self) -> Option<ScriptPosition> {
+        self.error_position
     }
 }
 
@@ -170,6 +216,7 @@ mod tests {
     use serde_json::json;
 
     use super::{McpInput, McpRecord, ScriptInput, ScriptRecord};
+    use crate::scratchpad::{ScriptErrorClass, ScriptPosition};
     use crate::session::Redactor;
 
     fn script_record(
@@ -328,5 +375,74 @@ mod tests {
         );
         let back: ScriptRecord = serde_json::from_str(&json).expect("a script record deserializes");
         assert_eq!(back, record, "the record must deserialize to the same value");
+    }
+
+    // Scenario: la classe et la position de l'erreur sont portées
+    #[test]
+    fn error_class_and_position_are_carried() {
+        let mut redactor = Redactor::new();
+        redactor
+            .add_secret("tok-123")
+            .expect("a seven-character secret is accepted");
+        let position = ScriptPosition::new(3, 5).expect("a one-based position is built");
+        let input = ScriptInput::new("agent-a", "print(1)", "", Duration::from_millis(12))
+            .with_error("failed with tok-123")
+            .with_error_class(ScriptErrorClass::NotFound)
+            .with_error_position(position);
+        let record = ScriptRecord::new(&redactor, 100, input);
+        assert_eq!(
+            record.error_class(),
+            Some(ScriptErrorClass::NotFound),
+            "the record must carry the class given to the input"
+        );
+        let carried = record
+            .error_position()
+            .expect("the record must carry the position given to the input");
+        assert_eq!(carried.line(), 3, "the position must read back at line 3");
+        assert_eq!(carried.column(), 5, "the position must read back at column 5");
+        assert!(
+            !record.error.unwrap_or_default().contains("tok-123"),
+            "the error text must stay masked next to its class and position"
+        );
+    }
+
+    // Scenario: un script réussi ne porte ni classe ni position
+    #[test]
+    fn successful_script_carries_no_class_and_no_position() {
+        let redactor = Redactor::new();
+        let record = script_record(&redactor, 20, "print(1)", "0123456789", None);
+        assert_eq!(
+            record.error_class(),
+            None,
+            "a successful script must not carry an error class"
+        );
+        assert_eq!(
+            record.error_position(),
+            None,
+            "a successful script must not carry an error position"
+        );
+        let json = serde_json::to_string(&record).expect("a script record serializes");
+        assert!(
+            !json.contains("error_class") && !json.contains("error_position"),
+            "absent class and position must not be written, got {json}"
+        );
+    }
+
+    // Scenario: un enregistrement écrit avant ce changement se relit
+    #[test]
+    fn record_written_before_class_and_position_reads_back() {
+        let legacy = r#"{"agent":"agent-a","script":"print(1)","result":"","original_len":0,"truncated":false,"duration_ms":12,"error":null}"#;
+        let back: ScriptRecord =
+            serde_json::from_str(legacy).expect("a record written before the change reads back");
+        assert_eq!(
+            back.error_class(),
+            None,
+            "a record without the field must read the class as None"
+        );
+        assert_eq!(
+            back.error_position(),
+            None,
+            "a record without the field must read the position as None"
+        );
     }
 }

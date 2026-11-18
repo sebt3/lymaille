@@ -9,6 +9,7 @@ Owns:
 Exposes:
   @Skill
   @Skill::parse
+  @Skill::to_text
   @Skill::check_size
 
 Accepts:
@@ -16,6 +17,7 @@ Accepts:
   @Skill::parse: un texte `SKILL.md` (frontmatter YAML entre `---`, puis le corps).
 
 Returns:
+  @Skill::to_text: le texte `SKILL.md` du skill : la ligne `---`, le frontmatter YAML (`name`, `description`, puis `license`, `compatibility` et `metadata` quand ils sont posés, dans cet ordre, les clés de `metadata` triées), la ligne `---`, puis le corps exactement, sans ajout ni retrait. Les documents annexes n'en font pas partie.
   Accesseurs en lecture seule. Le nom du toolset de rattachement est posé par @Toolset (./toolset.sdd), non par le skill.
 
 Raises:
@@ -31,6 +33,7 @@ Must:
   Un texte `SKILL.md` de plus de 256 Kio (262 144 octets) est refusé avant toute analyse, avec une raison fixe qui dit la taille ; la constante `TEXT_MAX_BYTES` est nommée dans le code (décision du 2026-10-31, D-a).
   Un `name` ou une `description` absent, ou un YAML null (`~`, `null`, vide), est refusé : un null n'est pas du texte, il ne devient jamais la chaîne `null`. Une `license` ou une `compatibility` null se lit comme absente (décision du 2026-10-31).
   Se sérialise et se désérialise à l'identique.
+  @Skill::to_text est la lecture inverse de @Skill::parse (`agent-sessions/toolsets#FR-24`) : pour un skill sans document annexe et dont le texte tient dans 256 Kio, `parse(to_text(s))` est égal à `s`. Le corps est exact : aucun `trim`, aucune ligne ajoutée, une ligne `---` du corps reste dans le corps, et les fins de ligne du corps sont gardées. Un champ facultatif absent n'est pas écrit. Le texte ne porte rien que le skill ne contienne pas (aucun `allowed-tools`). La production du texte ne peut pas échouer sur un skill valide ; un échec de sérialisation (@ToolsetsError::InvalidSkill, raison fixe, sans contenu) est rendu, jamais une panique.
   Sous la feature `ts-rs`, @Skill dérive `TS` sans changer la sérialisation serde ; la déclaration TypeScript décrit exactement la forme serde (`agent-sessions#NFR-4`).
 
 Depends on:
@@ -82,6 +85,21 @@ Scenario: licence null lue comme absente
   When il est analysé
   Then la licence est absente et l'analyse réussit
 
+Scenario: un skill se rend en texte et se relit à l'identique
+  Given un skill avec une licence, une compatibilité, des métadonnées et un corps contenant une ligne `---` et des fins de ligne CRLF
+  When to_text puis parse sont appelés
+  Then le skill relu est égal à l'original, et le corps du texte est celui du skill, octet pour octet
+
+Scenario: un skill minimal ne rend que ses deux champs obligatoires
+  Given un skill sans licence, sans compatibilité et sans métadonnées
+  When to_text est appelé
+  Then le frontmatter ne contient que `name` et `description`
+
+Scenario: les documents annexes ne sont pas dans le texte
+  Given un skill avec un document annexe
+  When to_text est appelé
+  Then le texte ne contient ni le nom ni le contenu du document, et le skill relu n'a plus de document annexe
+
 Tasks:
   [x] #1 Tests puis implémentation, vérifié le 2026-10-31.
   [x] #4 Description blanche et clé de `metadata` en double refusées (voir `Must`), avec leurs tests.
@@ -97,3 +115,5 @@ Tasks:
   [x] #3 « Contexte le plus long permis » (FR-18) : la taille rendue dépend des valeurs du contexte, inconnues à l'enregistrement. Posé : le contrôle porte sur le gabarit brut sans marge, et un dépassement au rendu est tronqué par @truncate_middle ; à confirmer.
       Validé le 2026-10-31 (accord du développeur principal).
   [x] #5 `ts-rs` (`sebt3/lymaille#10`) : dériver `TS` sous la feature `ts-rs` pour @Skill. @Skill ne dérive que `Serialize` : la déclaration suit sa sérialisation. Poser `#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]` sans `#[ts(export)]` (ses tests générés écrivent des fichiers). Un entier 64 bits (`u64`, `NonZeroU64`) se sérialise en nombre JSON : `#[cfg_attr(feature = "ts-rs", ts(type = "number"))]`, jamais `bigint`. Un champ avec `skip_serializing_if` est optionnel dans la déclaration (`ts(optional)`, à vérifier dans la documentation de la version retenue de `ts-rs`). Une version `Semver` (`serde(with = "semver_text")`) se déclare `string` ; une valeur `serde_json::Value` utilise l'implémentation `serde-json-impl`. Aucun test de sérialisation existant ne change ; une erreur de compilation sous la feature est le rouge attendu. Dépend de la tâche « feature `ts-rs` » de /lymaille.sdd (elle ajoute la dépendance optionnelle) ; le contrat est vérifié par ../ts_contract.sdd.
+  [x] #6 Lot 0.3.1-B (`sebt3/lymaille#13` point 3, `agent-sessions/toolsets#FR-24`, `AC-19`) : tests des trois Scenario vus échouer, puis @Skill::to_text (rendu par `yaml_serde` comme @Skill::parse le lit ; même découpage du frontmatter que @AgentDefinition::to_text, ../agents/definition.sdd, qui en donne le modèle : le signaler si la duplication devient une factorisation à décider). Le retour est un `ToolsetsResult<String>`, comme `AgentDefinition::to_text`.
+      Validé le 2026-11-18 (validator) : rouge E0599 vu, trois Scenario testés (aller-retour identité avec corps contenant `---` et CRLF, octet pour octet ; minimal à deux champs ; annexes absentes). Divergence assumée et validée d'avec le modèle `AgentDefinition::to_text` : celui-ci passe par `serde_json::to_value` et perd l'ordre d'insertion (alphabétique sans `preserve_order`), que le `Returns` de cette spec impose — construction directe en `yaml_serde::Mapping` (IndexMap). La duplication résiduelle (découpage de clôture, raison fixe) reste réelle ; la factorisation n'est pas triviale et n'est pas décidée. Non mutogène par les familles du harnais. `scripts/check` vert hors `dependencies` (RUSTSEC-2026-0543 `chrono`, préexistant, précédent `SKIP=deny`).

@@ -17,20 +17,24 @@ Exposes:
   @DraftStore
   @DraftKind
   @DraftEntry
+  @DraftEntry::with_level
+  @DraftEntry::level
   @builder_registration
 
 Accepts:
+  @DraftEntry::with_level: un @ContextLevel (../toolsets/toolset_context.sdd), constructeur chaîné ; @DraftEntry::new reste inchangé et sans niveau. La librairie ne contrôle pas que le niveau soit `User` ou `Shared` : c'est l'hôte qui les pose (choix posé le 2026-11-17, à valider ; un type à deux variantes ajouterait de la surface pour un contrôle que l'hôte porte déjà).
   @DraftStore: trait de l'hôte (`Send + Sync`, futurs `Send`, générique, jamais objet dynamique) pour ce que @ToolsetStore ne sait pas faire : `list_drafts` (aucun argument ; rend des @DraftEntry : genre et nom), `delete_draft` (un @DraftKind et un nom ; rend si un brouillon a été retiré) et, pour les types de contexte qui n'ont pas de brouillon dans @ContextTypeStore, `put_type_draft` et `get_type_draft`.
   @builder_registration: un @ToolsetStore, un @DraftStore, le @Redactor de la session et le @SecretDetector (par défaut @DefaultSecretDetector) ; rend une étape d'enregistrement (@EngineBuilder::with_registration) du module `toolset_builder`.
 
 Returns:
+  @DraftEntry::level: le @ContextLevel posé par @DraftEntry::with_level, ou `None` quand le stockage de l'hôte ne distingue pas les niveaux (`agent-sessions/toolsets#FR-23`). Le module Rhai ne l'expose pas.
   Module `toolset_builder` :
   `put_toolset_draft(definition)` : une map Rhai (nom, version, description, fonctions, paramètres, dépendances) ; construit un @Toolset, le valide (compilation des fonctions, plafond de rendu, `Skill`, défauts de paramètres sans secret) et l'écrit comme brouillon ; rend le nom.
   `put_skill_draft(toolset, definition)` : une map (nom, description, corps, documents annexes) ; ajoute le skill au brouillon du toolset nommé, ou remplace le skill de même nom (@Toolset::replace_skill) (le crée à partir de la version active si aucun brouillon n'existe) ; rend le nom du skill.
   `put_skill_draft_text(toolset, texte)` : même effet à partir d'un texte `SKILL.md` (frontmatter et corps, @Skill::parse).
   `put_context_type_draft(definition)` : une map (nom, version, schéma, rôles, inclusions) ; construit un @ContextType validé et l'écrit comme brouillon par le @DraftStore ; rend le nom.
   `validate_draft(genre, nom)` : revalide un brouillon et rend un tableau d'écarts en texte (vide si valide), sans rien écrire.
-  `list_drafts()` : un tableau de maps `{kind, name}`. `delete_draft(genre, nom)` : retire un brouillon, rend vrai s'il existait.
+  `list_drafts()` : un tableau de maps `{kind, name}` (le niveau d'une entrée n'y figure pas). `delete_draft(genre, nom)` : retire un brouillon, rend vrai s'il existait.
 
 Raises:
   Une erreur de script rendue au LLM, texte sans valeur de secret (masqué par le @Redactor), nommant la règle violée : définition illisible, nom invalide, secret détecté, fonction qui ne compile pas, plafond dépassé, brouillon absent, échec du stockage.
@@ -45,6 +49,7 @@ Must:
 
 Depends on:
   ./store.sdd
+  ./toolset_context.sdd
   ./toolset.sdd
   ./skill.sdd
   ./context_type.sdd
@@ -95,6 +100,11 @@ Scenario: le plafond de rendu est appliqué par le store
   When put_skill_draft est appelé
   Then le script reçoit l'erreur du store et get_draft ne rend pas le skill
 
+Scenario: le niveau d'une entrée de brouillon se porte
+  Given une entrée construite par new et une autre par new puis with_level(Shared)
+  When level est lu sur chacune
+  Then la première rend `None`, la seconde rend `Shared`, et list_drafts rend toujours des maps `{kind, name}` sans niveau
+
 Tasks:
   [x] #1 Tests puis implémentation (lot T1), déclaration dans ./mod.rs et ré-export dans ../lib.rs.
   [x] #2 Posé : les types de contexte n'ont pas de brouillon dans @ContextTypeStore ; le brouillon vit dans le @DraftStore de l'hôte (`put_type_draft`, `get_type_draft`). À confirmer par le développeur principal.
@@ -102,3 +112,5 @@ Tasks:
   [x] #3 Posé : seuls les skills admettent la forme texte (`SKILL.md`), le seul format texte existant ; toolsets et types de contexte se donnent en map. À confirmer.
       Validé le 2026-10-31 (accord du développeur principal).
   [x] #4 Remplacement de skill et test du plafond de rendu (Décision du 2026-10-31 (lot T2, lacune relevée à la validation de T1)) : dépend de ./toolset.sdd #P7.
+  [x] #5 Lot 0.3.1-B (`sebt3/lymaille#13` point 4, `agent-sessions/toolsets#FR-23`, `AC-18`) : test du Scenario « le niveau d'une entrée de brouillon se porte », vu échouer, puis le champ optionnel de @DraftEntry, @DraftEntry::with_level et @DraftEntry::level. @DraftEntry n'est pas sérialisé : aucun changement de format. Aucun appelant de @DraftEntry::new ne change.
+      Validé le 2026-11-18 (validator) : rouge E0599 vu ; deux tests (None/Shared ; maps `{kind, name}` du module Rhai inchangées) ; le mutant de la ligne du diff est neutralisé par le compilateur (`unused_mut` deny), non par un test — consigné comme tel. Survivant relevé HORS tâche, à ouvrir en durcissement dans ce fichier : `flag_of` (builder.rs:214, `false → true` sur drapeau optionnel absent), lacune préexistante depuis T1. `scripts/check` vert hors `dependencies` (RUSTSEC-2026-0543 `chrono`, préexistant, précédent `SKIP=deny`). Clôt la part FR-23/`AC-18` du lot.

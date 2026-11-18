@@ -13,7 +13,7 @@ use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, oneshot};
 use vynil_core::cancel::{self as vynil_cancel, CancelToken};
 
 use super::engine::{RunScope, ScratchpadEngine, captured_output};
-use super::error::{ScratchpadError, ScriptErrorClass};
+use super::error::{ScratchpadError, ScriptErrorClass, ScriptPosition};
 use super::introspect::{ScriptFunction, VariableInfo};
 use super::persist::{
     PersistWarning, RestoreWarning, extract_function_sources, key_of, recompile_functions, restore_scope,
@@ -24,24 +24,35 @@ use super::suggest::{CandidateSet, suggest_for};
 use crate::clock::Clock;
 use crate::session::{CancelHandle, Redactor, ScriptInput, ScriptRecord, TaggedValue};
 
-/// The environment of one run: the agent that runs the script, the redactor of its session and the clock that dates it.
+/// The environment of one run: the agent that runs the script, the redactor of its session and the clock that dates it,
+/// with, when the host gives them, the run constants of `with_constants`.
 #[derive(Clone, Copy)]
 #[non_exhaustive]
 pub struct RunEnv<'env> {
     agent: &'env str,
     redactor: &'env Redactor,
     clock: &'env dyn Clock,
+    constants: Option<&'env BTreeMap<String, serde_json::Value>>,
 }
 
 impl<'env> RunEnv<'env> {
-    /// The environment of a run of the agent `agent`.
+    /// The environment of a run of the agent `agent`, without any run constant.
     #[must_use]
     pub const fn new(agent: &'env str, redactor: &'env Redactor, clock: &'env dyn Clock) -> Self {
         Self {
             agent,
             redactor,
             clock,
+            constants: None,
         }
+    }
+
+    /// The environment completed with run constants: named values placed in the scope as Rhai constants for the run,
+    /// removed when it ends. Without this call, no constant.
+    #[must_use]
+    pub const fn with_constants(mut self, constants: &'env BTreeMap<String, serde_json::Value>) -> Self {
+        self.constants = Some(constants);
+        self
     }
 }
 
@@ -126,6 +137,7 @@ pub struct RunOutcome {
     warnings: Vec<PersistWarning>,
     record: ScriptRecord,
     snapshot: PadSnapshot,
+    error_position: Option<ScriptPosition>,
 }
 
 impl RunOutcome {
@@ -163,6 +175,13 @@ impl RunOutcome {
     #[must_use]
     pub const fn snapshot(&self) -> &PadSnapshot {
         &self.snapshot
+    }
+
+    /// The position of the error when the run failed and Rhai gives one, `None` otherwise; the class stays the one of
+    /// the [`RunStatus::Failed`].
+    #[must_use]
+    pub const fn error_position(&self) -> Option<ScriptPosition> {
+        self.error_position
     }
 }
 
@@ -285,7 +304,9 @@ impl Scratchpad {
         }
         let token = CancelToken::new();
         let bridge = tokio::spawn(bridge(cancel.clone(), token.clone()));
-        let settled = self.evaluate_on_thread(script, cancel, token).await;
+        let settled = self
+            .evaluate_on_thread(script, cancel, token, env.constants)
+            .await;
         bridge.abort();
         let finished = env.clock.now();
         let duration = Duration::from_millis(finished.as_millis().saturating_sub(started.as_millis()));
@@ -343,6 +364,7 @@ impl Scratchpad {
             warnings: Vec::new(),
             record,
             snapshot: self.snapshot(),
+            error_position: None,
         }
     }
 
@@ -361,6 +383,7 @@ impl Scratchpad {
             warnings: Vec::new(),
             record,
             snapshot: self.snapshot(),
+            error_position: None,
         }
     }
 
@@ -371,12 +394,14 @@ impl Scratchpad {
         script: &str,
         cancel: &CancelHandle,
         token: CancelToken,
+        constants: Option<&BTreeMap<String, serde_json::Value>>,
     ) -> Option<(OwnedMutexGuard<PadState>, Evaluated)> {
         let guard = Arc::clone(&self.state).lock_owned().await;
         let (sender, receiver) = oneshot::channel();
         let engine = Arc::clone(&self.engine);
         let thread_cancel = cancel.clone();
         let script = script.to_owned();
+        let constants = constants.cloned().unwrap_or_default();
         // The runtime of the host, entered on the evaluation thread so that a native call reads the same flavor as the
         // host: a `current_thread` host makes `vynil-core` refuse the call explicitly.
         let host = Handle::try_current().ok();
@@ -387,9 +412,14 @@ impl Scratchpad {
                 let _host = host.as_ref().map(Handle::enter);
                 let mut guard = guard;
                 let cap = engine.limits().render_cap_chars();
+                let input = RunInput {
+                    script: &script,
+                    cancel: &thread_cancel,
+                    constants: &constants,
+                };
                 let outcome = panic::catch_unwind(AssertUnwindSafe(|| {
                     let _run = RunScope::enter(&thread_cancel, cap);
-                    vynil_cancel::scope(&token, || evaluate(&engine, &mut guard, &script, &thread_cancel))
+                    evaluate_under_token(&token, &engine, &mut guard, &input)
                 }));
                 let evaluated = outcome.unwrap_or_else(|_| Evaluated::panicked());
                 let _sent = sender.send((guard, evaluated));
@@ -428,10 +458,18 @@ impl Scratchpad {
         }
         state.warned = current;
         let notices = notices_text(&messages, env.redactor);
-        let (text, truncated, status, warnings, full, error) = match evaluated.result {
+        let (text, truncated, status, warnings, full, error, error_position) = match evaluated.result {
             Ok(value) => {
                 let (text, truncated) = ok_text(&evaluated.captured, &value, cap, &notices, env.redactor);
-                (text, truncated, RunStatus::Ok, fresh, full_text(&value), None)
+                (
+                    text,
+                    truncated,
+                    RunStatus::Ok,
+                    fresh,
+                    full_text(&value),
+                    None,
+                    None,
+                )
             }
             Err(error) => {
                 let error = if cancel.is_cancelled() {
@@ -445,13 +483,23 @@ impl Scratchpad {
                 } else {
                     RunStatus::Failed(class)
                 };
+                let position = error_position_of(&error);
                 let rendered = suggest_for(error, &candidates).to_string();
                 let (text, truncated) = error_text(&rendered, cap, &notices, env.redactor);
-                (text, truncated, status, fresh, rendered.clone(), Some(rendered))
+                (
+                    text,
+                    truncated,
+                    status,
+                    fresh,
+                    rendered.clone(),
+                    Some(rendered),
+                    position,
+                )
             }
         };
         let input = ScriptInput::new(env.agent, script, &full, duration);
         let input = error.as_deref().into_iter().fold(input, ScriptInput::with_error);
+        let input = with_error_metadata(input, status, error_position);
         let record = ScriptRecord::new(env.redactor, cap, input);
         *self.snapshot.lock().unwrap_or_else(PoisonError::into_inner) = snapshot.clone();
         RunOutcome {
@@ -461,6 +509,7 @@ impl Scratchpad {
             warnings,
             record,
             snapshot,
+            error_position,
         }
     }
 
@@ -531,20 +580,71 @@ struct Warned {
     current: BTreeMap<String, String>,
 }
 
+/// The position an error carries, when it has one: the positions kept by `ScratchpadError::from_rhai`. Errors that
+/// never carry one (cancellation, internal failures) give `None`.
+const fn error_position_of(error: &ScratchpadError) -> Option<ScriptPosition> {
+    match error {
+        ScratchpadError::Syntax { position, .. }
+        | ScratchpadError::Runtime { position, .. }
+        | ScratchpadError::NotFound { position, .. }
+        | ScratchpadError::Limit { position, .. } => *position,
+        ScratchpadError::Cancelled
+        | ScratchpadError::InspectionOnly { .. }
+        | ScratchpadError::Engine { .. }
+        | ScratchpadError::Internal { .. } => None,
+    }
+}
+
+/// Adds the class and the position of the error to the audit inputs of a failed run, as structural data that never
+/// goes through the redactor. A successful or cancelled run gets neither.
+const fn with_error_metadata(
+    input: ScriptInput<'_>,
+    status: RunStatus,
+    position: Option<ScriptPosition>,
+) -> ScriptInput<'_> {
+    match (status, position) {
+        (RunStatus::Failed(class), Some(position)) => {
+            input.with_error_class(class).with_error_position(position)
+        }
+        (RunStatus::Failed(class), None) => input.with_error_class(class),
+        (RunStatus::Ok | RunStatus::Cancelled, _) => input,
+    }
+}
+
 /// Cancels the token of the evaluation thread once the handle of the run is cancelled.
 async fn bridge(cancel: CancelHandle, token: CancelToken) {
     cancel.cancelled().await;
     token.cancel();
 }
 
-/// Evaluates a script on the calling thread, under the run's scope: compiles it, merges it with the functions of the pad,
-/// evaluates it on the scope, then keeps the functions it defined. A script that fails to compile changes nothing.
-fn evaluate(
+/// Runs one evaluation inside the cancellation scope of `vynil-core`, the token mirror of the run's handle.
+fn evaluate_under_token(
+    token: &CancelToken,
     engine: &ScratchpadEngine,
     state: &mut PadState,
-    script: &str,
-    cancel: &CancelHandle,
+    input: &RunInput<'_>,
 ) -> Evaluated {
+    vynil_cancel::scope(token, || evaluate(engine, state, input))
+}
+
+/// What one evaluation needs from the run: the script text, its cancellation handle and the run constants to place in
+/// the scope before the evaluation.
+struct RunInput<'run> {
+    script: &'run str,
+    cancel: &'run CancelHandle,
+    constants: &'run BTreeMap<String, serde_json::Value>,
+}
+
+/// Evaluates a script on the calling thread, under the run's scope: compiles it, merges it with the functions of the pad,
+/// evaluates it on the scope, then keeps the functions it defined. A script that fails to compile changes nothing. The
+/// run constants are placed as Rhai constants just before the evaluation and removed when it ends, so that the pad never
+/// keeps them. A refused constant name stops the run before the script is evaluated, leaving the pad as it was.
+fn evaluate(engine: &ScratchpadEngine, state: &mut PadState, input: &RunInput<'_>) -> Evaluated {
+    let RunInput {
+        script,
+        cancel,
+        constants,
+    } = *input;
     if cancel.is_cancelled() {
         return Evaluated {
             result: Err(ScratchpadError::Cancelled),
@@ -570,9 +670,21 @@ fn evaluate(
         .introspection()
         .update(variables_of(&state.scope), functions);
     let merged = state.functions.merge(&ast);
+    let scope = &mut state.scope;
+    let mut declared = match declare_constants(scope, constants) {
+        Ok(declared) => declared,
+        Err(error) => {
+            return Evaluated {
+                result: Err(error),
+                captured: String::new(),
+                notices: Vec::new(),
+            };
+        }
+    };
     let result = rhai
-        .eval_ast_with_scope::<Dynamic>(&mut state.scope, &merged)
+        .eval_ast_with_scope::<Dynamic>(declared.scope_mut(), &merged)
         .map_err(|error| ScratchpadError::from_rhai(&error));
+    drop(declared);
     let captured = captured_output();
     let notices = if persist_functions(engine, state, script, &ast) {
         Vec::new()
@@ -584,6 +696,93 @@ fn evaluate(
         captured,
         notices,
     }
+}
+
+/// The run constants placed in the scope of a pad: when the value drops, at the end of the run, successful or failed,
+/// only the entries it named are removed. The variables the script itself set stay in the scope.
+struct RunConstants<'scope> {
+    scope: &'scope mut Scope<'static>,
+    names: Vec<String>,
+    /// Position of the first placed entry in the scope.
+    base: usize,
+}
+
+impl RunConstants<'_> {
+    /// The scope the constants were placed in, for the evaluation that reads them.
+    const fn scope_mut(&mut self) -> &mut Scope<'static> {
+        self.scope
+    }
+
+    /// Rebuilds the scope without the placed entries: their positions did not move during the evaluation, which only
+    /// ever pushes above them.
+    fn rebuild_without_placed(&mut self) {
+        let end = self.base.saturating_add(self.names.len());
+        let kept: Vec<(String, bool, Dynamic)> = self
+            .scope
+            .iter()
+            .enumerate()
+            .filter(|(index, _entry)| !(self.base..end).contains(index))
+            .map(|(_index, (name, constant, value))| (name.to_owned(), constant, value))
+            .collect();
+        let _cleared = self.scope.clear();
+        for (name, constant, value) in kept {
+            let _pushed = if constant {
+                self.scope.push_constant_dynamic(name.as_str(), value)
+            } else {
+                self.scope.push_dynamic(name.as_str(), value)
+            };
+        }
+    }
+}
+
+impl Drop for RunConstants<'_> {
+    fn drop(&mut self) {
+        // A `let` of the script that took one of the names pushed a variable above the constant: removing by name
+        // would take that variable and leave the constant. Then the scope is rebuilt without the placed positions.
+        let shadowed = self
+            .names
+            .iter()
+            .any(|name| self.scope.is_constant(name) == Some(false));
+        if shadowed {
+            self.rebuild_without_placed();
+        } else {
+            for name in &self.names {
+                let _removed: Option<Dynamic> = self.scope.remove(name.as_str());
+            }
+        }
+    }
+}
+
+/// Validates the names of the run constants and places them in the scope, returning the guard that removes them when the
+/// run ends: a name that is not a valid Rhai identifier, or that is already a variable of the pad, is refused before
+/// anything is placed.
+fn declare_constants<'scope>(
+    scope: &'scope mut Scope<'static>,
+    constants: &BTreeMap<String, serde_json::Value>,
+) -> Result<RunConstants<'scope>, ScratchpadError> {
+    let mut values: Vec<(String, Dynamic)> = Vec::with_capacity(constants.len());
+    for (name, value) in constants {
+        if !rhai::is_valid_identifier(name) {
+            return Err(ScratchpadError::Engine {
+                message: format!("the run constant `{name}` is not a valid Rhai identifier"),
+            });
+        }
+        if scope.contains(name) {
+            return Err(ScratchpadError::Engine {
+                message: format!("the run constant `{name}` is already a variable of the pad"),
+            });
+        }
+        let dynamic = rhai::serde::to_dynamic(value).map_err(|error| ScratchpadError::Engine {
+            message: format!("the value of the run constant `{name}` cannot be converted: {error}"),
+        })?;
+        values.push((name.clone(), dynamic));
+    }
+    let names = values.iter().map(|(name, _value)| name.clone()).collect();
+    let base = scope.len();
+    for (name, value) in values {
+        let _pushed = scope.push_constant_dynamic(name.as_str(), value);
+    }
+    Ok(RunConstants { scope, names, base })
 }
 
 /// Keeps the functions of a script that compiled: their compiled form for the next runs, and their source texts by key.
@@ -977,6 +1176,60 @@ mod tests {
             ScriptErrorClass::NotFound,
             "b does not exist"
         );
+    }
+
+    // Scenario: la position d'une erreur d'exécution est rendue
+    #[tokio::test]
+    async fn the_position_of_a_runtime_error_is_rendered() {
+        /// A native function that fails, with no position of its own: the position of the call site is the one to keep.
+        fn boom_native() -> Result<i64, Box<EvalAltResult>> {
+            Err(Box::new(EvalAltResult::ErrorRuntime(
+                "native boom".into(),
+                rhai::Position::NONE,
+            )))
+        }
+        let engine = engine_with(Grants::new(), ScratchpadLimits::new(), |engine| {
+            let _native = engine.register_fn("boom_native", boom_native);
+        });
+        let pad = Scratchpad::new(engine);
+        let missing = eval(&pad, "// one\n// two\nnope").await;
+        let thrown = eval(&pad, "// one\n// two\nthrow \"boom\"").await;
+        let native = eval(&pad, "// one\n// two\nboom_native()").await;
+        for (outcome, class) in [
+            (&missing, ScriptErrorClass::NotFound),
+            (&thrown, ScriptErrorClass::Runtime),
+            (&native, ScriptErrorClass::Runtime),
+        ] {
+            assert_eq!(failed(outcome), class, "the class of the error");
+            assert!(
+                outcome.text().contains("at line 3, column 1"),
+                "the rendered text carries the position: {}",
+                outcome.text()
+            );
+            let position = outcome
+                .error_position()
+                .expect("the outcome carries the position of the error");
+            assert_eq!(
+                position.line(),
+                3,
+                "the error is on line 3, the line of the expression"
+            );
+            assert_eq!(
+                position.column(),
+                1,
+                "the error is at the column of the expression"
+            );
+            assert_eq!(
+                outcome.record().error_class(),
+                Some(class),
+                "the record carries the class"
+            );
+            assert_eq!(
+                outcome.record().error_position(),
+                Some(position),
+                "the record carries the position"
+            );
+        }
     }
 
     #[tokio::test]
@@ -2210,6 +2463,176 @@ mod tests {
             !outcome_debug.contains("FAKE-SECRET"),
             "the snapshot carried by an outcome follows the same rule: {outcome_debug}"
         );
+    }
+
+    /// Runs a script with these run constants, an empty redactor, a fresh clock and a handle that is not cancelled.
+    async fn eval_with_constants(
+        pad: &Scratchpad,
+        script: &str,
+        constants: &BTreeMap<String, serde_json::Value>,
+    ) -> RunOutcome {
+        let redactor = Redactor::new();
+        let clock = ManualClock::new(Timestamp::from_millis(0));
+        let cancel = CancelHandle::new();
+        let env = RunEnv::new("agent", &redactor, &clock).with_constants(constants);
+        pad.run(script, &cancel, &env).await
+    }
+
+    // Scenario: une constante de run se lit sans se persister
+    #[tokio::test]
+    async fn a_run_constant_is_read_without_being_persisted() {
+        let pad = Scratchpad::new(plain());
+        let constants = BTreeMap::from([("env_name".to_owned(), serde_json::json!("prod"))]);
+        let script = r#"let x = env_name + "-1"; x"#;
+        let outcome = eval_with_constants(&pad, script, &constants).await;
+        assert_eq!(outcome.status(), RunStatus::Ok, "the run: {}", outcome.text());
+        assert_eq!(outcome.text(), "prod-1", "the constant reads its value");
+        let snapshot = pad.snapshot();
+        assert!(
+            snapshot.variables().contains_key("x"),
+            "the variable the script set is persisted: {:?}",
+            snapshot.variables()
+        );
+        assert!(
+            !snapshot.variables().contains_key("env_name"),
+            "the run constant is not persisted: {:?}",
+            snapshot.variables()
+        );
+        assert_eq!(
+            outcome.record().script,
+            script,
+            "the record carries the script of the LLM alone, with no constant in it"
+        );
+        let listing = eval(&pad, "vars()").await;
+        assert!(
+            listing.text().contains('x') && !listing.text().contains("env_name"),
+            "the introspection of a later run carries x, never the constant: {}",
+            listing.text()
+        );
+    }
+
+    // Scenario: une constante de run se lit sans se persister (un `let` du script qui reprend le nom la masque, et le
+    // retrait ne doit emporter que la constante, jamais la variable posée par le script)
+    #[tokio::test]
+    async fn a_run_constant_shadowed_by_a_let_does_not_survive_the_run() {
+        let pad = Scratchpad::new(plain());
+        let constants = BTreeMap::from([("env_name".to_owned(), serde_json::json!("prod"))]);
+        let outcome = eval_with_constants(
+            &pad,
+            r#"let env_name = "scriptee"; let t = 1; env_name"#,
+            &constants,
+        )
+        .await;
+        assert_eq!(
+            outcome.status(),
+            RunStatus::Ok,
+            "the shadowing run: {}",
+            outcome.text()
+        );
+        assert_eq!(
+            outcome.text(),
+            "scriptee",
+            "the `let` masks the constant for this script, as ordinary Rhai shadowing allows"
+        );
+        let after = eval(&pad, "env_name").await;
+        assert_eq!(
+            after.text(),
+            "scriptee",
+            "the constant is gone and only the script's variable under that name survives: {}",
+            after.text()
+        );
+        assert_eq!(
+            eval(&pad, "t").await.text(),
+            "1",
+            "the other variable the script set survives"
+        );
+        let listing = eval(&pad, "vars()").await;
+        assert!(
+            listing.text().contains("scriptee") && !listing.text().contains("prod"),
+            "the introspection of the next run carries the variable under that name alone, never the constant: {}",
+            listing.text()
+        );
+    }
+
+    // Scenario: une constante de run ne se réaffecte pas
+    #[tokio::test]
+    async fn a_run_constant_is_not_reassigned() {
+        let pad = Scratchpad::new(plain());
+        let constants = BTreeMap::from([("env_name".to_owned(), serde_json::json!("prod"))]);
+        let outcome = eval_with_constants(&pad, r#"env_name = "x""#, &constants).await;
+        assert_eq!(
+            failed(&outcome),
+            ScriptErrorClass::Runtime,
+            "assigning a constant is a runtime error: {}",
+            outcome.text()
+        );
+        let after = eval(&pad, "env_name").await;
+        assert_eq!(
+            failed(&after),
+            ScriptErrorClass::NotFound,
+            "the constant left the scope with the failed run: {}",
+            after.text()
+        );
+    }
+
+    // Scenario: les positions d'erreur ne sont pas décalées par les constantes
+    #[tokio::test]
+    async fn error_positions_are_not_shifted_by_the_constants() {
+        let pad = Scratchpad::new(plain());
+        let script = "// one\n// two\nnope";
+        let without = eval(&pad, script).await;
+        let constants = BTreeMap::from([("env_name".to_owned(), serde_json::json!("prod"))]);
+        let with = eval_with_constants(&Scratchpad::new(plain()), script, &constants).await;
+        for outcome in [&without, &with] {
+            assert_eq!(
+                failed(outcome),
+                ScriptErrorClass::NotFound,
+                "the missing variable: {}",
+                outcome.text()
+            );
+            let position = outcome
+                .error_position()
+                .expect("the outcome carries the position of the error");
+            assert_eq!(
+                position.line(),
+                3,
+                "the error stays on line 3, with or without constants: {}",
+                outcome.text()
+            );
+        }
+    }
+
+    // Scenario: un nom de constante invalide ou déjà pris est refusé
+    #[tokio::test]
+    async fn an_invalid_or_taken_constant_name_is_refused() {
+        let pad = Scratchpad::new(plain());
+        let _set = eval(&pad, "let keep = 1").await;
+        for name in ["bad name", "keep"] {
+            let constants = BTreeMap::from([(name.to_owned(), serde_json::json!("hush-value"))]);
+            let outcome = eval_with_constants(&pad, "let z = 2", &constants).await;
+            assert_eq!(
+                failed(&outcome),
+                ScriptErrorClass::Engine,
+                "the name `{name}` is refused before the evaluation: {}",
+                outcome.text()
+            );
+            assert!(
+                outcome.text().contains(name),
+                "the message names the constant `{name}`: {}",
+                outcome.text()
+            );
+            assert!(
+                !outcome.text().contains("hush-value"),
+                "the message never carries the value: {}",
+                outcome.text()
+            );
+            assert_eq!(eval(&pad, "keep").await.text(), "1", "the pad did not move");
+            assert_eq!(
+                failed(&eval(&pad, "z").await),
+                ScriptErrorClass::NotFound,
+                "the script was not evaluated"
+            );
+        }
     }
 
     // Config task #4: an inspection pad never persists, so it never renders the notice that its functions were not persisted.

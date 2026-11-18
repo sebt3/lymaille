@@ -240,6 +240,59 @@ impl Skill {
     pub fn annex(&self, name: &str) -> Option<&str> {
         self.annexes.get(name).map(String::as_str)
     }
+
+    /// Writes the `SKILL.md` text of the skill: the reverse reading of [`Skill::parse`]
+    /// (`agent-sessions/toolsets#FR-24`). The frontmatter opens the text, written by `yaml_serde` with `name` and
+    /// `description`, then `license`, `compatibility` and `metadata` when they are set, in that order, the metadata keys
+    /// sorted; an absent optional field is not written, and nothing the skill does not hold appears (no `allowed-tools`).
+    /// The body follows the closing line, unchanged: no trim, no added line, every line ending kept. Annex documents are
+    /// not part of the text.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ToolsetsError::InvalidSkill`] when the frontmatter does not serialize, which no skill built by this
+    /// module does. The reason is fixed and carries no content.
+    pub fn to_text(&self) -> ToolsetsResult<String> {
+        let mut fields = yaml_serde::Mapping::new();
+        let _name = fields.insert(
+            yaml_serde::Value::String("name".to_owned()),
+            yaml_serde::Value::String(self.name.clone()),
+        );
+        let _description = fields.insert(
+            yaml_serde::Value::String("description".to_owned()),
+            yaml_serde::Value::String(self.description.clone()),
+        );
+        for (key, value) in [("license", &self.license), ("compatibility", &self.compatibility)] {
+            if let Some(text) = value {
+                let _entry = fields.insert(
+                    yaml_serde::Value::String(key.to_owned()),
+                    yaml_serde::Value::String(text.clone()),
+                );
+            }
+        }
+        if !self.metadata.is_empty() {
+            let mut entries = yaml_serde::Mapping::new();
+            for (key, value) in &self.metadata {
+                let _entry = entries.insert(
+                    yaml_serde::Value::String(key.clone()),
+                    yaml_serde::Value::String(value.clone()),
+                );
+            }
+            let _metadata = fields.insert(
+                yaml_serde::Value::String("metadata".to_owned()),
+                yaml_serde::Value::Mapping(entries),
+            );
+        }
+        let yaml = yaml_serde::to_string(&yaml_serde::Value::Mapping(fields)).map_err(|_error| {
+            ToolsetsError::InvalidSkill {
+                name: self.name.clone(),
+                reason: "the frontmatter does not serialize",
+                known: Vec::new(),
+            }
+        })?;
+        let line_break = if yaml.ends_with('\n') { "" } else { "\n" };
+        Ok(format!("{FENCE}\n{yaml}{line_break}{FENCE}\n{}", self.body))
+    }
 }
 
 impl fmt::Debug for Skill {
@@ -825,5 +878,91 @@ mod tests {
                 "the text of the skill never appears in a debug output: {shown}"
             );
         }
+    }
+
+    // Scenario: un skill se rend en texte et se relit à l'identique (skill.sdd #6, FR-24)
+    #[test]
+    fn a_skill_renders_to_text_and_reads_back_identically() {
+        let body = "First line.\r\n---\r\nLast line with CRLF endings.\r\n";
+        let built = Skill::new(
+            "grafana".to_owned(),
+            "a short description".to_owned(),
+            body.to_owned(),
+        )
+        .expect("a valid skill builds")
+        .with_license("BSD-3-Clause".to_owned())
+        .with_compatibility("any Rhai scratchpad".to_owned())
+        .with_metadata("owner".to_owned(), "team".to_owned())
+        .expect("a metadata entry builds")
+        .with_metadata("version".to_owned(), "1.0".to_owned())
+        .expect("a second metadata entry builds");
+        let text = built.to_text().expect("a skill is written");
+        let back = Skill::parse(&text).expect("the text is read back");
+        assert_eq!(back, built, "the round trip must be identical");
+        let (_, written_body) = super::split_frontmatter(&text).expect("the text has a closed frontmatter");
+        assert_eq!(
+            written_body, body,
+            "the body of the text is the body of the skill, byte for byte"
+        );
+        for (key, next) in [
+            ("name:", "description:"),
+            ("description:", "license:"),
+            ("license:", "compatibility:"),
+        ] {
+            let at = text.find(key).unwrap_or(usize::MAX);
+            let after = text.find(next).unwrap_or(usize::MAX);
+            assert!(at < after, "`{key}` must be written before `{next}`: {text}");
+        }
+        let metadata_at = text.find("\nmetadata:").unwrap_or(usize::MAX);
+        assert!(
+            metadata_at > text.find("\ncompatibility:").unwrap_or(0),
+            "metadata follows compatibility: {text}"
+        );
+        assert!(metadata_at != usize::MAX, "metadata is written: {text}");
+    }
+
+    // Scenario: un skill minimal ne rend que ses deux champs obligatoires (skill.sdd #6, FR-24)
+    #[test]
+    fn a_minimal_skill_renders_its_two_required_fields_only() {
+        let built = skill("grafana").expect("a valid skill builds");
+        let text = built.to_text().expect("a skill is written");
+        assert!(
+            text.starts_with("---\n"),
+            "the frontmatter opens the text: {text}"
+        );
+        assert!(text.contains("\nname: grafana\n"), "the name is written: {text}");
+        assert!(
+            text.contains("\ndescription: a short description\n"),
+            "the description is written: {text}"
+        );
+        for field in ["license", "compatibility", "metadata"] {
+            assert!(
+                !text.contains(field),
+                "an absent `{field}` is not written: {text}"
+            );
+        }
+    }
+
+    // Scenario: les documents annexes ne sont pas dans le texte (skill.sdd #6, FR-24)
+    #[test]
+    fn annex_documents_are_not_in_the_text() {
+        let built = skill("grafana")
+            .expect("a valid skill builds")
+            .with_annex("queries".to_owned(), "PROMQL-ANNEX-CONTENT".to_owned())
+            .expect("an annex builds");
+        let text = built.to_text().expect("a skill is written");
+        assert!(
+            !text.contains("queries"),
+            "the annex name is not in the text: {text}"
+        );
+        assert!(
+            !text.contains("PROMQL-ANNEX-CONTENT"),
+            "the annex content is not in the text: {text}"
+        );
+        let back = Skill::parse(&text).expect("the text is read back");
+        assert!(
+            back.annexes().is_empty(),
+            "the skill read back has no annex document"
+        );
     }
 }

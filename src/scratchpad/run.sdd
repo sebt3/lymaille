@@ -37,7 +37,9 @@ Depends on:
 Exposes:
   @Scratchpad
   @RunEnv
+  @RunEnv::with_constants
   @RunOutcome
+  @RunOutcome::error_position
   @RunStatus
   @PadSnapshot
   @Restored
@@ -63,11 +65,13 @@ Accepts:
   @Scratchpad::restore: le @ScratchpadEngine, la table des variables de l'état (nom vers @TaggedValue) et la table des sources de fonctions (clé vers texte) ; rend un @Restored : le pad et la liste triée des clés de fonctions cassées (pour @restore_notices de ../session/notice.sdd).
   @Scratchpad::run: le texte du script, le @CancelHandle du run et un @RunEnv ; fonction asynchrone.
   @RunEnv::new: le nom de l'agent, une référence vers le @Redactor de la session et une référence vers l'horloge (@Clock).
+  @RunEnv::with_constants: une référence vers une table ordonnée nom vers valeur JSON (`BTreeMap<String, serde_json::Value>`), constructeur chaîné ; le @RunEnv reste `Copy`. Sans appel, aucune constante.
   @Scratchpad::snapshot: aucun argument.
   @RunOutcome::snapshot: aucun argument ; l'instantané calculé à la fin du run, sans reprendre le verrou du pad.
 
 Returns:
   @RunOutcome (`#[non_exhaustive]`, accesseurs en lecture seule) : `text` (le résultat du tool pour le LLM, déjà plafonné et masqué), `status` (@RunStatus : `Ok`, `Failed` avec une @ScriptErrorClass, ou `Cancelled`), `truncated`, les avertissements de persistance (@PersistWarning) et l'enregistrement d'audit (@ScriptRecord, ../session/audit.sdd). La boucle de tour émet l'événement de script à partir de cet enregistrement ; ce fichier n'émet rien.
+  @RunOutcome::error_position: la @ScriptPosition de l'erreur quand le run a échoué et que Rhai la fournit, sinon `None` ; la classe reste celle de @RunStatus::Failed.
   @Scratchpad::snapshot: un @PadSnapshot : variables persistables (table ordonnée nom vers @TaggedValue), sources de fonctions (clé vers texte) et avertissements des variables exclues. C'est ce que la boucle de tour range dans @SessionState.
 
 Must:
@@ -83,6 +87,8 @@ Must:
   Erreur : le texte rendu est le `Display` de @ScratchpadError, complété des suggestions de ./suggest.sdd (candidats parmi les seuls éléments accordés), masqué des secrets, puis plafonné au plafond de rendu par @truncate_middle. Le statut est `Failed` avec la classe de l'erreur.
   Avertissements de persistance : calculés à la fin de chaque run, réussi ou en échec, sur le scope vivant (décidé le 2026-10-29 par le développeur principal). Un avertissement pour une variable donnée est rendu au premier run qui la voit non persistable et n'est pas répété aux runs suivants tant qu'elle reste dans le même état ; il redevient possible si la variable disparaît ou devient persistable puis ne l'est plus. Les avertissements ne font pas échouer le script : le statut reste `Ok` (`agent-sessions/scratchpad#FR-7`).
   Enregistrement d'audit : @ScriptRecord est construit avec le nom de l'agent, le texte complet du script, le résultat entier non plafonné (@full_text de la valeur, ou le texte de l'erreur), la durée et l'erreur éventuelle ; il masque et plafonne lui-même (`agent-sessions/session#AC-4`). Le record est rendu même si le run échoue ou est annulé. Le script n'est jamais tronqué.
+  Position d'erreur (`agent-sessions/scratchpad#FR-15`) : pour toute erreur d'exécution classée par @ScratchpadError::from_rhai (variable introuvable, `throw`, fonction native en échec), le run rend la position de Rhai dans le texte, dans @RunOutcome::error_position et, avec la classe, dans le @ScriptRecord de l'issue (../session/audit.sdd). Le script évalué est celui du LLM, sans préfixe : aucune position n'est décalée.
+  Constantes de run (`agent-sessions/scratchpad#FR-16`) : celles de @RunEnv::with_constants sont posées dans le scope avant l'évaluation comme constantes Rhai, converties par `rhai::serde` ; une affectation échoue en `Runtime`. Elles sont retirées du scope du pad à la fin du run, réussi ou en échec : ni @PadSnapshot, ni les sources de fonctions, ni l'instantané d'introspection du run suivant ne les portent, et le @ScriptRecord ne contient que le texte du script du LLM, pas leur nom ni leur valeur. Un nom qui n'est pas un identifiant Rhai valide, ou qui est déjà une variable du pad, est refusé avant l'évaluation par @ScratchpadError::Engine dont le message nomme la constante sans sa valeur (choix posé le 2026-11-17, à valider) : le script n'est pas évalué et le pad ne change pas. Une fonction du script ne voit pas ces constantes, comme le reste du scope (`agent-sessions#CON-4`). Les valeurs que l'hôte veut secrètes sont déclarées à son @Redactor, qui masque tout résultat rendu (`agent-sessions#CON-3`).
   L'instantané d'un pad restauré puis non modifié est égal à celui qui a servi à le restaurer, aux variables non persistables près.
   Restauration : les variables sont reposées dans le scope par @restore_scope ; les fonctions sont recompilées par @recompile_functions ; le pad ne rejoue aucun script (`agent-sessions/scratchpad#DEC-1`) ; les clés cassées sont rendues dans @Restored. Après restauration, `f(x)` s'évalue comme avant la sauvegarde (`agent-sessions/scratchpad#AC-1`).
   Si l'extraction des sources de fonctions échoue après une évaluation réussie (méthode typée, position saturée : ./persist.sdd #9), le run garde sa valeur et son statut `Ok` ; un avertissement dit que les fonctions du script ne sont pas persistées, et elles restent connues du pad (décidé le 2026-10-29 par le développeur principal).
@@ -248,6 +254,31 @@ Scenario: le secret reste utilisable dans le pad, masqué dans toute sortie
   When l'exécution se termine
   Then l'appel du module a reçu la vraie valeur, et le texte rendu au LLM montre `*redacted secret*` à la place
 
+Scenario: la position d'une erreur d'exécution est rendue
+  Given trois scripts de trois lignes : l'un lit une variable absente à la ligne 3, l'autre fait un `throw` à la ligne 3, le dernier appelle à la ligne 3 une fonction native qui échoue
+  When chacun est exécuté
+  Then chaque statut est Failed avec sa classe, error_position rend la ligne 3 et la colonne de l'expression, le texte rendu porte la même position, et le @ScriptRecord porte la classe et la position
+
+Scenario: une constante de run se lit sans se persister
+  Given un @RunEnv avec la constante `env_name` valant `prod` et un script `let x = env_name + "-1"; x`
+  When le script est exécuté puis le pad est instantané
+  Then le résultat est `prod-1`, l'instantané porte `x` et ne porte pas `env_name`, et le @ScriptRecord a pour script exactement le texte donné
+
+Scenario: une constante de run ne se réaffecte pas
+  Given un @RunEnv avec la constante `env_name` et un script `env_name = "x"`
+  When il est exécuté
+  Then le statut est Failed de classe Runtime, et la constante n'est plus dans le scope du pad après le run
+
+Scenario: les positions d'erreur ne sont pas décalées par les constantes
+  Given un @RunEnv avec une constante et un script de trois lignes qui échoue à la ligne 3
+  When il est exécuté
+  Then error_position rend la ligne 3, comme sans constante
+
+Scenario: un nom de constante invalide ou déjà pris est refusé
+  Given un @RunEnv avec la constante `bad name`, puis un autre avec une constante nommée comme une variable du pad
+  When un script est exécuté avec chacun
+  Then le statut est Failed de classe Engine, le message nomme la constante sans sa valeur, le script n'est pas évalué et le pad est inchangé
+
 Tasks:
   [x] #18 L'ensemble des candidats construit à chaque erreur (`candidates_of`) reçoit les lignes d'usage des fonctions visibles, par @CandidateSet::with_usage (./suggest.sdd #6), lues de @FunctionEntry::usage (./introspect.sdd #12) : lot 0.2-B2, `agent-sessions/scratchpad#FR-14`. Scenario de bout en bout : un script appelle `sandbox::read_file("p")` sur un moteur dont le module `sandbox` a une fonction à table et une ligne d'usage ; l'erreur rendue contient `sandbox::read_file(#{ path: "…" })`. Ne touche ni la table des erreurs ni le masquage.
       Validé le 2026-11-04 (validator : `scripts/check` complet vert ; rouge reproduit sans le câblage pour la bonne raison ; aucun mutant sur les lignes du diff, retrait du câblage tué par le test bout en bout ; BR-2 tenu — les usages viennent du catalogue filtré par l'octroi et with_usage jette les chemins non candidats). La seconde moitié de l'`AC-14` du DSD (les trois règles dans le skill) est la tâche ./../toolsets/native.sdd #5.
@@ -277,6 +308,10 @@ Tasks:
       Validé le 2026-10-29 (validator) sous `SKIP=deny scripts/check` : l'étape `cargo deny` échoue faute de `deny.toml` (lymaille.sdd #1, #5).
   [x] #13 Scenarios ajoutés le 2026-10-29 (ci-dessous), tests puis implémentation : avertissements sur run en échec, échec d'extraction après évaluation, instantané d'introspection posé avant l'évaluation, avertissement qui redevient possible, fonction exclue par masquage, runtime `current_thread`.
       Validé le 2026-10-29 (validator) sous `SKIP=deny scripts/check` : l'étape `cargo deny` échoue faute de `deny.toml` (lymaille.sdd #1, #5).
+  [x] #19 Lot 0.3.1-B (`sebt3/lymaille#14` point 2, `agent-sessions/scratchpad#FR-15`, `AC-15`) : écrire d'abord le test du Scenario « la position d'une erreur d'exécution est rendue ». Le classement de @ScratchpadError::from_rhai garde déjà la position d'un `ErrorRuntime` et d'une variable absente (constat du 2026-11-17 à la lecture de ./error.rs) : si le test passe d'emblée pour le texte, le signaler au lieu de le forcer, la perte de l'issue se situant alors dans le transport vers l'appelant. Ajouter @RunOutcome::error_position et poser classe et position sur la @ScriptInput du run (@ScriptInput::with_error_class et @ScriptInput::with_error_position, ../session/audit.sdd). Dépend des tâches « aller-retour JSON » de ./error.sdd et « classe et position » de ../session/audit.sdd.
+      Validé le 2026-11-18 (validator) : rouge E0599 et record sans classe vus ; SIGNALEMENT — le texte rendu « at line 3, column 1 » passait d'emblée pour les trois cas (porté par `location()` déjà présente à HEAD) : la perte était bien dans le transport, conformément au constat ; le transport (accesseur + record) est désormais asserté cas par cas. Run annulé, `refused` et `lost` sans classe ni position (jugé cohérent avec FR-15 ; question du `lost` portée au développeur). Aucun mutant sur les lignes du diff (partage de `match` et chaînage, familles non atteignantes). `scripts/check` vert hors `dependencies` (RUSTSEC-2026-0543 `chrono`, préexistant, précédent `SKIP=deny`), 1427 tests.
+  [x] #20 Lot 0.3.1-B (`sebt3/lymaille#15`, `agent-sessions/scratchpad#FR-16`, `AC-16`) : tests des quatre Scenario « constante » vus échouer, puis @RunEnv::with_constants et la pose des constantes dans le scope (`push_constant_dynamic`, comme le pad d'inspection) avec leur retrait en fin de run. Le retrait ne doit pas emporter les variables que le script a posées : le Scenario « une constante de run se lit sans se persister » le vérifie. Vérifier que le pad d'inspection (./inspect.sdd), qui réutilise @Scratchpad::run, n'est pas affecté. À faire après la tâche « position » de ce fichier (même fichier source).
+      Validé le 2026-11-18 (validator, revalidation après FAIL) : rouge E0599 vu ; écart bloquant corrigé — shadowing d'une constante par un `let` du script : `Scope::remove` par nom emportait la variable et laissait la constante ; correction par `RunConstants` mémorisant les positions posées et reconstruction ciblée en cas de shadowing détecté (`is_constant == Some(false)`). Décision de lecture consignée par le validator : sous AC-1, un `let` reprenant le nom de la constante survit au run et le masque à l'avenir ; la part garantie par FR-16 est que la CONSTANTE ne survit pas (preuve par `vars()`), pas un `NotFound`. Pad d'inspection non affecté (chemin rapide, table vide). Mutant de la condition de shadowing tué ; intégrité du fichier confirmée après un incident de restauration par `git checkout` (rétabli, 437 insertions, sha256 stable). `scripts/check` vert hors `dependencies` (RUSTSEC-2026-0543 `chrono`, préexistant, précédent `SKIP=deny`), 1436 tests.
 
 Scenario: les avertissements sont calculés sur une exécution échouée
   Given un script qui pose une variable non persistable puis échoue à l'exécution
