@@ -177,14 +177,24 @@ pub_with_shorthand = "deny"
 redundant_pub_crate = { level = "allow", priority = 1 }
 
 [features]
-# Relay of the `vynil-core` features that give the host group its files and shell (see `src/scratchpad/engine.sdd`, #17).
-# Off by default: a build without them has no file or shell function, even with the host group granted.
-# Real MCP connector over streamable HTTP (`src/modules/mcp_client.sdd`). The host installs its own rustls provider.
-# OpenAI-compatible inference adapter over `rig-core` (`src/agents/rig.sdd`), on by default; a host may turn it off.
+# Relay of the `vynil-core` features that project their tool functions into the host group (`agent-sessions#NFR-6`).
+# Off by default: a build without one simply has no function from that group, even with the group granted.
+# `k8s` and `s3` are not relayed: their dependency graphs break resolution or `cargo deny` (measured, see `lymaille.sdd` #21).
 default = ["mcp-http", "rig"]
 fs = ["vynil-core/fs"]
 shell = ["vynil-core/shell"]
+password = ["vynil-core/password"]
+quantity = ["vynil-core/quantity"]
+crypto = ["vynil-core/crypto"]
+http = ["vynil-core/http"]
+oci = ["vynil-core/oci"]
+feeds = ["vynil-core/feeds"]
+prometheus = ["vynil-core/prometheus"]
+loki = ["vynil-core/loki"]
+# Internal features, not `vynil-core` relays: the crate's own transports and adapters.
+# Real MCP connector over streamable HTTP (`src/modules/mcp_client.sdd`). The host installs its own rustls provider.
 mcp-http = ["dep:rmcp", "dep:http"]
+# OpenAI-compatible inference adapter over `rig-core` (`src/agents/rig.sdd`), on by default; a host may turn it off.
 rig = ["dep:rig-core"]
 # TypeScript derivation of the definition types (`dsd/agent-sessions.md` NFR-4, `src/ts_contract.sdd`). Off by
 # default: without it `ts-rs` is absent from the dependency graph, and the library never writes TypeScript files.
