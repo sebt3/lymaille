@@ -1,0 +1,73 @@
+Spec: native
+
+Purpose:
+  Table des modules natifs d'une session : ce que la nature de la session donne, sans liste dans la définition d'agent. Une fonction pure que l'hôte lit pour assembler le moteur
+    de session (`agent-sessions#BR-2`, `agent-sessions#DEC-16`, `agent-sessions/modules#FR-4`, `agent-sessions/toolsets#FR-8`, `FR-19`).
+
+Owns:
+  ./native.rs
+
+References:
+  ./modules.sdd
+  ./memory_module.sdd
+  ./session_module.sdd
+  ./todo.sdd
+  ../agents/definition.sdd
+  ../toolsets/config.sdd
+  ../toolsets/builder.sdd
+  ../delegation/module.sdd
+
+Depends on:
+  ../agents/definition.sdd
+
+Exposes:
+  @NativeModule
+  @NativeModule::name
+  @native_modules
+  @MemoryAccess
+
+Accepts:
+  @native_modules: une nature (@AgentKind), un booléen « la session a une session parente » et un booléen « l'hôte fournit un niveau de Memory partagé à cette session ». Le second vient du `SessionState::parent` (`agent-sessions/session#FR-2`) ; le troisième est décidé par l'hôte (voir #3).
+
+Returns:
+  @native_modules: la liste ordonnée des @NativeModule de la session. @NativeModule : `Todo`, `MemorySession`, `MemoryShared`, `MemoryUser(MemoryAccess)`, `Delegation`, `Session`, `ToolsetBuilder`, `Contexts`, `Sessions`, `Inspect`. @MemoryAccess : `Read` ou `ReadWrite`. @NativeModule::name : le nom Rhai du module (`todo`, `memory_session`, `memory_shared`, `memory_user`, `delegation`, `session`, `toolset_builder`, `contexts`, `sessions`, `inspect`).
+
+Must:
+  La table est la seule source des modules natifs ; aucune définition d'agent, aucun contexte ni aucun toolset n'en ajoute ou n'en retire (`agent-sessions#DEC-16`) :
+  - agent de travail : `Todo`, `MemorySession`, `MemoryShared` (si le niveau est fourni), `MemoryUser(Read)`, `Delegation`, `Session` ;
+  - sous-agent : `Todo`, `MemorySession`, `MemoryShared` (si le niveau est fourni), `MemoryUser(Read)`, et `Session` seulement s'il a une session parente (un sous-agent d'un processus automatisé n'a pas de titre à donner) ; jamais `Delegation` ;
+  - agent de configuration : `Todo`, `MemorySession`, `MemoryUser(ReadWrite)`, `Session`, `ToolsetBuilder`, `Contexts`, `Sessions`, `Inspect` ; jamais `MemoryShared` ni `Delegation`.
+  `ToolsetBuilder`, `Contexts`, `Sessions` et `Inspect` ne sont donnés à aucune session productive, quels que soient la définition, le contexte et les toolsets (`agent-sessions/toolsets#FR-8`, `FR-19`, `agent-sessions#BR-8`).
+  L'introspection du pad n'est pas un module natif : elle est offerte à toutes les natures par le moteur (`agent-sessions/scratchpad#FR-3`).
+  Pure : aucune E/S ; `#[non_exhaustive]`, `Clone`, `Debug`, `PartialEq`.
+
+Scenario: un agent de travail
+  Given la nature Work, aucune session parente, niveau partagé fourni
+  When la table est lue
+  Then elle contient `Todo`, `MemorySession`, `MemoryShared`, `MemoryUser(Read)`, `Delegation` et `Session`, et aucun module de configuration
+
+Scenario: un sous-agent rattaché à un humain
+  Given la nature Sub avec une session parente
+  When la table est lue
+  Then elle contient `Session` et `MemoryUser(Read)`, et ni `Delegation` ni module de configuration
+
+Scenario: un sous-agent de processus automatisé
+  Given la nature Sub sans session parente
+  When la table est lue
+  Then elle ne contient pas `Session`
+
+Scenario: un agent de configuration
+  Given la nature Config
+  When la table est lue
+  Then elle contient `Todo`, `MemorySession`, `MemoryUser(ReadWrite)`, `Session`, `ToolsetBuilder`, `Contexts`, `Sessions` et `Inspect`, et ni `MemoryShared` ni `Delegation`
+
+Scenario: sans niveau partagé, pas de Memory partagée
+  Given la nature Work et un hôte sans niveau partagé
+  When la table est lue
+  Then `MemoryShared` est absent
+
+Tasks:
+  [ ] #1 Lot 0.4.0-F : tests puis implémentation de ./native.rs ; déclarer le module dans ./mod.rs et ré-exporter dans ../lib.rs. Remplace les règles retirées de ../toolsets/compat.sdd #10.
+  [ ] #2 Lot 0.4.0-F : `MemoryAccess::Read` de `memory_module` n'expose que les fonctions de lecture (`list`, `read`, recherche) et aucune fonction d'écriture ; modifier ./memory_module.sdd #3 en conséquence (aujourd'hui la lecture seule se fait par un toolset de présentation). Aucune migration de l'ancien comportement : sans accès précisé, le module expose tout, comme avant.
+  [ ] #3 Lot 0.4.0-F : réponse à `agent-sessions/modules#FR-4` pour `memory_shared` : « dépend du contexte » est consigné, mais le DSD ne dit pas comment le ToolsetContext désigne le niveau partagé. Hypothèse de travail, sans rien inventer : un booléen fourni par l'hôte à @native_modules (XP : aucune clé nouvelle de contexte sans hôte demandeur). À valider.
+  [?] #4 À trancher par le développeur principal : le nom du module de création est `toolset_builder` dans le code (../toolsets/builder.rs) et `toolset_creator` dans l'ancienne liste de noms réservés (../agents/definition.sdd #13) et le DSD (`agent-sessions/toolsets#FR-8`). Hypothèse de travail : le nom du code, `toolset_builder`, qui fait foi ; corriger le DSD en conséquence.

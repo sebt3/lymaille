@@ -19,7 +19,7 @@ Exposes:
   @RestoredSession
 
 Accepts:
-  @restore_session: un @SessionStore (générique), un @SessionId, le @ScratchpadEngine de la cible (déjà construit par l'hôte avec les accords courants) et la @Provenance courante (empreinte de l'agent, version de chaque toolset utilisé) ; asynchrone.
+  @restore_session: un @SessionStore (générique), un @SessionId, le @ScratchpadEngine de la cible (déjà construit par l'hôte avec la présentation courante) et la @Provenance courante (empreinte de l'agent, version de chaque toolset utilisé) ; asynchrone.
 
 Returns:
   @restore_session: un @RestoredSession : l'@SessionState chargé, le @Scratchpad restauré, et les messages système de restauration (@restore_notices : définition d'agent changée, toolsets changés par nom croissant, fonctions cassées dans l'ordre reçu ; puis @unresolved_call_notices pour les appels irrésolus des avertissements de @Restored::warnings, `AC-2`).

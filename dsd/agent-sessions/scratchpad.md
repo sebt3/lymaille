@@ -287,7 +287,7 @@ Specs créées dans `src/scratchpad/` (une par fichier source prévu, spec de r�
 - `scratchpad.sdd` : spec de répertoire (frontière : aucune E/S ni horloge système, seuls les groupes accordés, `const` désactivé).
 - `error.sdd` : erreur du module, erreurs de Rhai classées et rendues avec position (FR-6, AC-3, AC-7, AC-11).
 - `limits.sdd` : plafonds de mémoire et profondeurs, aucune limite de durée (FR-4, AC-3, AC-7).
-- `grant.sdd` : description abstraite de ce que le contexte donne à la session (toolsets, leurs modules de présentation, skills ; FR-11, FR-3). À renommer par la réalisation de `DEC-16`.
+- `presentation.sdd` : description abstraite de ce que le contexte donne à la session (toolsets, leurs modules de présentation, skills ; FR-11, FR-3). À renommer par la réalisation de `DEC-16`.
 - `engine.sdd` : moteur d'une session, groupes accordés, `const`, résolveur fermé, crochet d'annulation (FR-11, FR-12, DEC-3, AC-10, AC-11).
 - `render.sdd` : rendu borné, JSON compact, troncature début et fin avec avis (FR-5, AC-4).
 - `format.sdd` : fonctions de formatage exposées au LLM (FR-8, AC-5).

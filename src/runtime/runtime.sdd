@@ -26,8 +26,9 @@ References:
 
 Must:
   Ne réaliser aucune E/S propre : le stockage de session, l'inférence et les modules viennent de traits ou d'objets fournis par l'hôte ; le temps passe par @Clock et par l'attente annulable de @CancelHandle.
-  Ne dépendre ni de `toolsets` ni de `modules` ni de `delegation` : ces domaines produisent des @Grants et des modules Rhai que l'hôte a déjà assemblés dans le @ScratchpadEngine reçu.
+  Ne dépendre ni de `toolsets` ni de `modules` ni de `delegation` : ces domaines produisent des @Presentation et des modules Rhai que l'hôte a déjà assemblés dans le @ScratchpadEngine reçu.
   Ne laisser aucun secret atteindre l'historique, les événements, les erreurs ni les sorties renvoyées au LLM (`agent-sessions#CON-3`) : tout texte sort par le @Redactor de la session.
 
 Tasks:
+  [ ] #2 Lot 0.4.0-I : adapter le texte (`Grants` devient @Presentation, ../scratchpad/presentation.sdd) et vérifier que ./restore.rs, ./turn.rs et ./definition.rs ne lisent ni `AgentDefinition::modules()` ni `toolsets()` ; ./restore.sdd : l'hôte reconstruit le @ScratchpadEngine de la cible avec la présentation du ToolsetContext courant ; la @Provenance (versions de toolsets) vient des toolsets de la session.
   [x] #1 Déclarer les sous-modules dans ./mod.rs au fil des specs enfants livrées, et le module dans ../lib.sdd et ../lib.rs.

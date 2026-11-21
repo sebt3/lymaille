@@ -14,7 +14,7 @@ Exposes:
   @check_template
 
 Accepts:
-  @SessionMeta::new: l'identifiant de l'agent, la date de début de la session (texte posé par l'hôte), les toolsets accordés (nom, description), les noms des skills accordés et, pour un agent principal, le nombre de sous-agents parallélisables (`agent-sessions/delegation#FR-11`).
+  @SessionMeta::new: l'identifiant de l'agent, la date de début de la session (texte posé par l'hôte), les toolsets de la session (nom, description), les noms des skills de la session et, pour un agent principal, le nombre de sous-agents parallélisables (`agent-sessions/delegation#FR-11`).
   @render_prompt: le gabarit du prompt système, un @ResolvedContext et un @SessionMeta.
   @render_skill: un @Skill, le nom du toolset auquel il est rattaché, un @ResolvedContext et un @SessionMeta ; rend description et corps rendus. `context.params` y est le contexte partagé recouvert des paramètres résolus du toolset (surcharge, puis contexte, puis défaut du toolset, `./toolset_context.sdd`) : un skill voit les valeurs de son propre toolset et d'aucun autre.
   @check_template: un gabarit ; ne rend rien.
@@ -51,7 +51,7 @@ Scenario: un rôle absent retire sa section
   Then la section est absente
 
 Scenario: les skills ne donnent que leur nom
-  Given les skills accordés `deploy` et `triage`
+  Given les skills de la session `deploy` et `triage`
   When le prompt système est rendu
   Then il contient les deux noms, ni description ni corps
 

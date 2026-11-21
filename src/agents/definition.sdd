@@ -1,7 +1,7 @@
 Spec: definition
 
 Purpose:
-  Définition d'un agent, de travail (`Work`), de configuration (`Config`) ou sous-agent (`Sub`, `agent-sessions#BR-8`) : identifiant, nature, prompt système templaté, nom du profil de modèle (facultatif) et paramètres, modules et toolsets accessibles,
+  Définition d'un agent, de travail (`Work`), de configuration (`Config`) ou sous-agent (`Sub`, `agent-sessions#BR-8`) : identifiant, nature, prompt système templaté, nom du profil de modèle (facultatif) et paramètres, restriction facultative des toolsets d'un sous-agent,
     limites de sandbox, stratégie de fenêtre de contexte, sous-agents délégables (`Work`) ou schéma de sortie (`Sub`), et son empreinte
     (`agent-sessions/agents#FR-1`, `FR-2`, `FR-8`, `FR-9`, `FR-10`, `agent-sessions/session#FR-2`).
 
@@ -33,7 +33,7 @@ Exposes:
   @AgentDefinition::profile
 
 Accepts:
-  @AgentDefinition::new: l'identifiant, la nature (@AgentKind : `Work`, `Config` ou `Sub`) et le prompt système (gabarit texte) ; la définition n'a alors aucun profil. Constructeurs chaînés : @AgentDefinition::with_profile (le nom du profil de modèle, texte), paramètres d'échantillonnage, modules, toolsets, @SandboxLimits (délai de script, plafond de rendu en caractères, et trois plafonds de mémoire optionnels), nom de la stratégie de contexte, sous-agents délégables (agent de travail), schéma JSON de sortie (sous-agent).
+  @AgentDefinition::new: l'identifiant, la nature (@AgentKind : `Work`, `Config` ou `Sub`) et le prompt système (gabarit texte) ; la définition n'a alors aucun profil. Constructeurs chaînés : @AgentDefinition::with_profile (le nom du profil de modèle, texte), paramètres d'échantillonnage, @AgentDefinition::with_toolset_restriction (sous-agent seulement : la liste des noms de toolsets auxquels il se restreint, sous-ensemble de la liste du ToolsetContext ; absente, il voit toute la liste ; vide, aucun), @SandboxLimits (délai de script, plafond de rendu en caractères, et trois plafonds de mémoire optionnels), nom de la stratégie de contexte, sous-agents délégables (agent de travail), schéma JSON de sortie (sous-agent).
   @AgentDefinition::validate: aucun argument.
   @SandboxLimits::with_max_string_bytes, @SandboxLimits::with_max_array_len, @SandboxLimits::with_max_map_len: un entier non signé (`u64`) par plafond de mémoire (octets pour la chaîne, éléments pour le tableau, entrées pour la table) ; zéro est accepté par le constructeur et refusé par @AgentDefinition::validate.
 
@@ -49,16 +49,16 @@ Returns:
   @SandboxLimits::max_string_bytes, @SandboxLimits::max_array_len, @SandboxLimits::max_map_len: `None` quand le plafond est absent (le défaut de `scratchpad/limits` s'applique alors), sinon la valeur posée.
 
 Raises:
-  @AgentsError::InvalidDefinition: un sous-agent ou un agent de configuration qui déclare des sous-agents délégables ; un agent de travail ou de configuration qui déclare un schéma de sortie ; un module réservé à la configuration (`toolset_creator`, `inspect`, `contexts`, `sessions`) accordé à un agent de travail ou à un sous-agent ; le module `session` accordé à un sous-agent (la raison porte le texte de la règle, ../toolsets/compat.sdd) ; un identifiant ou un prompt vide, un nom de profil présent mais vide ou blanc ; un sous-agent délégable égal à l'agent lui-même ou en double ; une liste de toolsets ou de modules qui contient un doublon ; un plafond de mémoire du sandbox posé à zéro.
+  @AgentsError::InvalidDefinition: un sous-agent ou un agent de configuration qui déclare des sous-agents délégables ; un agent de travail ou de configuration qui déclare un schéma de sortie ; une restriction de toolsets sur un agent de travail ou de configuration (leurs toolsets viennent du ToolsetContext, `agent-sessions#DEC-16`) ; un identifiant ou un prompt vide, un nom de profil présent mais vide ou blanc ; un sous-agent délégable égal à l'agent lui-même ou en double ; une restriction de toolsets qui contient un doublon ; un plafond de mémoire du sandbox posé à zéro.
   @AgentsError::InvalidDefinition, identifiant `<AGENT.md>` et raison fixe : frontmatter absent ou non fermé, YAML illisible, champ de mauvais type, champ `prompt` dans le frontmatter, texte de plus de 256 Kio (refusé avant toute analyse), nombre non fini (`.nan`, `.inf`, `-.inf`), clé qui n'est pas un texte, clé déclarée deux fois au premier niveau (le prompt est le corps, choix posé le 2026-10-31 à valider : un doublon refusé plutôt qu'écrasé en silence). Le message ne porte jamais le prompt ni une valeur du texte.
 
 Must:
   Le modèle se désigne, quand la définition en désigne un, par un nom de profil : la définition n'a aucun champ de fournisseur.
   Le profil est facultatif (`agent-sessions/agents#FR-9`) : une définition sans profil est valide et se sérialise sans la clé `profile` (JSON et texte) ; un JSON ou un frontmatter sans la clé, ou avec `profile: null`, se lit comme l'absence de profil ; une définition qui porte un profil garde le JSON, le texte et l'empreinte qu'elle avait quand le profil était obligatoire. La résolution d'une définition sans profil appartient à l'hôte : la librairie n'appelle jamais la résolution d'un profil avec un nom vide.
-  L'empreinte est déterministe et indépendante de la plate-forme : même définition, même empreinte, y compris après un aller-retour de sérialisation ; elle change dès qu'un champ de la définition change (prompt, profil, toolsets, modules, limites, plafonds de mémoire du sandbox, sous-agents, schéma). Calculée par FNV-1a 64 bits sur la sérialisation JSON canonique (clés triées), sans dépendance externe.
+  L'empreinte est déterministe et indépendante de la plate-forme : même définition, même empreinte, y compris après un aller-retour de sérialisation ; elle change dès qu'un champ de la définition change (prompt, profil, restriction de toolsets, limites, plafonds de mémoire du sandbox, sous-agents, schéma). Calculée par FNV-1a 64 bits sur la sérialisation JSON canonique (clés triées), sans dépendance externe.
   Les trois plafonds de mémoire du sandbox sont optionnels : absents, ils ne sont pas sérialisés (aucune clé dans le JSON) et le JSON ancien qui ne les porte pas se lit sans eux. Posés, chacun entre dans l'empreinte et sa valeur se relit à l'identique. Un zéro est refusé par @AgentDefinition::validate, jamais silencieusement ramené au défaut. Les plafonds ne sont branchés au moteur de `scratchpad` qu'avec `run` : ce module ne dépend pas du scratchpad.
-  Un sous-agent ne délègue pas (`agent-sessions#BR-6`) ; seul un agent de travail a des sous-agents délégables. Un agent de configuration ne délègue pas et reçoit seul les modules réservés à la configuration (`agent-sessions#BR-8`).
-  Les capacités sont exactement celles de la définition (`agent-sessions#BR-2`) : aucune valeur par défaut n'accorde un module ou un toolset ; les listes absentes sont vides. La définition ne porte aucun droit de Memory : l'accès à un niveau se décide par les toolsets (`agent-sessions/modules#FR-4`).
+  Un sous-agent ne délègue pas (`agent-sessions#BR-6`) ; seul un agent de travail a des sous-agents délégables. Un agent de configuration ne délègue pas (`agent-sessions#BR-8`). Les modules natifs d'une session (création de toolsets, `session`, Memory, `todo`…) se déduisent de la nature (../modules/native.sdd), jamais de la définition.
+  La définition ne porte aucun droit : ni liste de modules, ni droit de Memory, ni liste de toolsets pour un agent de travail ou de configuration ; la liste de toolsets est celle du ToolsetContext (`agent-sessions#BR-2`, `agent-sessions#DEC-16`), la définition d'un sous-agent peut seulement la restreindre.
   Se sérialise et se désérialise à l'identique ; aucun champ ne porte de secret.
   Le texte ne porte aucune clé de fournisseur (`agents#FR-8`) : le profil seul, quand il existe.
   `from_text(to_text(d))` est identique à `d` et a la même empreinte. Les plafonds de mémoire absents n'apparaissent pas dans le texte, comme dans le JSON.
@@ -133,6 +133,8 @@ Scenario: une définition avec profil garde son JSON et son texte
   Then ils se relisent à l'identique et se réécrivent octet pour octet
 
 Tasks:
+  [ ] #25 Lot 0.4.0-G : retirer `modules` et `with_modules`/`modules()` de @AgentDefinition, ainsi que les noms réservés (`toolset_creator`, `inspect`, `contexts`, `sessions`, `session`) et les règles de validation qui s'y rapportaient ; `toolsets` devient `with_toolset_restriction` / `toolset_restriction() -> Option<&[String]>`, réservé à la nature `Sub` ; migrer les appelants (grep `\.modules()` et `\.toolsets()` : ../toolsets/compat.rs, config.rs, ../tools/inspect.rs, ../delegation, ../runtime, tests), l'empreinte, la sérialisation JSON et frontmatter, la dérivation `ts-rs` ; les trois Scenarios ci-dessus et la suppression de ceux qui portaient sur les modules. Rupture d'API (version 0.4.0, `agent-sessions#DEC-16`).
+  [?] #26 À confirmer par le développeur principal : une ancienne définition de la 0.3 qui porte `modules` ou `toolsets` est-elle refusée à la lecture (hypothèse de travail, échec fermé : les capacités d'un agent ne changent jamais en silence) ou la clé est-elle ignorée comme tout champ inconnu (#8) ? Les hôtes (vanyline, miryad-core) devront migrer leurs définitions stockées dans les deux cas.
   [x] #6 Tests manquants : l'empreinte change pour chaque champ de la liste du Must (prompt, profil, toolsets, modules, délai et plafond de sandbox, sous-agents délégables, schéma de sortie, aussi id, nature, paramètres, stratégie de contexte) ;
       vecteurs connus du FNV-1a 64 bits sur des chaînes (`""` → `cbf29ce484222325`, `"a"` → `af63dc4c8601ec8c`, `"foobar"` → `85944171f73967e8`) pour la fonction de hachage, afin que « indépendante de la plate-forme » soit vérifié ; `validate()` Ok sur une définition valide et sur un sous-agent avec schéma ;
       identifiant, prompt et profil vides refusés ; doublon de modules refusé.
@@ -182,7 +184,7 @@ Scenario: l'empreinte est stable et sensible
 Scenario: aucune capacité par défaut
   Given une définition ne renseignant que les champs requis
   When elle est lue
-  Then les modules et les toolsets sont vides
+  Then la restriction de toolsets est absente (le sous-agent voit toute la liste du contexte)
 
 Scenario: un sous-agent ne peut pas déléguer
   Given une définition de sous-agent qui déclare des sous-agents délégables
@@ -244,31 +246,20 @@ Scenario: un agent de configuration ne peut pas déléguer
   When elle est validée
   Then elle échoue avec InvalidDefinition
 
-Scenario: un agent de travail ne peut pas recevoir le module de création
-  Given une définition de nature Work qui accorde le module `toolset_creator`
+Scenario: une restriction de toolsets sur un agent de travail est refusée
+  Given une définition de nature Work ou Config avec une restriction de toolsets
   When elle est validée
-  Then elle échoue avec InvalidDefinition
+  Then elle échoue avec InvalidDefinition et la raison renvoie au ToolsetContext
 
-Scenario: un sous-agent ne peut pas recevoir un module d'inspection
-  Given une définition de nature Sub qui accorde le module `inspect`
-  When elle est validée
-  Then elle échoue avec InvalidDefinition
+Scenario: la restriction d'un sous-agent fait l'aller-retour et compte dans l'empreinte
+  Given une définition de nature Sub restreinte à `a` et `b`, puis la même sans restriction, puis la même restreinte à une liste vide
+  When elles sont sérialisées, relues et que leur empreinte est calculée
+  Then la restriction se relit à l'identique, la liste vide reste distincte de l'absence, et les trois empreintes diffèrent
 
-Scenario: un agent de configuration avec ses modules est valide
-  Given une définition de nature Config qui accorde `toolset_creator`, `inspect`, `contexts` et `sessions`
-  When elle est validée
-  Then elle réussit
-
-Scenario: le module session est refusé pour un sous-agent, au chargement
-  Given une définition de nature Sub qui accorde le module `session`
-  When elle est validée
-  Then elle échoue avec InvalidDefinition et la raison porte le texte de la règle (`the session module (title and flag for analysis) is reserved to a work or configuration agent: a sub-agent cannot hold it`)
-
-Scenario: le module session est gardé pour Work et Config
-  Given une définition de nature Work ou Config qui accorde le module `session`
-  When elle est validée
-  Then elle réussit
-
+Scenario: les anciennes clés `modules` et `toolsets` d'un agent principal sont refusées à la lecture
+  Given un JSON ou un texte de la 0.3 qui porte `modules`, ou `toolsets` sur une définition Work ou Config
+  When il est lu
+  Then la lecture échoue avec un message qui nomme la clé et renvoie à `agent-sessions#DEC-16`, sans que la clé soit ignorée en silence
 
 Scenario: définition aller-retour texte
   Given une définition de nature Work avec tous les champs renseignés, y compris les trois plafonds de mémoire

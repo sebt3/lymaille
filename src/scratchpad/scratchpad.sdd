@@ -9,13 +9,14 @@ Structure:
   ./mod.rs: déclarations et ré-exports du module
   ./error.rs: erreur du module, erreurs de Rhai classées avec position
   ./limits.rs: plafonds de mémoire, profondeurs, aucune limite de durée
-  ./grant.rs: description abstraite de ce que la définition d'agent accorde
+  ./presentation.rs: description abstraite de ce que le ToolsetContext présente à la session (toolsets, modules de présentation, skills)
+  ./capabilities.rs: registre des capacités brutes (modules de `vynil-core`, modules de l'hôte), dépendances des toolsets, jamais présentées au LLM
   ./engine.rs: construction du moteur d'une session
   ./render.rs: rendu borné d'une valeur
   ./format.rs: fonctions de formatage exposées au LLM
   ./persist.rs: scope vers variables étiquetées, fonctions par texte source, restauration
   ./introspect.rs: catalogue et fonctions d'introspection
-  ./suggest.rs: candidats les plus proches parmi les éléments accordés
+  ./suggest.rs: candidats les plus proches parmi les éléments présentés
   ./run.rs: le pad et l'exécution d'un appel de `rhai_pad`
   ./inspect.rs: pad d'inspection de l'agent de configuration (`rhai_prod_inspect`), modules coquilles
   ./inspect_tool.rs: tool natif `rhai_prod_inspect` et sa définition
@@ -30,7 +31,8 @@ References:
   ../session/session.sdd
   ./error.sdd
   ./limits.sdd
-  ./grant.sdd
+  ./presentation.sdd
+  ./capabilities.sdd
   ./engine.sdd
   ./render.sdd
   ./format.sdd
@@ -44,20 +46,21 @@ References:
 Must:
   Ne réaliser aucune E/S : ni fichier, ni processus, ni environnement, ni sortie standard ; le moteur n'a pas de résolveur de modules par fichier et capte `print` et `debug` (`agent-sessions#CON-1`, `agent-sessions#CON-3`).
   Ne lire l'horloge que par @Clock ; ne jamais appeler `std::thread::sleep` ni une attente sans point d'annulation (`agent-sessions#FR-4`).
-  N'enregistrer que le groupe `core` du socle commun de `vynil-core` et les groupes que la définition d'agent accorde, quelles que soient les features avec lesquelles `vynil-core` est compilé ; aucun groupe de fonctions non accordé n'est atteignable ni visible (`agent-sessions#BR-2`, `agent-sessions/scratchpad#FR-11`).
+  N'enregistrer dans le moteur de session que le groupe `core` du socle commun de `vynil-core`, quelles que soient les features avec lesquelles `vynil-core` est compilé ; les autres capacités brutes de `vynil-core` ne vivent que dans ./capabilities.sdd, comme dépendances des toolsets, jamais atteignables ni visibles du LLM productif (`agent-sessions#BR-2`, `agent-sessions#DEC-16`, `agent-sessions/scratchpad#FR-11`).
   Désactiver `const` dans tout moteur qu'il construit (`agent-sessions/scratchpad#FR-12`).
   N'imposer aucune limite de durée ni de nombre d'opérations à un script (`agent-sessions/scratchpad#FR-4`) ; l'arrêt d'une boucle est l'annulation par l'hôte.
-  Exécuter chaque script dans un fil dédié à pile dimensionnée (`std::thread::Builder::stack_size`, amendement de DEC-3 du 2026-10-27) joint depuis une tâche async, avec une portée d'annulation (`agent-sessions/scratchpad#DEC-3`) ; ne dépendre ni de `toolsets`, ni de `modules`, ni de la boucle de tour : les entrées venues d'eux passent par ./grant.sdd.
+  Exécuter chaque script dans un fil dédié à pile dimensionnée (`std::thread::Builder::stack_size`, amendement de DEC-3 du 2026-10-27) joint depuis une tâche async, avec une portée d'annulation (`agent-sessions/scratchpad#DEC-3`) ; ne dépendre ni de `toolsets`, ni de `modules`, ni de la boucle de tour : les entrées venues d'eux passent par ./presentation.sdd.
   Ne paniquer jamais hors des tests : toute panique d'une évaluation est contenue et rendue en erreur interne.
   Rendre l'API publique conforme au harnais : énumérations et structures publiques `#[non_exhaustive]` avec constructeurs, rustdoc en anglais, au plus cinq paramètres par fonction.
   Déclarer chaque sous-module dans ./mod.rs et ré-exporter ce que les specs enfants exposent ; ./mod.rs ne contient aucun comportement.
 
 Tasks:
+  [ ] #6 Lot 0.4.0 : spec fille ./capabilities.sdd, renommage de ./grant.rs en ./presentation.rs et retrait du groupe `Host` du moteur de session (`agent-sessions#DEC-16`) ; voir ./presentation.sdd #7 et #8, ./engine.sdd #18 et #19, ./capabilities.sdd #1 à #3, ./inspect.sdd #8. Déclarer `capabilities` dans ./mod.rs.
   [x] #1 Déclarer les sous-modules dans ./mod.rs au fil des specs enfants livrées.
   [x] #2 Dépendances à épingler dans `/Cargo.toml` (hors de cette spec) et features : `rhai` avec `sync`, `serde`, `internals`, `metadata` ; `vynil-core` avec les features `rhai` et `rt` (et, selon ./engine.sdd #3, `fs` et `shell` relayées) ; `serde`, `serde_json`, `thiserror`, `tokio` (`rt`, `rt-multi-thread`, `sync`, `time`, `macros`) et `tokio-util` pour @CancelHandle. À consigner par le développeur principal dans `/lymaille.sdd` (tâche #2) ; ce répertoire ne les épingle pas.
       Fait : voir lymaille.sdd #2, #7, #9.
   [x] #3 Déclarations à faire hors de ce répertoire : `/src/lib.sdd` (module `scratchpad` et ré-exports) et `/lymaille.sdd` (`References`). Non faites ici.
       Fait (lymaille.sdd References, lib.sdd).
-  [x] #4 Dépendances d'autres domaines livrées : `toolsets` (session_context_registration, assemble sur base_engine, GrantedModule/Toolset/Skill, limits_notice dans le skill intégré), `modules` (mcp_module, todo et Memory rendent des modules à accorder), `session` (la boucle de tour appelle Scratchpad::run et range le PadSnapshot par set_pad, src/runtime/turn.rs), `agents` (champs mémoire de @SandboxLimits, src/agents/definition.rs).
+  [x] #4 Dépendances d'autres domaines livrées : `toolsets` (session_context_registration, assemble sur base_engine, PresentedModule/Toolset/Skill, limits_notice dans le skill intégré), `modules` (mcp_module, todo et Memory rendent des modules à accorder), `session` (la boucle de tour appelle Scratchpad::run et range le PadSnapshot par set_pad, src/runtime/turn.rs), `agents` (champs mémoire de @SandboxLimits, src/agents/definition.rs).
   [x] #5 Mesures préalables (spikes courts, avant l'implémentation de ./persist.sdd et ./introspect.sdd) : délimitation du texte d'une fonction par `Engine::lex`, parcours des appels qualifiés par `AST::walk`, champs du JSON de métadonnées de Rhai, attrapage de l'arrêt de `on_progress` par `try/catch`. Les résultats alimentent `Observed in:` des specs concernées.
       Fait : spikes A et B (persist.sdd) et mesures de l'introspection.

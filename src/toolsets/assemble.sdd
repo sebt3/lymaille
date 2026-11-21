@@ -1,8 +1,8 @@
 Spec: assemble
 
 Purpose:
-  Construit ce que le scratchpad reçoit : les @GrantedModule, @GrantedToolset et @GrantedSkill d'un agent à partir de ses toolsets, de leurs dépendances privées et du ToolsetContext résolu
-    (`agent-sessions/toolsets#FR-2`, `AC-1`, `agent-sessions/scratchpad#FR-3`).
+  Construit ce que le scratchpad reçoit : les @PresentedModule, @PresentedToolset et @PresentedSkill de la session, à partir des toolsets que le ToolsetContext liste, des capacités brutes que ces toolsets déclarent en dépendance
+    et du ToolsetContext résolu (`agent-sessions/toolsets#FR-2`, `FR-25`, `AC-1`, `agent-sessions/scratchpad#FR-3`, `agent-sessions#DEC-16`).
 
 Owns:
   ./assemble.rs
@@ -12,45 +12,52 @@ Exposes:
   @Assembled
 
 Accepts:
-  @assemble: les @Toolset de l'agent, les modules accordés par la définition, les modules disponibles à titre de dépendance (nom vers module Rhai), un @ResolvedContext et un @ScratchpadEngine de base (@base_engine).
+  @assemble: les @Toolset de la session (déjà choisis par ./selection.sdd), les @Capabilities (../scratchpad/capabilities.sdd : modules de `vynil-core` des features compilées, modules MCP et modules de l'hôte, déjà réunis), un @ResolvedContext et les @ScratchpadLimits (pour le moteur de base). Il n'y a plus de paramètre de modules présentés : un module brut n'est jamais présenté.
 
 Returns:
-  @Assembled: un @Grants (modules, toolsets, skills) et la liste des toolsets en échec, avec la raison.
+  @Assembled: une @Presentation (modules de présentation, toolsets, skills) et la liste des toolsets en échec, avec la raison.
 
 Raises:
-  @ToolsetsError::InvalidToolset: le module d'un toolset ne s'évalue pas ; un toolset en échec est retiré, les autres restent.
+  @ToolsetsError::InvalidToolset: le module d'un toolset ne s'évalue pas ; une dépendance déclarée n'existe pas dans les @Capabilities (feature non compilée, nom inconnu) ; un nom de toolset ou de skill est déjà pris ; un toolset en échec est retiré, les autres restent.
 
 Must:
-  Les dépendances d'un toolset lui sont accessibles à l'évaluation de son module mais n'apparaissent ni dans le scope, ni dans @Grants, ni dans l'introspection, sauf si la définition d'agent les accorde (`agent-sessions/toolsets#FR-2`, `AC-1`).
-  Le module d'un toolset est celui de ses fonctions publiques : les sous-modules d'import des dépendances, que l'export brut de Rhai expose, en sont retirés avant de l'accorder (Observed in: spikes/rhai-1-25, `private_dependencies`).
-  Un toolset dont une dépendance n'est pas disponible est en échec, pas accordé à moitié.
-  Les skills d'un toolset sont accordés avec lui (nom, description, nom du toolset) ; ceux d'un toolset non accordé ne le sont pas.
+  Les dépendances d'un toolset sont des noms de @Capabilities : elles lui sont accessibles à l'évaluation de son module, et seulement celles qu'il déclare ; elles n'apparaissent ni dans le scope, ni dans @Presentation, ni dans l'introspection, sans exception (`agent-sessions/toolsets#FR-2`, `AC-1`). Aucune dépendance ne devient présentée par le fait d'être déclarée.
+  Le module d'un toolset est celui de ses fonctions publiques : les sous-modules d'import des dépendances, que l'export brut de Rhai expose, en sont retirés avant de le présenter (Observed in: spikes/rhai-1-25, `private_dependencies`).
+  Un toolset dont une dépendance n'est pas disponible est en échec, pas présenté à moitié.
+  Les skills d'un toolset sont présentés avec lui (nom, description, nom du toolset) ; ceux d'un toolset en échec ne le sont pas.
   Aucune E/S ; l'évaluation du module n'ouvre aucune connexion.
 
 Depends on:
   ./toolset.sdd
   ./toolset_context.sdd
   ./error.sdd
-  ../scratchpad/grant.sdd
+  ../scratchpad/presentation.sdd
+  ../scratchpad/capabilities.sdd
   ../scratchpad/engine.sdd
   rhai
 
 Scenario: la dépendance fonctionne mais reste cachée
-  Given un toolset `ops` qui appelle le module `helpers` et un agent qui n'accorde pas `helpers`
+  Given un toolset `ops` qui appelle le module `helpers` des @Capabilities
   When le toolset est assemblé et une fonction de `ops` qui utilise `helpers` est appelée
-  Then l'appel réussit et `helpers` est absent des modules accordés
+  Then l'appel réussit et `helpers` est absent des modules présentés et de l'introspection
+
+Scenario: une capacité de l'hôte reste cachée aussi
+  Given un module `grafana` ajouté par l'hôte aux @Capabilities et un toolset qui le déclare
+  When la session appelle `grafana::query` directement
+  Then c'est une erreur de module introuvable, et le toolset qui l'utilise fonctionne
 
 Scenario: dépendance indisponible
-  Given un toolset qui dépend d'un module absent
+  Given un toolset qui dépend d'un module absent des @Capabilities, par exemple `k8s` sans la feature
   When il est assemblé
-  Then le toolset est signalé en échec et les autres sont accordés
+  Then le toolset est signalé en échec et les autres sont présentés
 
 Scenario: les skills suivent leur toolset
-  Given deux toolsets portant chacun un skill, dont un seul est accordé
+  Given deux toolsets portant chacun un skill, dont un seul est en échec
   When ils sont assemblés
-  Then seul le skill du toolset accordé est accordé
+  Then seul le skill du toolset réussi est présenté
 
 Tasks:
+  [ ] #3 Lot 0.4.0-E : nouvelle signature de @assemble (plus de `granted_modules`, `&Capabilities` à la place de la table `dependencies`) ; migrer les appelants (../toolsets/config.rs, ../tools/inspect.rs, ../delegation, ../runtime, tests) ; tests des quatre Scenarios ; mettre à jour `agent-sessions/toolsets#AC-1`. Dépend de ../scratchpad/capabilities.sdd #1 et ../scratchpad/presentation.sdd #7.
   [x] #1 Tests puis implémentation.
       Validé le 2026-10-30 (validator, mutations manuelles) sous `scripts/check` complet. Posé à l'implémentation : @assemble reçoit les @ScratchpadLimits (et non un moteur) pour construire @base_engine ; le @ResolvedContext est reçu mais non lu à l'évaluation d'un module (`session_context()` se lit à l'appel, `native.sdd`) ; un nom de toolset égal à un module accordé, ou un skill de même nom dans deux toolsets, met le toolset en échec entier ; @Assembled::into_grants permet d'ajouter les groupes.
   [x] #2 Mécanisme du retrait des sous-modules d'import, mesuré le 2026-10-30 (Observed in: spikes/rhai-1-25, `strip_submodules`, rhai 1.25.1) : `Module` n'a pas de retrait public (`iter_script_fn` est `pub(crate)`) ; remplacer chaque sous-module par un `Module::new()` vide (`set_sub_module`) suffit : les fonctions publiques du toolset marchent toujours (leur environnement capture l'import), `d::secret()` appelé par le LLM échoue (« Module not found »), et le contenu de la dépendance disparaît des métadonnées. Reste dans l'export brut une entrée vide `"d": {}` (l'alias de l'`import`, non le nom du module) : @assemble ne peut pas la supprimer : l'introspection (../scratchpad/introspect.sdd) devra écarter les modules vides (à vérifier, non mesuré). À revérifier sur rhai 1.27.0.

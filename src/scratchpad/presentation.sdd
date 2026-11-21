@@ -1,0 +1,88 @@
+Spec: presentation
+
+Purpose:
+  Description abstraite de ce que le ToolsetContext présente à une session : les toolsets de présentation (leur module Rhai, leur description, leurs skills). Le droit
+    d'accès n'a qu'un lieu, la liste de toolsets du ToolsetContext (`agent-sessions#BR-2`, `agent-sessions#DEC-16`) ; cette spec ne décide rien, elle
+    décrit le résultat. Le scratchpad la reçoit du domaine `toolsets` et ne dépend ni des toolsets ni des modules MCP (`agent-sessions/scratchpad#FR-11`,
+    `agent-sessions/scratchpad#FR-3`). Remplace `grant.sdd` (lot 0.4.0) : `Grants` n'existe plus, ni le groupe `Host`, ni l'accord de modules bruts.
+
+Owns:
+  ./presentation.rs
+
+Depends on:
+  rhai
+
+Exposes:
+  @Presentation
+  @PresentedModule
+  @PresentedToolset
+  @PresentedSkill
+
+Accepts:
+  @Presentation::new: aucun argument, rend une présentation vide (le groupe `core`, toujours présent, n'y figure pas).
+  @Presentation::with_module: un @PresentedModule ; `pub(crate)` : seul `toolsets` (@assemble) produit les modules de présentation, l'hôte n'en ajoute pas ; rend `None` si le nom est déjà pris par un autre module.
+  @Presentation::with_toolset: un @PresentedToolset ; rend `None` si le nom est déjà pris par un autre toolset.
+  @Presentation::with_skill: un @PresentedSkill ; rend `None` si le nom est déjà pris par un autre skill.
+  @PresentedModule::new: un nom de module et un module Rhai partagé (@rhai::Shared de @rhai::Module) ; rend `None` si le nom n'est pas un identifiant Rhai valide.
+  @PresentedToolset::new: un nom et une description ; rend `None` si l'un est vide ou blanc.
+  @PresentedSkill::new: un nom, une description et le nom optionnel du toolset auquel le skill est rattaché ; rend `None` si le nom ou la description est vide ou blanc.
+
+Returns:
+  Des accesseurs en lecture seule : modules, toolsets et skills (dans l'ordre d'ajout).
+
+Must:
+  Le ToolsetContext est la seule source de ce qui est présenté (`agent-sessions#BR-2`) : @Presentation ne déduit rien et n'a aucune valeur par défaut qui présente un module ou un toolset. Aucune capacité brute (module de `vynil-core`, module MCP) n'y figure jamais.
+  Un nom de module est un identifiant Rhai : ASCII alphanumérique et `_`, ne commence pas par un chiffre, n'est pas un mot réservé de Rhai (`let`, `fn`, `import`, `const`, `this`, ... ; `global` en est exclu depuis la décision du 2026-10-30 : Rhai l'accepte comme espace de noms, et le test de ./presentation.rs compare à l'analyseur de Rhai), non vide. Le module est appelé en Rhai par `nom::fonction()`.
+  Les noms de modules, de toolsets et de skills sont uniques chacun dans leur catégorie : deux ajouts du même nom ne s'accumulent pas.
+  Un toolset décrit seulement ce que l'introspection liste (nom et description) : son module, s'il en a un, est un @PresentedModule distinct de même nom, que `toolsets` construit. Les dépendances d'un toolset ne figurent jamais dans @Presentation (`agent-sessions/toolsets#FR-2`).
+  Aucun secret : un @PresentedModule porte du code et des liaisons que l'hôte a déjà résolus, @Presentation ne contient ni référence ni identifiant d'authentification.
+  Les types sont `#[non_exhaustive]` et se construisent par constructeur ; ils sont `Clone`, `Debug` (le `Debug` d'un @PresentedModule ne montre que le nom) et `Send + Sync`.
+
+Must not:
+  Dépendre de `toolsets` ni de `modules` : ces domaines produisent des @PresentedModule, @PresentedToolset et @PresentedSkill, le scratchpad ne les connaît pas.
+  Exposer une énumération de groupes de fonctions de `vynil-core` : `CoreGroup` et `with_group` sont supprimés.
+
+Scenario: rien n'est présenté par défaut
+  Given une nouvelle @Presentation
+  When la lecture est effectuée
+  Then elle ne contient ni module, ni toolset, ni skill
+
+Scenario: noms en double refusés
+  Given une @Presentation qui porte un module `grafana`
+  When un autre module `grafana` est ajouté
+  Then rien n'est produit et le premier module est conservé
+
+Scenario: nom de module invalide refusé
+  Given les noms `1abc`, `a-b`, ``, `fn` et `let`
+  When un @PresentedModule est construit avec chacun
+  Then rien n'est produit pour chacun
+
+Scenario: nom de module valide accepté
+  Given le nom `grafana_prod`
+  When un @PresentedModule est construit
+  Then il est produit et expose son nom
+
+Scenario: toolset et skill vides refusés
+  Given un toolset au nom vide et un skill à la description blanche
+  When chacun est construit
+  Then rien n'est produit
+
+Scenario: le débogage masque le contenu du module
+  Given un @PresentedModule qui porte des fonctions
+  When formaté avec Debug
+  Then seul le nom apparaît
+
+Tasks:
+  [ ] #7 Lot 0.4.0-A (renommage seul, comportement identique, avant tout autre lot) : renommer ./grant.rs en ./presentation.rs et dans tout le code et les tests (`Grants` en `Presentation`, `GrantedModule`, `GrantedToolset`, `GrantedSkill` en `PresentedModule`, `PresentedToolset`, `PresentedSkill`, `grants()` et `into_grants()` en `presentation()` et `into_presentation()`, `ToolsetsError` et messages `granted` compris), ré-exports de ../lib.rs et ../scratchpad/mod.rs, `tests/api_accessors.rs`, rustdoc, README. Aucune autre modification : `scripts/check` vert avant et après, mêmes tests.
+  [ ] #8 Lot 0.4.0-B : retirer @CoreGroup, `Presentation::with_group`, `groups()` et le champ qui les porte ; rendre `Presentation::with_module` `pub(crate)` (seul ../toolsets/assemble.rs l'appelle ; les tests de la crate qui construisent un module de démonstration l'appellent aussi). Retirer les Scenarios « groupes » ; ajuster les tests. Dépend de ./engine.sdd #18 (le moteur ne lit plus les groupes) : à faire dans le même lot.
+  [x] #1 Tests puis implémentation.
+  [x] #6 Lot 0.2.1-A (alignement sur `vynil-core` 0.9.1, option C du 2026-11-12) : @CoreGroup ne garde que `Host` ; `Sleep`, `Fs` et `Shell` sont supprimés (rupture d'API assumée en patch (0.2.1), décision du développeur principal).
+  [x] #2 Posé : les types d'entrée sont définis ici, dans le scratchpad, plutôt que de dépendre de `toolsets` et `modules` non encore spécifiés. Quand ces domaines seront écrits, ils produiront ces types (ou une conversion vers eux) ; si leur forme diverge, c'est cette spec qui change, pas l'inverse.
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #3 La liste des mots réservés de Rhai est celle de la version épinglée : un test vérifie le refus par l'analyseur de Rhai (un module nommé d'un mot réservé ne compile pas dans `nom::f()`) plutôt qu'une liste figée dans le code.
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #4 Posé : le rattachement d'un skill à un toolset (`toolset`) n'est pas validé contre @Presentation::with_toolset ; l'introspection affiche ce que l'hôte fournit.
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).
+  [x] #5 Nom de module : identifiant ASCII (lettre ou `_`, puis alphanumérique ou `_`) et `rhai::is_valid_function_name` (refuse
+      les mots réservés et les symboles de Rhai). Le contrôle est celui de Rhai dans la version épinglée (voir ../../lymaille.sdd #7).
+      Validé le 2026-10-29 (accord du développeur principal : validation en bloc des choix posés, hors risques de sécurité).

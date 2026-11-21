@@ -19,7 +19,7 @@ References:
 Depends on:
   ./engine.sdd
   ./error.sdd
-  ./grant.sdd
+  ./presentation.sdd
   ./introspect.sdd
   ./limits.sdd
   ./persist.sdd
@@ -84,7 +84,7 @@ Must:
   Un appel MCP ou d'inférence qui ne rend jamais est abandonné à l'annulation du run : le futur est détruit et le run se termine dans le délai d'une annulation, sans attendre l'appel (`agent-sessions/scratchpad#AC-9`).
   Une panique du fil d'évaluation (défaut de Rhai ou d'une fonction native) est interceptée à la frontière du fil et rendue comme @ScratchpadError::Internal ; le verrou du pad empoisonné par cette panique est récupéré (l'état laissé par l'évaluation est conservé) : aucune panique ne traverse `run`, et le pad reste utilisable.
   Rendu, dans cet ordre : le texte capté par `print` et `debug` pendant le script (plafonné, une ligne par appel), puis la valeur finale par @render_value, puis les avertissements de persistance, un par ligne. Le texte entier est masqué par @Redactor::redact avant la troncature, puis la valeur est tronquée de sorte que le total ne dépasse pas le plafond de rendu (`agent-sessions/scratchpad#FR-5`, `agent-sessions/scratchpad#AC-4`, `agent-sessions#CON-3`) ; les avertissements et le texte capté ne sont jamais coupés avant la valeur : le plafond de la valeur est le plafond de rendu moins la longueur des avertissements et du texte capté, plancher à zéro.
-  Erreur : le texte rendu est le `Display` de @ScratchpadError, complété des suggestions de ./suggest.sdd (candidats parmi les seuls éléments accordés), masqué des secrets, puis plafonné au plafond de rendu par @truncate_middle. Le statut est `Failed` avec la classe de l'erreur.
+  Erreur : le texte rendu est le `Display` de @ScratchpadError, complété des suggestions de ./suggest.sdd (candidats parmi les seuls éléments présentés), masqué des secrets, puis plafonné au plafond de rendu par @truncate_middle. Le statut est `Failed` avec la classe de l'erreur.
   Avertissements de persistance : calculés à la fin de chaque run, réussi ou en échec, sur le scope vivant (décidé le 2026-10-29 par le développeur principal). Un avertissement pour une variable donnée est rendu au premier run qui la voit non persistable et n'est pas répété aux runs suivants tant qu'elle reste dans le même état ; il redevient possible si la variable disparaît ou devient persistable puis ne l'est plus. Les avertissements ne font pas échouer le script : le statut reste `Ok` (`agent-sessions/scratchpad#FR-7`).
   Enregistrement d'audit : @ScriptRecord est construit avec le nom de l'agent, le texte complet du script, le résultat entier non plafonné (@full_text de la valeur, ou le texte de l'erreur), la durée et l'erreur éventuelle ; il masque et plafonne lui-même (`agent-sessions/session#AC-4`). Le record est rendu même si le run échoue ou est annulé. Le script n'est jamais tronqué.
   Position d'erreur (`agent-sessions/scratchpad#FR-15`) : pour toute erreur d'exécution classée par @ScratchpadError::from_rhai (variable introuvable, `throw`, fonction native en échec), le run rend la position de Rhai dans le texte, dans @RunOutcome::error_position et, avec la classe, dans le @ScriptRecord de l'issue (../session/audit.sdd). Le script évalué est celui du LLM, sans préfixe : aucune position n'est décalée.
@@ -204,10 +204,10 @@ Scenario: les secrets sont masqués dans le texte et l'audit
   Then le texte contient `*redacted secret*` et non le secret, et l'enregistrement d'audit ne porte le secret ni dans le script, ni dans le résultat, ni dans l'erreur
 
 Scenario: les erreurs sont masquées et suggérées
-  Given un masqueur qui porte `tok-123456` et le script `grafana::loki_queryy("tok-123456")` avec un module accordé `grafana::loki_query`
+  Given un masqueur qui porte `tok-123456` et le script `grafana::loki_queryy("tok-123456")` avec un module présenté `grafana::loki_query`
   When il est exécuté
   Then le texte nomme `grafana::loki_query` comme candidat le plus proche et ne contient pas le secret
-  And aucune suggestion ne nomme une fonction d'un module non accordé
+  And aucune suggestion ne nomme une fonction d'un module non présenté
 
 Scenario: la sortie de print est rendue avant la valeur
   Given le script `print("step 1"); 42`
@@ -234,7 +234,7 @@ Scenario: const est refusé
   When il est exécuté
   Then le statut est Failed(Syntax) et aucune panique ne survient, et `let c = #{a: 1}; c.a = 2; c.a` rend `2`
 
-Scenario: seuls les modules accordés sont atteignables, même par une fonction définie par le LLM (domaine AC-1)
+Scenario: seuls les modules présentés sont atteignables, même par une fonction définie par le LLM (domaine AC-1)
   Given un pad sur un agent auquel seul un toolset de lecture est accordé, et un script qui définit `fn w() { writer::delete() }`
   When `w()` est exécutée
   Then le statut est Failed(NotFound) sans suggestion nommant `writer`, et le module `writer` n'a pas été atteint

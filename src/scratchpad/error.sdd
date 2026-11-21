@@ -39,7 +39,7 @@ Raises:
   @ScratchpadError::Limit: dépassement d'un plafond ; porte le genre (@LimitKind : profondeur d'appel, profondeur d'expression, taille de chaîne, de tableau ou de table, autre), le message et la position.
   @ScratchpadError::Cancelled: exécution interrompue par l'annulation du run.
   @ScratchpadError::InspectionOnly: appel d'une fonction de coquille dans le pad d'inspection (`./inspect.sdd`) ; porte le nom de la fonction (l'écriture d'une variable de la cible échoue par l'erreur de constante de Rhai, classe `Runtime`). Sa @ScriptErrorClass est `Runtime`. Texte `Display` : « {name} is not executed: the inspection does not run it ». Elle traverse Rhai comme valeur d'un `ErrorRuntime` et @ScratchpadError::from_rhai la restitue telle quelle (exception à la table du `Must`, qui range sinon toute erreur de fonction native en `Runtime`).
-  @ScratchpadError::Engine: construction du moteur impossible (groupe non accordable, enregistrement refusé), message texte.
+  @ScratchpadError::Engine: construction du moteur impossible (enregistrement refusé, module de présentation refusé par Rhai), message texte.
   @ScratchpadError::Internal: défaut interne (tâche bloquante interrompue par une panique, verrou empoisonné irrécupérable, thread d'évaluation du script qui n'a pas pu démarrer ou n'a pas répondu), message texte. Décision du 2026-11-18 : ce dernier cas est assumé en classe `Internal` ; l'hôte n'a aucune cause exploitable ni rien à corriger côté script.
 
 Must:

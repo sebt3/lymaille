@@ -161,7 +161,7 @@ Specs dans `src/modules/`, implémentées (des tâches de durcissement restent l
 - `mcp_auth.sdd` : en-têtes d'authentification et trait `McpAuth` de l'hôte, sans la feature `mcp-http` (FR-13, AC-9).
 - `mcp_client.sdd` : connecteur MCP réel HTTP streamable sur `rmcp`, derrière la feature `mcp-http` (FR-6, CON-5).
 
-État au 2026-11-01 : tout est livré, y compris `FR-7` (notifications MCP vers les watchers) : le connecteur MCP appelle `notify` sur la source `mcp` (`delegation/sources.sdd` #2, confirmé par le validateur le 2026-11-01 ; tests de notifications et d'annulation ajoutés). FR-8 (modules de l'hôte) ne demande aucun code : un module construit par l'hôte entre dans `Grants`.
+État au 2026-11-01 : tout est livré, y compris `FR-7` (notifications MCP vers les watchers) : le connecteur MCP appelle `notify` sur la source `mcp` (`delegation/sources.sdd` #2, confirmé par le validateur le 2026-11-01 ; tests de notifications et d'annulation ajoutés). FR-8 (modules de l'hôte) ne demande aucun code : un module construit par l'hôte entre dans `Presentation`.
 
 État au 2026-11-04 (lot 0.2.0) : livré, `FR-12` (ligne d'usage des fonctions MCP) et le niveau `Shared` de la Memory (`FR-2`, `FR-4`, `AC-2` : `MemoryLevel::Shared`, module `memory_shared`, sans alias).
 

@@ -1,0 +1,57 @@
+Spec: selection
+
+Purpose:
+  Toolsets d'une session : la liste du ToolsetContext fait foi pour l'agent principal, un sous-agent peut seulement la restreindre. Une fonction pure, sans E/S
+    (`agent-sessions#BR-2`, `agent-sessions#DEC-16`, `agent-sessions/toolsets#FR-25`, `agent-sessions/toolsets#AC-20`).
+
+Owns:
+  ./selection.rs
+
+References:
+  ./toolset_context.sdd
+  ./compat.sdd
+  ../agents/definition.sdd
+
+Depends on:
+  ./toolset_context.sdd
+  ../agents/definition.sdd
+
+Exposes:
+  @select_toolsets
+  @Selection
+
+Accepts:
+  @select_toolsets: un @ToolsetContext et une @AgentDefinition.
+
+Returns:
+  @Selection : `names()`, les noms des toolsets de la session, dans l'ordre du contexte ; `ignored()`, les noms de la restriction de la définition qui ne sont pas dans la liste du contexte (dans l'ordre de la restriction), signalés à l'hôte, jamais ajoutés.
+
+Must:
+  Pour un agent de travail ou de configuration, les noms sont exactement ceux du contexte, tous, quelle que soit la définition (une définition n'en porte aucun, `agent-sessions/agents#FR-1`).
+  Pour un sous-agent sans restriction, les noms sont ceux du contexte, tous. Pour un sous-agent avec restriction, les noms sont l'intersection (ordre du contexte) : la restriction ne peut jamais étendre la liste du contexte.
+  Une restriction vide d'un sous-agent est une restriction : aucun toolset. Une absence de restriction n'en est pas une (valeur facultative distincte).
+  Pure : aucune E/S, aucune lecture de stockage ; l'existence du toolset dans le catalogue est vérifiée ailleurs (./compat.sdd).
+  @Selection est `#[non_exhaustive]`, `Clone`, `Debug`.
+
+Scenario: l'agent principal voit toute la liste du contexte
+  Given un contexte qui liste `a` et `b` et un agent de travail
+  When la sélection est calculée
+  Then les noms sont `a`, `b`
+
+Scenario: un sous-agent restreint ne voit que l'intersection
+  Given le même contexte et un sous-agent restreint à `b`
+  When la sélection est calculée
+  Then les noms sont `b`
+
+Scenario: la restriction n'étend jamais la liste du contexte
+  Given le même contexte et un sous-agent restreint à `a` et `c`
+  When la sélection est calculée
+  Then les noms sont `a` et `ignored()` vaut `c`
+
+Scenario: une restriction vide ne laisse rien
+  Given le même contexte et un sous-agent restreint à une liste vide
+  When la sélection est calculée
+  Then les noms sont vides
+
+Tasks:
+  [ ] #1 Lot 0.4.0-D : tests puis implémentation de ./selection.rs ; déclarer le module dans ./mod.rs et ré-exporter dans ../lib.rs. Dépend de ../agents/definition.sdd #25 (restriction de sous-agent) et de ./toolset_context.sdd #11.

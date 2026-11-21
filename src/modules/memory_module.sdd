@@ -32,7 +32,7 @@ Must:
   `create`, `update` et `delete` émettent un @EventKind::MemoryChanged avec le niveau (`user`, `shared`, `session`) et l'identifiant, jamais le corps ; `list` et `read` n'en émettent pas ; un appel refusé n'en émet pas.
   Un module expose toutes les fonctions du niveau : l'accès en lecture seule se décide par le toolset (`agent-sessions/modules#FR-4`), dont le module appelle seulement `list` et `read` du module de Memory en dépendance privée (../toolsets/assemble.sdd). La définition d'agent ne porte aucun droit de Memory.
   Les fonctions sont synchrones et appellent le trait asynchrone par `vynil_core::rt::block_on` ; sur un runtime `current_thread`, elles rendent l'erreur explicite de `vynil-core`.
-  Les noms de module sont des identifiants Rhai valides (../scratchpad/grant.sdd).
+  Les noms de module sont des identifiants Rhai valides (../scratchpad/presentation.sdd).
 
 Depends on:
   ./memory.sdd

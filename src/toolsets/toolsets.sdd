@@ -17,7 +17,8 @@ Structure:
   ./template.rs: rendu Handlebars du prompt système et des skills
   ./store.rs: traits de stockage et stockage mémoire
   ./compat.rs: compatibilité structurelle et règles de définition d'agent
-  ./assemble.rs: construction des @GrantedModule, @GrantedToolset et @GrantedSkill
+  ./selection.rs: toolsets d'une session : la liste du ToolsetContext, restreinte pour un sous-agent
+  ./assemble.rs: construction des @PresentedModule, @PresentedToolset et @PresentedSkill
   ./native.rs: tool `skill`, fonction `session_context()`
     ./start.rs: résolution du point de départ d'une session (agent par défaut et nature) depuis un ContextType et le catalogue d'agents
   ./config.rs: modules de l'agent de configuration (`contexts`, `inspect`, `sessions`)
@@ -42,6 +43,7 @@ References:
   ./template.sdd
   ./store.sdd
   ./compat.sdd
+  ./selection.sdd
   ./assemble.sdd
   ./start.sdd
   ./native.sdd
@@ -51,11 +53,12 @@ References:
 Must:
   Ne réaliser aucune E/S : le stockage est un ensemble de traits que l'hôte implémente (`agent-sessions#CON-1`).
   Ne jamais contenir de secret : un ToolsetContext ne porte que des références nommées (`agent-sessions#CON-3`) et les valeurs propres à un environnement viennent de lui, jamais de la définition du toolset (`agent-sessions#BR-3`).
-  La définition d'agent est la seule source de ce qui est accordé (`agent-sessions#BR-2`) : rien de ce que ce module enregistre n'étend ce qu'une session peut appeler.
+  La liste de toolsets du ToolsetContext est la seule source de ce que le LLM productif voit des toolsets (`agent-sessions#BR-2`, `agent-sessions#DEC-16`) : rien de ce que ce module enregistre n'étend ce qu'une session peut appeler, et aucune capacité brute n'est jamais présentée au LLM.
   `vynil_core::Semver` n'implémente pas serde : toute version d'un objet de ce module se sérialise en chaîne `major.minor.patch` (comme les versions de toolset de ../session/signals.sdd) et se relit par `Semver::parse`.
   Déclarer chaque sous-module et ré-exporter ce que les specs enfants exposent ; mod.rs ne contient aucun comportement.
 
 Tasks:
+  [ ] #7 Lot 0.4.0 : déclarer `selection` dans ./mod.rs ; réaliser `agent-sessions/toolsets#FR-2`, `FR-3`, `FR-25` et `AC-1`, `AC-20` par ./toolset_context.sdd #11, ./selection.sdd #1, ./assemble.sdd #3, ./compat.sdd #10 et #11, ./config.sdd #P10.
   [x] #1 Déclarer les sous-modules dans ./mod.rs au fil des specs enfants livrées.
   [x] #2 Dépendances épinglées dans `/Cargo.toml` : `handlebars` 6.4.4, `jsonschema` 0.60.2 (default-features = false, décidé le 2026-10-30, #3) et `yaml_serde` 0.10.7 (default-features = false, décidé le 2026-10-31) ; `cargo deny check` vert. Point d'attention conservé : `libyaml-rs` (c2rust, `unsafe` transitif hors de ce crate).
   [x] #3 Compatibilité structurelle (`FR-4`) : Décidé le 2026-10-30 par le développeur principal : validation complète des valeurs du ToolsetContext contre le JSON Schema (et non la seule présence des noms `required`). Contredit la décision du 2026-10-29 sur `jsonschema` (#2) : ajouter la dépendance par `cargo add`, vérifier `cargo deny` et les doublons de crates (`clippy.toml`), puis réviser ./compat.sdd et ./context_type.sdd #2. Tâche à cadrer avant implémentation. Réalisée (état au 2026-10-31) : le schéma est compilé une fois à la construction de @ContextType (./context_type.sdd #4) ; la dépendance `jsonschema` est dans `/Cargo.toml`.

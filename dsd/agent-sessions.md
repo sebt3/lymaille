@@ -496,7 +496,7 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
 
 - **DEC-16 - Deux couches : capacités brutes et toolsets de présentation ; le droit vit dans le contexte**
     - **Context:** la première réalisation traitait les modules (groupe hôte de `vynil-core`, modules fournis) comme une liste de
-      droits que la définition d'agent accordait au LLM (`Grants`, `granted_modules`), y compris des modules bruts. Or un module brut,
+      droits que la définition d'agent accordait au LLM (`Presentation`, `granted_modules`), y compris des modules bruts. Or un module brut,
       même en lecture seule, ne se présente pas bien à un LLM : il n'a ni skill qui dise dans quel cadre l'employer, ni mise en forme.
     - **Decision:** (1) Capacités brutes : modules de `vynil-core` (`NFR-6`) et modules MCP. Jamais présentées au LLM productif ; elles
       n'existent que comme dépendances des toolsets. (2) Toolset de présentation : seule face visible d'une capacité brute pour un LLM
@@ -520,7 +520,7 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
     - **Alternatives:** une allowlist de modules accordés par la définition d'agent, écartée : elle expose du brut et fait vivre le droit
       à deux endroits ; un masquage de ce qui est présenté (tout visible sauf liste noire), écarté : une capacité brute ajoutée par
       une montée de version de `vynil-core` deviendrait visible sans décision.
-    - **Consequences:** `Grants`, `CoreGroup::Host`, `with_group`, `with_module`, `granted_modules`, `AgentDefinition::modules` et les
+    - **Consequences:** `Presentation`, `CoreGroup::Host`, `with_group`, `with_module`, `granted_modules`, `AgentDefinition::modules` et les
       droits de Memory de la définition disparaissent ou changent de sens ; les règles de nature de `toolsets` FR-8 et `agents` FR-1
       se lisent sur les modules natifs ; la sortie de `Host` du moteur de session retire `get_env`, `log_*`, `file_*` et `shell_run` du
       LLM productif. Rupture d'API publique (version 0.4.0).
