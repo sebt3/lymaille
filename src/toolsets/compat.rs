@@ -8,25 +8,12 @@ use std::fmt;
 
 use serde_json::Value;
 
-use crate::agents::{AgentDefinition, AgentKind};
+use crate::agents::AgentDefinition;
 
 use super::{
     ContextType, ResolvedContext, Toolset, ToolsetContext, ToolsetsError, ToolsetsResult, TypeRequirement,
+    select_toolsets,
 };
-
-/// Returns the toolset names a definition sees: the list of the context, restricted for a sub-agent that carries a
-/// restriction. A work or configuration agent sees the whole list (`agent-sessions#BR-2`, `agent-sessions#DEC-16`).
-fn listed_toolsets<'names>(
-    definition: &'names AgentDefinition,
-    context: &'names ToolsetContext,
-) -> &'names [String] {
-    match definition.kind() {
-        AgentKind::Sub => definition
-            .toolset_restriction()
-            .unwrap_or_else(|| context.toolset_names()),
-        AgentKind::Work | AgentKind::Config => context.toolset_names(),
-    }
-}
 
 /// One gap between what a toolset requires and what the toolset context provides.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -315,11 +302,13 @@ fn select<'table>(names: &[String], table: &'table [Toolset]) -> (Vec<&'table To
 
 /// Computes the delegable sub-agents of a work agent (`Work`) in this session, in the order of its definition.
 ///
-/// A work agent whose toolsets have gaps against `context` fails with [`ToolsetsError::Incompatible`]. Its toolsets are
-/// the ones `context` lists (`agent-sessions#DEC-16`). A sub-agent with a gap, a toolset that is not available, or no
-/// definition in `subagents`, is removed from the list without error and
-/// reported in [`Delegation::removed`] with its [`RemovalReason`]. A sub-agent sees the list of the context, restricted
-/// by its definition when it carries a restriction.
+/// A work agent whose toolsets have gaps against `context` fails with [`ToolsetsError::Incompatible`]. Its toolsets
+/// are those `select_toolsets` (./selection.sdd) gives for it: the whole list of the context
+/// (`agent-sessions#BR-2`, `agent-sessions#DEC-16`). A sub-agent sees the intersection of that list and its own
+/// restriction; it is removed from the list without error, and reported in [`Delegation::removed`] with its
+/// [`RemovalReason`], when its definition is missing, when a toolset of its selection is not available or when its
+/// restriction names a toolset the context does not list (`ToolsetMissing`: never added in silence,
+/// `agent-sessions/toolsets#FR-25`, `AC-20`), or when its toolsets have a gap (`Incompatible`).
 ///
 /// # Errors
 ///
@@ -334,9 +323,11 @@ pub fn delegable_subagents<F>(
 where
     F: Fn(&str) -> Option<ContextType>,
 {
-    let (found, missing) = select(listed_toolsets(main, context), toolsets);
+    let selection = select_toolsets(context, main);
+    let (found, missing) = select(selection.names(), toolsets);
     let mut issues: Vec<Gap> = missing
         .into_iter()
+        .chain(selection.ignored().iter().cloned())
         .map(|name| Gap {
             toolset: name,
             context_type: None,
@@ -361,15 +352,17 @@ where
             removed.push(removal(RemovalReason::DefinitionMissing));
             continue;
         };
-        let (sub_found, sub_missing) = select(listed_toolsets(sub, context), toolsets);
-        if !sub_missing.is_empty() {
+        let sub_selection = select_toolsets(context, sub);
+        let (sub_found, sub_missing) = select(sub_selection.names(), toolsets);
+        if !sub_selection.ignored().is_empty() || !sub_missing.is_empty() {
             removed.push(removal(RemovalReason::ToolsetMissing));
             continue;
         }
         match gaps_of(context, sub_found, lookup) {
             Ok(gaps) if gaps.is_empty() => kept.push(id.clone()),
             Ok(gaps) => removed.push(removal(RemovalReason::Incompatible(gaps))),
-            // Fail closed: an inconsistent type removes the sub-agent, with no gap to name.
+            // Fail closed: an inconsistent type removes the sub-agent, with no gap to name. Reachable only
+            // defensively: the main's check above flattens the same types and propagates the error first.
             Err(_) => removed.push(removal(RemovalReason::Incompatible(Vec::new()))),
         }
     }
@@ -471,6 +464,11 @@ mod tests {
     }
 
     // Scenario: un sous-agent retiré est signalé avec sa raison
+    // Note (0.4.0-F #10/#11): the sub-agent selection is a subset of the main's, so a gap that would remove a
+    // sub-agent as `Incompatible` fails the main's start first. The removals reachable without a start failure
+    // are a missing definition and a restriction naming a toolset the context does not list (`ToolsetMissing`),
+    // whether or not that toolset is in the catalogue. The scenario's `Incompatible` reason must be revised in
+    // the spec by the orchestrator.
     #[test]
     fn a_removed_sub_agent_is_reported_with_its_reason() {
         let role_toolset = Toolset::new(
@@ -517,16 +515,11 @@ mod tests {
         };
         assert_eq!(reason_of("lost"), Some(RemovalReason::DefinitionMissing));
         assert_eq!(reason_of("ghost"), Some(RemovalReason::ToolsetMissing));
-        match reason_of("needy") {
-            Some(RemovalReason::Incompatible(gaps)) => assert!(
-                gaps.iter().any(|gap| gap.kind()
-                    == &GapKind::MissingRole {
-                        name: "k8s".to_owned()
-                    }),
-                "the gaps name the missing role: {gaps:?}"
-            ),
-            other => panic!("expected Incompatible, got {other:?}"),
-        }
+        assert_eq!(
+            reason_of("needy"),
+            Some(RemovalReason::ToolsetMissing),
+            "`k8s_tools` is in the catalogue but the context does not list it: the restriction is never added"
+        );
         assert_eq!(
             removed.iter().map(super::RemovedSubagent::id).collect::<Vec<_>>(),
             ["lost", "ghost", "needy"],
@@ -535,6 +528,9 @@ mod tests {
     }
 
     // Scenario: un rôle manquant retire un sous-agent
+    // Note (0.4.0-F #10/#11): with the context list authoritative, a sub-agent is only checked on toolsets the
+    // context lists — and the main agent is checked on the same ones. The reachable removal, without failing the
+    // main's start, is a restriction naming a toolset the context does not list: `ToolsetMissing`.
     #[test]
     fn missing_role_removes_a_sub_agent() {
         let role_toolset = Toolset::new(
@@ -554,7 +550,9 @@ mod tests {
         let with_role = ToolsetContext::new("with".to_owned(), ContextLevel::Session)
             .expect("the context builds")
             .with_role("k8s".to_owned(), "prod-k8s".to_owned())
-            .expect("the role is bound");
+            .expect("the role is bound")
+            .with_toolset("k8s_tools".to_owned())
+            .expect("the toolset is listed");
         let with_role_result = delegable_subagents(&main, &subagents, &toolsets, &with_role, &lookup);
         assert_eq!(
             with_role_result.expect("the context has the role").kept(),
@@ -563,8 +561,17 @@ mod tests {
         );
 
         let without_role = delegable_subagents(&main, &subagents, &toolsets, &empty_context(), &lookup);
+        let delegation = without_role.expect("a sub-agent gap raises no error");
         assert_eq!(
-            without_role.expect("a sub-agent gap raises no error").kept(),
+            delegation
+                .removed()
+                .first()
+                .map(|removal| removal.reason().clone()),
+            Some(RemovalReason::ToolsetMissing),
+            "the listed context carries no `k8s_tools`: the restriction is never added and the sub-agent is removed"
+        );
+        assert_eq!(
+            delegation.kept(),
             Vec::<String>::new(),
             "without the role the sub-agent is absent and no error is raised"
         );
@@ -696,13 +703,25 @@ mod tests {
             sub_agent("plain", Vec::new()),
         ];
         let delegable = delegable_subagents(&main, &subagents, &[], &empty_context(), &lookup_of(Vec::new()));
+        let delegation = delegable.expect("removal is silent");
         assert_eq!(
-            delegable.expect("removal is silent").kept(),
+            delegation.kept(),
             ["plain".to_owned()],
             "a sub-agent with an unknown toolset and a delegable id without definition are removed; a valid one stays"
         );
+        let reason_of = |id: &str| {
+            delegation
+                .removed()
+                .iter()
+                .find(|entry| entry.id() == id)
+                .map(|entry| entry.reason().clone())
+        };
+        assert_eq!(reason_of("ghost"), Some(RemovalReason::ToolsetMissing));
+        assert_eq!(reason_of("lost"), Some(RemovalReason::DefinitionMissing));
     }
 
+    // Scenario à reporter dans compat.sdd (`agent-sessions/toolsets#FR-4`, `AC-20`, tâche #11): l'agent principal
+    // dont la liste du contexte nomme un toolset absent du catalogue ne démarre pas, avec un message qui le nomme.
     #[test]
     fn main_agent_with_unknown_toolset_fails() {
         let main = main_agent(Vec::new());
@@ -713,16 +732,63 @@ mod tests {
             &context_listing(&["missing"]),
             &lookup_of(Vec::new()),
         );
-        assert!(
-            matches!(result, Err(ToolsetsError::Incompatible { .. })),
-            "a session listing an unavailable toolset fails to start"
+        match result {
+            Err(ToolsetsError::Incompatible { issues }) => assert!(
+                issues.iter().any(|issue| issue.contains("`missing`")),
+                "the refusal names the unavailable toolset: {issues:?}"
+            ),
+            other => panic!("expected Incompatible, got {other:?}"),
+        }
+    }
+
+    // Scenario à reporter dans compat.sdd (`agent-sessions/toolsets#FR-25`, `AC-20`, tâche #11): la restriction d'un
+    // sous-agent qui nomme un toolset hors de la liste du contexte le retire (`ToolsetMissing`), jamais ajoutée en
+    // silence ; une restriction contenue dans la liste reste délégable.
+    #[test]
+    fn a_sub_agent_restricted_outside_the_context_list_is_removed_as_toolset_missing() {
+        let role_toolset = Toolset::new(
+            "k8s_tools".to_owned(),
+            "Kubernetes tools".to_owned(),
+            version("1.0.0"),
+            "fn pods() { 1 }".to_owned(),
+        )
+        .expect("the toolset builds")
+        .with_role(RoleDecl::new("k8s".to_owned(), true))
+        .expect("the role is declared");
+        let main = main_agent(vec!["wide".to_owned(), "narrow".to_owned()]);
+        let subagents = vec![
+            sub_agent("wide", vec!["grafana".to_owned(), "k8s_tools".to_owned()]),
+            sub_agent("narrow", vec!["grafana".to_owned()]),
+        ];
+        let toolsets = vec![grafana_requiring_cluster("cluster@1.0"), role_toolset];
+        let lookup = lookup_of(vec![("cluster", cluster("1.0.0"))]);
+        // The context lists `grafana` only, and satisfies it: the start of the main agent is fine.
+        let context = complete_context()
+            .with_toolset("grafana".to_owned())
+            .expect("the toolset is listed");
+        let delegation = delegable_subagents(&main, &subagents, &toolsets, &context, &lookup)
+            .expect("a removal raises no error");
+        assert_eq!(
+            delegation.kept(),
+            ["narrow".to_owned()],
+            "the sub-agent restricted inside the context list stays delegable"
+        );
+        assert_eq!(
+            delegation
+                .removed()
+                .first()
+                .map(|removal| removal.reason().clone()),
+            Some(RemovalReason::ToolsetMissing),
+            "`k8s_tools` is in the catalogue but not in the list: the extra name is signalled, never added"
         );
     }
 
-    // Task #4 of compat.sdd: a sub-agent whose type is inconsistent (inclusion cycle) fails closed: it is removed from the
-    // delegable list, without error.
+    // Task #4 of compat.sdd, reshaped by 0.4.0-F #10/#11: an inconsistent type in a listed toolset now fails the
+    // main's check too (the sub-agent's selection is a subset of the main's), so the fail-closed removal of a
+    // sub-agent is only reachable through a restriction naming a toolset the context does not list — a
+    // `ToolsetMissing`, not an empty `Incompatible`. The fail-closed branch stays defensive.
     #[test]
-    fn sub_agent_with_an_inconsistent_type_is_removed_without_error() {
+    fn sub_agent_with_an_inconsistent_type_restriction_is_removed_without_error() {
         let first = ContextType::new("first".to_owned(), version("1.0.0"), json!({ "type": "object" }))
             .expect("the sample type builds")
             .with_include(TypeRequirement::parse("second@1.0").expect("the requirement parses"));
@@ -748,8 +814,8 @@ mod tests {
         assert_eq!(removed.first().map(super::RemovedSubagent::id), Some("worker"));
         assert_eq!(
             removed.first().map(super::RemovedSubagent::reason),
-            Some(&RemovalReason::Incompatible(Vec::new())),
-            "the removal is signalled as incompatible, without gaps"
+            Some(&RemovalReason::ToolsetMissing),
+            "the context lists no `grafana`: the restriction names a toolset outside the list"
         );
     }
 
@@ -1061,8 +1127,12 @@ mod tests {
     }
 
     // Scenario: sous-agent dont une valeur viole le schéma est retiré sans erreur
+    // Note (0.4.0-F #10/#11): a value that violates the schema of a listed toolset's type is also a gap of the
+    // main agent, which fails the start first. The sub-agent removal reachable without a start failure is the
+    // restriction naming a toolset the context does not list. Schema violations stay checked by `check_context`
+    // (tests above). The scenario's `Incompatible` reason must be revised in the spec by the orchestrator.
     #[test]
-    fn sub_agent_with_a_value_breaking_its_schema_is_removed_without_error() {
+    fn sub_agent_with_a_toolset_outside_the_list_is_removed_without_error() {
         let main = main_agent(vec!["worker".to_owned()]);
         let subagents = vec![sub_agent("worker", vec!["grafana".to_owned()])];
         let toolsets = vec![grafana_requiring_cluster("cluster@1.0")];
@@ -1074,16 +1144,14 @@ mod tests {
             delegation.kept().is_empty(),
             "the sub-agent is not delegable: {delegation:?}"
         );
-        match delegation
-            .removed()
-            .first()
-            .map(|removal| removal.reason().clone())
-        {
-            Some(RemovalReason::Incompatible(gaps)) => assert!(
-                gaps.iter().any(|gap| gap.to_string().contains("namespace")),
-                "the removal names the gap of the value: {gaps:?}"
-            ),
-            other => panic!("expected Incompatible with a value gap, got {other:?}"),
-        }
+        assert_eq!(
+            delegation
+                .removed()
+                .first()
+                .map(|removal| removal.reason().clone()),
+            Some(RemovalReason::ToolsetMissing),
+            "the context lists no `grafana`: the restriction names a toolset outside the list: {:?}",
+            delegation.removed()
+        );
     }
 }

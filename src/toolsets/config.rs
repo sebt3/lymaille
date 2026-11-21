@@ -16,9 +16,9 @@ use vynil_core::rt::block_on;
 
 use super::{
     ContextStore, ContextType, ContextTypeStore, ResolvedContext, Toolset, ToolsetContext, ToolsetStore,
-    ToolsetsError, delegable_subagents,
+    ToolsetsError, delegable_subagents, select_toolsets,
 };
-use crate::agents::{AgentDefinition, AgentKind, AgentStore};
+use crate::agents::{AgentDefinition, AgentStore};
 use crate::clock::Clock;
 use crate::scratchpad::{ScratchpadResult, ScriptErrorClass};
 use crate::session::{
@@ -678,21 +678,17 @@ fn context_of<C: ContextStore>(contexts: &C, name: &str) -> Result<ToolsetContex
         .ok_or_else(|| Box::new(runtime_error(format!("unknown toolset context `{name}`"))))
 }
 
-/// The active toolsets of the session, in the order of the list of the context, restricted by the definition when it
-/// carries a restriction. A name that is not available is left out: the check reports it as a gap.
+/// The active toolsets of the session: those [`select_toolsets`] gives for the definition and the context, in the
+/// order of the list of the context. A name that is not available is left out: the check reports it as a gap, the
+/// resolution ignores it (`agent-sessions/toolsets#FR-25`, `AC-20`).
 fn toolsets_of<T: ToolsetStore>(
     toolsets: &T,
     agent: &AgentDefinition,
     context: &ToolsetContext,
 ) -> Result<Vec<Toolset>, Box<EvalAltResult>> {
-    let names = match agent.kind() {
-        AgentKind::Sub => agent
-            .toolset_restriction()
-            .unwrap_or_else(|| context.toolset_names()),
-        AgentKind::Work | AgentKind::Config => context.toolset_names(),
-    };
+    let selection = select_toolsets(context, agent);
     let mut found = Vec::new();
-    for name in names {
+    for name in selection.names() {
         if let Some(toolset) = await_store(toolsets.get_active(name))? {
             found.push(toolset);
         }
@@ -1010,7 +1006,7 @@ mod tests {
     use vynil_core::Semver;
 
     use super::*;
-    use crate::agents::InMemoryCatalog;
+    use crate::agents::{AgentKind, InMemoryCatalog};
     use crate::clock::{ManualClock, Timestamp};
     use crate::scratchpad::{
         Presentation, RunEnv, RunOutcome, RunStatus, Scratchpad, ScratchpadEngine, ScratchpadLimits,
@@ -1305,6 +1301,55 @@ mod tests {
         );
     }
 
+    // Not a Scenario (task #P10, `agent-sessions/toolsets#FR-25`, `AC-20`): the designated agent is a sub-agent and a
+    // restriction name that the context does not list is a reported gap, never a silently ignored one.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn check_reports_a_restriction_outside_the_context_list() {
+        let host = Host::new(Index::listing(Vec::new()), InMemoryStore::new());
+        host.types
+            .put_type(&cluster_type())
+            .await
+            .expect("the type is stored");
+        host.toolsets
+            .put_draft(&grafana_requiring_cluster())
+            .await
+            .expect("the draft is stored");
+        host.toolsets.activate("grafana").expect("the draft is activated");
+        let context = empty_context("prod")
+            .with_parameter("namespace".to_owned(), json!("apps"))
+            .expect("the parameter is added")
+            .with_role("k8s".to_owned(), "prod-k8s".to_owned())
+            .expect("the role is bound")
+            .with_toolset("grafana".to_owned())
+            .expect("the toolset is listed");
+        host.contexts
+            .put_context(&context)
+            .await
+            .expect("the context is stored");
+        let sub = AgentDefinition::new(
+            "sub-agent".to_owned(),
+            AgentKind::Sub,
+            "You are a sub-agent.".to_owned(),
+        )
+        .with_toolset_restriction(vec!["grafana".to_owned(), "ghost-tool".to_owned()]);
+        host.agents
+            .put_agent(&sub)
+            .await
+            .expect("the sub-agent is stored");
+        let outcome = run(&host.pad(), r#"contexts::check("sub-agent", "prod")"#).await;
+        assert_eq!(
+            outcome.status(),
+            RunStatus::Ok,
+            "the run succeeds: {}",
+            outcome.text()
+        );
+        assert!(
+            outcome.text().contains("toolset `ghost-tool` is not available"),
+            "the restriction name outside the list is reported: {}",
+            outcome.text()
+        );
+    }
+
     // Not a Scenario: `contexts::check` names an unknown agent.
     #[tokio::test(flavor = "multi_thread")]
     async fn check_names_an_unknown_agent() {
@@ -1422,6 +1467,57 @@ mod tests {
         assert!(
             !outcome.text().contains("eu-west"),
             "the context parameter wins over the default: {}",
+            outcome.text()
+        );
+    }
+
+    // Not a Scenario (task #P10, `agent-sessions/toolsets#FR-25`, `AC-20`): the toolsets of the session are the ones the
+    // context lists, restricted for a designated sub-agent: a restricted toolset the context does not list contributes no
+    // default.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn resolve_keeps_the_context_list_authoritative_for_a_sub_agent() {
+        let host = Host::new(Index::listing(Vec::new()), InMemoryStore::new());
+        let grafana = Toolset::new(
+            "grafana".to_owned(),
+            "Grafana queries".to_owned(),
+            version("1.0.0"),
+            "fn query() { 1 }".to_owned(),
+        )
+        .expect("the toolset builds")
+        .with_param(
+            ParamDecl::new("timeout".to_owned(), json!({ "type": "integer" })).with_default(json!(30)),
+        )
+        .expect("the parameter is declared");
+        host.toolsets
+            .put_draft(&grafana)
+            .await
+            .expect("the draft is stored");
+        host.toolsets.activate("grafana").expect("the draft is activated");
+        let context = empty_context("ctx");
+        host.contexts
+            .put_context(&context)
+            .await
+            .expect("the context is stored");
+        let sub = AgentDefinition::new(
+            "sub-agent".to_owned(),
+            AgentKind::Sub,
+            "You are a sub-agent.".to_owned(),
+        )
+        .with_toolset_restriction(vec!["grafana".to_owned()]);
+        host.agents
+            .put_agent(&sub)
+            .await
+            .expect("the sub-agent is stored");
+        let outcome = run(&host.pad(), r#"contexts::resolve("sub-agent", "ctx")"#).await;
+        assert_eq!(
+            outcome.status(),
+            RunStatus::Ok,
+            "the run succeeds: {}",
+            outcome.text()
+        );
+        assert!(
+            !outcome.text().contains("timeout"),
+            "the context lists no toolset, so the restricted toolset contributes no default: {}",
             outcome.text()
         );
     }

@@ -13,12 +13,14 @@ References:
 
 Exposes:
   @memory_module
+  @memory_module_read_only
   @MemoryScopes
   @memory_module_name
 
 Accepts:
   @MemoryScopes::new: la référence de l'utilisateur, celle du niveau partagé et l'@SessionId ; les trois portées d'une session.
   @memory_module: un @MemoryLevel, un @MemoryStore partagé, les @MemoryScopes (qui portent l'@SessionId des événements), un @EventSink partagé et une @Clock partagée ; rend le @rhai::Module du niveau. L'identifiant de session n'est pas un sixième paramètre : le seuil de cinq arguments du harnais le refuserait (décision du 2026-10-30).
+  @memory_module_read_only: les mêmes cinq arguments que @memory_module ; rend le module du niveau limité à `list` et `read` — aucune fonction d'écriture n'y est enregistrée (./native.sdd #2, @MemoryAccess::Read ; le seuil d'arguments interdit d'en faire un sixième paramètre de @memory_module).
   @memory_module_name: un @MemoryLevel ; rend le nom du module (`memory_user`, `memory_shared`, `memory_session`).
 
 Returns:
@@ -30,7 +32,7 @@ Raises:
 Must:
   La Memory n'est pas dans l'état de session : chaque appel passe par le @MemoryStore, dans la portée du niveau du module.
   `create`, `update` et `delete` émettent un @EventKind::MemoryChanged avec le niveau (`user`, `shared`, `session`) et l'identifiant, jamais le corps ; `list` et `read` n'en émettent pas ; un appel refusé n'en émet pas.
-  Un module expose toutes les fonctions du niveau : l'accès en lecture seule se décide par le toolset (`agent-sessions/modules#FR-4`), dont le module appelle seulement `list` et `read` du module de Memory en dépendance privée (../toolsets/assemble.sdd). La définition d'agent ne porte aucun droit de Memory.
+  Par défaut un module expose toutes les fonctions du niveau. La lecture seule se décide par la table des modules natifs (./native.sdd : `MemoryUser(Read)` pour les sessions de travail et les sous-agents) : le module est alors construit par @memory_module_read_only, qui n'enregistre que `list` et `read`. Un toolset de présentation peut restreindre davantage en n'appelant que `list` et `read` de sa dépendance privée (`agent-sessions/modules#FR-4`, ../toolsets/assemble.sdd). La définition d'agent ne porte aucun droit de Memory.
   Les fonctions sont synchrones et appellent le trait asynchrone par `vynil_core::rt::block_on` ; sur un runtime `current_thread`, elles rendent l'erreur explicite de `vynil-core`.
   Les noms de module sont des identifiants Rhai valides (../scratchpad/presentation.sdd).
 

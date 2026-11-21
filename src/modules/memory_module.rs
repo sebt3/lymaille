@@ -198,11 +198,12 @@ fn memory_value(memory: &Memory) -> Dynamic {
     ])
 }
 
-/// Builds the Rhai module of one level of Memory.
+/// Builds the Rhai module of one level of Memory with the full access: every function of the level is offered, as before.
 ///
 /// The module offers `list()`, `read(id)`, `create(id, title, body)`, `update(id, title, body)` and `delete(id)`. It reads
 /// and writes the scope of its level in `store`, and emits its `MemoryChanged` events through `sink`, dated by `clock` and
-/// named after the session of `scopes`.
+/// named after the session of `scopes`. The `MemoryAccess::Read` of the native table corresponds to
+/// [`memory_module_read_only`].
 #[must_use]
 pub fn memory_module<S>(
     level: MemoryLevel,
@@ -214,15 +215,52 @@ pub fn memory_module<S>(
 where
     S: MemoryStore + 'static,
 {
+    assemble(handle_of(level, store, scopes, sink, clock), true)
+}
+
+/// Builds the Rhai module of one level of Memory in read-only access: `list()` and `read(id)` only, no writing function.
+///
+/// It is the module of `MemoryAccess::Read` in the native table (native.sdd Tasks #2, `agent-sessions/modules#FR-4`).
+/// The `store`, `scopes`, `sink` and `clock` are those of [`memory_module`]; the scope of the level is never written
+/// through this module, so it emits no `MemoryChanged`.
+#[must_use]
+pub fn memory_module_read_only<S>(
+    level: MemoryLevel,
+    store: Arc<S>,
+    scopes: MemoryScopes,
+    sink: Arc<dyn EventSink>,
+    clock: Arc<dyn Clock>,
+) -> Module
+where
+    S: MemoryStore + 'static,
+{
+    assemble(handle_of(level, store, scopes, sink, clock), false)
+}
+
+/// Binds a level to its store: the scope of the level, the session and the event channel of the module.
+fn handle_of<S>(
+    level: MemoryLevel,
+    store: Arc<S>,
+    scopes: MemoryScopes,
+    sink: Arc<dyn EventSink>,
+    clock: Arc<dyn Clock>,
+) -> Handle<S> {
     let (scope, session) = scopes.into_scope(level);
-    let handle = Handle {
+    Handle {
         store,
         level,
         scope,
         session,
         sink,
         clock,
-    };
+    }
+}
+
+/// Assembles the Rhai module of a level: the reading functions always, the writing functions only when `writes`.
+fn assemble<S>(handle: Handle<S>, writes: bool) -> Module
+where
+    S: MemoryStore + 'static,
+{
     let mut module = Module::new();
     let list_handle = handle.clone();
     let _list = module.set_native_fn("list", move || -> Result<Array, Box<EvalAltResult>> {
@@ -237,39 +275,41 @@ where
             Ok(memory_value(&memory))
         },
     );
-    let create_handle = handle.clone();
-    let _create = module.set_native_fn(
-        "create",
-        move |id: ImmutableString,
-              title: ImmutableString,
-              body: ImmutableString|
-              -> Result<(), Box<EvalAltResult>> {
-            bridge(create_handle.create(id.as_str(), title.as_str(), body.as_str()))?;
-            create_handle.changed(id.as_str());
-            Ok(())
-        },
-    );
-    let update_handle = handle.clone();
-    let _update = module.set_native_fn(
-        "update",
-        move |id: ImmutableString,
-              title: ImmutableString,
-              body: ImmutableString|
-              -> Result<(), Box<EvalAltResult>> {
-            bridge(update_handle.update(id.as_str(), title.as_str(), body.as_str()))?;
-            update_handle.changed(id.as_str());
-            Ok(())
-        },
-    );
-    let delete_handle = handle;
-    let _delete = module.set_native_fn(
-        "delete",
-        move |id: ImmutableString| -> Result<(), Box<EvalAltResult>> {
-            bridge(delete_handle.delete(id.as_str()))?;
-            delete_handle.changed(id.as_str());
-            Ok(())
-        },
-    );
+    if writes {
+        let create_handle = handle.clone();
+        let _create = module.set_native_fn(
+            "create",
+            move |id: ImmutableString,
+                  title: ImmutableString,
+                  body: ImmutableString|
+                  -> Result<(), Box<EvalAltResult>> {
+                bridge(create_handle.create(id.as_str(), title.as_str(), body.as_str()))?;
+                create_handle.changed(id.as_str());
+                Ok(())
+            },
+        );
+        let update_handle = handle.clone();
+        let _update = module.set_native_fn(
+            "update",
+            move |id: ImmutableString,
+                  title: ImmutableString,
+                  body: ImmutableString|
+                  -> Result<(), Box<EvalAltResult>> {
+                bridge(update_handle.update(id.as_str(), title.as_str(), body.as_str()))?;
+                update_handle.changed(id.as_str());
+                Ok(())
+            },
+        );
+        let delete_handle = handle;
+        let _delete = module.set_native_fn(
+            "delete",
+            move |id: ImmutableString| -> Result<(), Box<EvalAltResult>> {
+                bridge(delete_handle.delete(id.as_str()))?;
+                delete_handle.changed(id.as_str());
+                Ok(())
+            },
+        );
+    }
     module
 }
 
@@ -280,11 +320,11 @@ mod tests {
 
     use rhai::{Array, Dynamic, Engine as RhaiEngine, EvalAltResult, Map};
 
-    use super::{MemoryScopes, memory_module, memory_module_name};
+    use super::{MemoryScopes, memory_module, memory_module_name, memory_module_read_only};
     use crate::clock::{Clock, ManualClock, Timestamp};
     use crate::modules::{
-        InMemoryMemoryStore, Memory, MemoryLevel, MemoryScope, MemoryStore, MemorySummary, ModulesError,
-        ModulesResult,
+        InMemoryMemoryStore, Memory, MemoryAccess, MemoryLevel, MemoryScope, MemoryStore, MemorySummary,
+        ModulesError, ModulesResult,
     };
     use crate::session::{EventKind, EventSink, RecordingSink, SessionId};
 
@@ -310,14 +350,29 @@ mod tests {
         /// A Rhai engine with the module of each given level, for the given session. The user is `alice` and the shared reference
         /// is `alpha`.
         fn engine_for(&self, session: &str, levels: &[MemoryLevel]) -> RhaiEngine {
+            self.engine_with_access(session, levels, &MemoryAccess::ReadWrite)
+        }
+
+        /// A Rhai engine with the module of each given level built with the given access, for the given session.
+        fn engine_with_access(
+            &self,
+            session: &str,
+            levels: &[MemoryLevel],
+            access: &MemoryAccess,
+        ) -> RhaiEngine {
             let session_id = SessionId::new(session).expect("a non-empty identifier");
             let scopes = MemoryScopes::new("alice", "alpha", &session_id);
             let recording: Arc<RecordingSink> = Arc::clone(&self.sink);
             let sink: Arc<dyn EventSink> = recording;
             let clock: Arc<dyn Clock> = Arc::new(ManualClock::new(Timestamp::from_millis(1_000)));
+            let build = if matches!(access, MemoryAccess::Read) {
+                memory_module_read_only::<InMemoryMemoryStore>
+            } else {
+                memory_module::<InMemoryMemoryStore>
+            };
             let mut engine = RhaiEngine::new();
             for level in levels {
-                let module = memory_module(
+                let module = build(
                     *level,
                     Arc::clone(&self.store),
                     scopes.clone(),
@@ -676,6 +731,68 @@ mod tests {
         assert!(
             memory_changes(&host.sink).is_empty(),
             "a failed call emits no event"
+        );
+    }
+
+    // native.sdd Tasks #2: a module built with MemoryAccess::Read exposes the reading functions and no writing
+    // function (native.sdd `Must`, agent-sessions/modules#FR-4).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn read_access_module_has_no_writing_function() {
+        let host = Host::new();
+        host.engine(&[MemoryLevel::User])
+            .eval::<()>(r#"memory_user::create("k", "Titre", "Corps")"#)
+            .expect("the seed create succeeds with the full module");
+        let engine = host.engine_with_access("s-1", &[MemoryLevel::User], &MemoryAccess::Read);
+        let title = engine
+            .eval::<String>(r#"memory_user::read("k").title"#)
+            .expect("read is offered");
+        let count = engine
+            .eval::<i64>("memory_user::list().len()")
+            .expect("list is offered");
+        assert_eq!(title, "Titre", "the read gives the seeded memory");
+        assert_eq!(count, 1, "the list gives the seeded memory");
+        for script in [
+            r#"memory_user::create("n", "t", "c")"#,
+            r#"memory_user::update("k", "t", "c")"#,
+            r#"memory_user::delete("k")"#,
+        ] {
+            let error = engine
+                .eval::<()>(script)
+                .expect_err("the writing function must not exist in a Read module");
+            assert!(
+                matches!(*error, EvalAltResult::ErrorFunctionNotFound { .. }),
+                "{script} fails as a missing function, not at run time: {error}"
+            );
+        }
+        assert_eq!(
+            engine
+                .eval::<String>(r#"memory_user::read("k").title"#)
+                .expect("read still succeeds"),
+            "Titre",
+            "the refused calls changed nothing"
+        );
+        assert!(
+            memory_changes(&host.sink).len() == 1,
+            "only the seed create emitted an event"
+        );
+    }
+
+    // native.sdd Tasks #2: with no access narrowed, the module exposes everything, as before.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn read_write_access_module_exposes_every_function() {
+        let host = Host::new();
+        let engine = host.engine_with_access("s-1", &[MemoryLevel::User], &MemoryAccess::ReadWrite);
+        engine
+            .eval::<()>(
+                r#"memory_user::create("k", "Titre", "Corps");
+                   memory_user::update("k", "Nouveau", "Nouveau corps");
+                   memory_user::delete("k")"#,
+            )
+            .expect("create, update and delete are offered with ReadWrite access");
+        assert_eq!(
+            memory_changes(&host.sink).len(),
+            3,
+            "the three changes each emitted one event"
         );
     }
 

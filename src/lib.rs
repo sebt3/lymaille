@@ -48,10 +48,10 @@ pub use delegation::{
 };
 pub use modules::{
     InMemoryMemoryStore, McpAuth, McpConnector, McpEnv, McpError, McpHeaders, McpLister, McpNotification,
-    McpRetryPolicy, McpTool, Memory, MemoryLevel, MemoryScope, MemoryScopes, MemoryStore, MemorySummary,
-    ModulesError, ModulesResult, ScriptedConnector, TodoItem, TodoList, TodoStatus, function_name,
-    mcp_module, mcp_shell_descriptor, memory_module, memory_module_name, name_tools, session_module,
-    todo_module,
+    McpRetryPolicy, McpTool, Memory, MemoryAccess, MemoryLevel, MemoryScope, MemoryScopes, MemoryStore,
+    MemorySummary, ModulesError, ModulesResult, NativeModule, ScriptedConnector, TodoItem, TodoList,
+    TodoStatus, function_name, mcp_module, mcp_shell_descriptor, memory_module, memory_module_name,
+    memory_module_read_only, name_tools, native_modules, session_module, todo_module,
 };
 #[cfg(feature = "mcp-http")]
 pub use modules::{McpClientConfig, RmcpConnector};

@@ -8,14 +8,16 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-use crate::agents::{AgentKind, AgentStore};
+use crate::agents::AgentStore;
 use crate::clock::Clock;
 use crate::scratchpad::{
     Capabilities, InspectionPad, InspectionTarget, ModuleDescriptor, Presentation, RunEnv, RunStatus,
     Scratchpad, ScratchpadEngine, descriptors_from_catalog, rhai_prod_inspect_definition,
 };
 use crate::session::{CancelHandle, InspectionTargetRef, NativeTool, Redactor, SessionId, SessionStore};
-use crate::toolsets::{ConfigStores, ContextStore, InspectionSlot, Toolset, ToolsetStore, assemble};
+use crate::toolsets::{
+    ConfigStores, ContextStore, InspectionSlot, Toolset, ToolsetStore, assemble, select_toolsets,
+};
 
 /// The host side of the inspection: what only the host can tell about the target.
 ///
@@ -157,13 +159,8 @@ where
             .map_err(|_error| unresolved("the context store failed"))?
             .ok_or_else(|| unresolved(&format!("unknown toolset context `{context}`")))?;
         let mut toolsets = Vec::new();
-        let listed = match definition.kind() {
-            AgentKind::Sub => definition
-                .toolset_restriction()
-                .unwrap_or_else(|| stored.toolset_names()),
-            AgentKind::Work | AgentKind::Config => stored.toolset_names(),
-        };
-        for name in listed {
+        let selection = select_toolsets(&stored, &definition);
+        for name in selection.names() {
             let found = self
                 .stores
                 .toolsets()
@@ -528,6 +525,57 @@ mod tests {
             call(&fixture, "x").await,
             Ok("5".to_owned()),
             "the variable is unchanged"
+        );
+    }
+
+    // Not a Scenario (`agent-sessions/toolsets#FR-25`, `AC-20`): the pad of a sub-agent's definition presents the
+    // intersection of the context list and its restriction: no toolset outside the list, even active in the catalogue.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_sub_agent_target_sees_only_the_intersection() {
+        let fixture = fixture();
+        let stores = &fixture.tool.stores;
+        for name in ["ops", "ghost"] {
+            let toolset = Toolset::new(
+                name.to_owned(),
+                "Operations".to_owned(),
+                Semver::parse("1.0.0").expect("a version"),
+                OPS.to_owned(),
+            )
+            .expect("the toolset builds");
+            stores
+                .toolsets()
+                .put_draft(&toolset)
+                .await
+                .expect("the draft is stored");
+            stores
+                .toolsets()
+                .activate(name)
+                .expect("the toolset is activated");
+        }
+        let agent = AgentDefinition::new("sub".to_owned(), AgentKind::Sub, "You delegate.".to_owned())
+            .with_toolset_restriction(vec!["ops".to_owned(), "ghost".to_owned()]);
+        stores
+            .agents()
+            .put_agent(&agent)
+            .await
+            .expect("the agent is stored");
+        let context = ToolsetContext::new("prod".to_owned(), ContextLevel::Shared)
+            .expect("a context")
+            .with_toolset("ops".to_owned())
+            .expect("the toolset is listed");
+        stores
+            .contexts()
+            .put_context(&context)
+            .await
+            .expect("the context is stored");
+        fixture.slot.set(Some(InspectionTargetRef::Definition {
+            agent: "sub".to_owned(),
+            context: "prod".to_owned(),
+        }));
+        let listed = call(&fixture, "toolsets()").await.expect("toolsets runs");
+        assert!(
+            listed.contains("ops") && !listed.contains("ghost"),
+            "the restriction never extends the list of the context: {listed}"
         );
     }
 

@@ -132,10 +132,21 @@ Scenario: sous-agent dont une valeur viole le schéma est retiré sans erreur
   When les sous-agents délégables sont calculés
   Then le sous-agent est retiré avec la raison `Incompatible` et un écart de valeur, sans erreur
 
+Scenario: un toolset de la liste du contexte absent du catalogue refuse le démarrage
+  Given un contexte qui liste un toolset `missing` et un agent de travail
+  When le démarrage est vérifié
+  Then il échoue par un écart qui nomme `missing` (`agent-sessions/toolsets#FR-4`, `AC-20`)
+
+Scenario: la restriction d'un sous-agent hors liste du contexte le retire
+  Given un contexte qui liste `a` et un sous-agent restreint à `a` et `c`
+  When la délégation est vérifiée
+  Then le sous-agent est retiré avec `ToolsetMissing` et `c` est signalé, jamais ajouté (`agent-sessions/toolsets#FR-25`, `AC-20`)
+
 Tasks:
   [ ] #10 Lot 0.4.0-F : supprimer @check_creation_rule, @check_session_module_rule, leurs constantes de règle (`CREATION_NATURE_RULE`, `SESSION_MODULE_RULE`) et leurs tests ; le contrôle devient la table de ../modules/native.sdd. `check_context` et `delegable_subagents` lisent les toolsets par @select_toolsets (./selection.sdd), non plus par `AgentDefinition::toolsets()`. Retirer la mention de ../modules/session_module.sdd de `References` si elle n'a plus d'objet.
   [ ] #11 Lot 0.4.0-F : un toolset de la liste du contexte absent du catalogue est un écart `ToolsetMissing` pour l'agent principal (démarrage refusé, message qui nomme le toolset) et retire le sous-agent concerné (`RemovalReason::ToolsetMissing`, déjà existant) ; ajouter les deux Scenarios correspondants (`agent-sessions/toolsets#FR-4`, `AC-20`).
       Constat du 2026-11-21 (tranche D, `selection.sdd` #1) : brancher `delegable_subagents` sur @select_toolsets sans brancher `ignored()` rend `ToolsetMissing` inatteignable pour un sous-agent (sa sélection est un sous-ensemble de celle du principal, qui échoue `Incompatible` avant) ; et les fixtures des cinq tests de retrait existants portent des contextes sans toolsets, à enrichir en `with_toolset` pour que les retraits restent testés. À traiter ici, avec le branchement de `ignored()` et des contextes des tests.
+  [?] #12 Constat structurel du 2026-11-21 (exécution de #10/#11) : la sélection d'un sous-agent étant un sous-ensemble de celle du principal, tout écart `Incompatible` (valeur violant un schéma, rôle manquant, type incohérent) fait échouer le démarrage du principal avant d'être calculé pour le sous-agent — les retraits `Incompatible` de `agent-sessions/toolsets#FR-4` ne sont plus atteignables que défensivement. Trois Scenarios de cette spec le supposaient encore ; leurs tests ont été adaptés aux retraits atteignables (`DefinitionMissing`, `ToolsetMissing` par `ignored()`). À trancher par le développeur principal : reformuler FR-4/AC-20 (les écarts de sous-agent deviennent des échecs du principal) ou prévoir une évaluation découplée.
   [x] #1 Tests puis implémentation.
       Validé le 2026-10-29 (validator, 12 mutants tués) sous `SKIP=deny scripts/check`.
   [x] #4 Trois tests manquants relevés par le validateur le 2026-10-29 : échec fermé d'un sous-agent dont le type est incohérent (inclusion cyclique) retiré sans erreur ; branche « table de sous-agents » de @check_creation_rule ; rôle propre optionnel non lié sans écart.

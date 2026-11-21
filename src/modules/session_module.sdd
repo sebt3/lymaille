@@ -59,6 +59,7 @@ Scenario: le module se découvre
   Then `session::set_title` figure dans les deux, avec sa documentation
 
 Tasks:
-  [ ] #2 Lot 0.4.0-F : retirer `check_session_module_rule` et le refus de @AgentDefinition::validate du module `session` pour un sous-agent (voir ../toolsets/compat.sdd #10, ../agents/definition.sdd #25) ; la règle de nature est ./native.sdd. Rien d'autre ne change dans le module.
+  [x] #2 Lot 0.4.0-F : retirer `check_session_module_rule` et le refus de @AgentDefinition::validate du module `session` pour un sous-agent (voir ../toolsets/compat.sdd #10, ../agents/definition.sdd #25) ; la règle de nature est ./native.sdd. Rien d'autre ne change dans le module.
+      Fait en tranche D (définition.rs), re-vérifié en tranche F (validator : grep vide). Relevé F : la rustdoc de ./session_module.rs (« a sub-agent never receives it ») contredit le Must du module (reçu par un sous-agent qui a une session parente) ; correction reportée avec le branchement de la table native (G/H/I).
   [x] #1 Tests puis implémentation (lot S2), déclaration dans ./mod.rs et ré-export dans ../lib.rs ; règle d'accord (Work et Config seulement) dans ../toolsets/compat.sdd, avec son Scenario.
   [x] Posé à l'implémentation : la règle d'accord est une fonction `check_session_module_rule(agent, sous-agents, nom du module)` de ../toolsets/compat.rs (même forme que @check_creation_rule) ; le module ne porte pas son nom, l'hôte l'enregistre `session`. Un titre « vide » s'entend après @normalize_title (blanc ou caractères de contrôle seulement) ; l'erreur de script ne cite aucun texte. @session_module est ré-exporté à la racine de la crate.
