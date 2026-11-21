@@ -65,10 +65,11 @@ pub use scratchpad::{
     PadSnapshot, PersistWarning, Presentation, PresentedModule, PresentedSkill, PresentedToolset, Recompiled,
     Rendered, RestoreWarning, Restored, RunEnv, RunOutcome, RunStatus, ScopeSnapshot, Scratchpad,
     ScratchpadEngine, ScratchpadError, ScratchpadLimits, ScratchpadResult, ScriptErrorClass, ScriptFunction,
-    ScriptPosition, UnpersistableReason, VariableInfo, descriptors_from_catalog, extract_function_sources,
-    full_text, limits_notice, nearest, recompile_functions, register_format_functions, render_value,
-    restore_scope, rhai_prod_inspect_definition, shell_module, snapshot_scope, suggest_for, to_dynamic,
-    to_tagged, truncate_middle,
+    ScriptPosition, UnpersistableReason, VariableInfo, descriptors_from_capabilities,
+    descriptors_from_catalog, extract_function_sources, full_text, limits_notice, nearest,
+    recompile_functions, register_format_functions, render_value, restore_scope,
+    rhai_prod_inspect_definition, shell_module, snapshot_scope, suggest_for, to_dynamic, to_tagged,
+    truncate_middle,
 };
 pub use secret::{DefaultSecretDetector, SecretDetector};
 pub use session::{

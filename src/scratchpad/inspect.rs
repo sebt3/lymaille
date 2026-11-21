@@ -4,14 +4,16 @@
 //! constants and its functions listed but not callable. See `src/scratchpad/inspect.sdd`.
 
 use std::any::TypeId;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use rhai::{
     Dynamic, Engine, EvalAltResult, FuncRegistration, ImmutableString, Module, NativeCallContext, Position,
     RhaiFunc, Shared,
 };
+use serde::Deserialize;
 
+use super::capabilities::Capabilities;
 use super::engine::{EngineBuilder, ScratchpadEngine};
 use super::error::{ScratchpadError, ScratchpadResult};
 use super::format::register;
@@ -67,6 +69,12 @@ impl ModuleDescriptor {
         self.functions.push(function);
         self
     }
+
+    /// The name of the module: the Rhai identifier it is registered under.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
 }
 
 /// What the inspection pad reads.
@@ -118,6 +126,96 @@ pub fn descriptors_from_catalog(catalog: &Catalog, modules: &[&str]) -> Vec<Modu
         .iter()
         .filter_map(|module| describe_module(catalog, module))
         .collect()
+}
+
+/// Descriptors of the raw capabilities: one descriptor per module of the registry.
+///
+/// The names, parameter names and documentation of the direct functions are read in the metadata of Rhai
+/// (the `metadata` feature of `vynil-core`). Nothing runs: registering the modules on a private engine
+/// indexes them, no script calls them. A module without a direct function gives no descriptor, as in the
+/// catalog.
+#[must_use]
+pub fn descriptors_from_capabilities(capabilities: &Capabilities) -> Vec<ModuleDescriptor> {
+    let metadata = registry_metadata(capabilities);
+    capabilities
+        .modules()
+        .filter_map(|(name, _module)| describe_capability(name, metadata.as_ref()))
+        .collect()
+}
+
+/// The metadata of the registry's modules, read on a private engine that registers them as static modules.
+/// Nothing is executed and the standard packages are left out.
+fn registry_metadata(capabilities: &Capabilities) -> Option<RegistryMetadata> {
+    let mut engine = Engine::new();
+    for (name, module) in capabilities.modules() {
+        let _registered = engine.register_static_module(name, Shared::clone(module));
+    }
+    let json = engine.gen_fn_metadata_to_json(false).ok()?;
+    serde_json::from_str(&json).ok()
+}
+
+/// The descriptor of one module of the registry. Overloads a shell cannot tell apart (same name, same arity)
+/// are described once, and a module left with no function gives no descriptor.
+fn describe_capability(name: &str, metadata: Option<&RegistryMetadata>) -> Option<ModuleDescriptor> {
+    let functions = &metadata?.modules.get(name)?.functions;
+    let mut described = 0usize;
+    let mut seen = BTreeSet::new();
+    let mut descriptor = ModuleDescriptor::new(name)?;
+    for function in functions {
+        if !seen.insert((function.name.as_str(), function.num_params)) {
+            continue;
+        }
+        let params = params_of(&function.signature, function.num_params);
+        let names: Vec<&str> = params.iter().map(String::as_str).collect();
+        let doc = doc_of(&function.doc_comments);
+        descriptor =
+            descriptor.with_function(FunctionDescriptor::new(&function.name, &names, doc.as_deref()));
+        described = described.saturating_add(1);
+    }
+    (described > 0).then_some(descriptor)
+}
+
+/// Documentation of a function of the metadata: its comment lines without the `///` markers, one line each.
+/// Absent when there is none.
+fn doc_of(comments: &[String]) -> Option<String> {
+    let lines: Vec<&str> = comments
+        .iter()
+        .map(|comment| comment.trim_start_matches('/').trim())
+        .filter(|line| !line.is_empty())
+        .collect();
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join("\n"))
+    }
+}
+
+/// The static modules of the metadata of an engine, keyed by their registered name.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RegistryMetadata {
+    #[serde(default)]
+    modules: BTreeMap<String, RegistryModule>,
+}
+
+/// A registered module of the metadata: its own functions only, its sub-modules being dependencies.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RegistryModule {
+    #[serde(default)]
+    functions: Vec<MetadataFunction>,
+}
+
+/// A function of the metadata of a module: its name, its signature, its number of parameters and its comments.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MetadataFunction {
+    name: String,
+    signature: String,
+    #[serde(default)]
+    num_params: usize,
+    #[serde(default)]
+    doc_comments: Vec<String>,
 }
 
 /// The descriptor of a presented module of the catalog, or nothing when the catalog lists no function of it.
@@ -371,13 +469,13 @@ impl InspectionPad {
 #[cfg(test)]
 mod tests {
     use super::{
-        FunctionDescriptor, InspectionPad, InspectionTarget, ModuleDescriptor, descriptors_from_catalog,
-        params_of,
+        FunctionDescriptor, InspectionPad, InspectionTarget, ModuleDescriptor, descriptors_from_capabilities,
+        descriptors_from_catalog, params_of,
     };
     use crate::clock::{ManualClock, Timestamp};
     use crate::scratchpad::{
-        Catalog, PadSnapshot, Presentation, PresentedModule, RunEnv, RunOutcome, RunStatus, Scratchpad,
-        ScratchpadEngine, ScratchpadLimits, ScriptErrorClass,
+        Capabilities, Catalog, PadSnapshot, Presentation, PresentedModule, RunEnv, RunOutcome, RunStatus,
+        Scratchpad, ScratchpadEngine, ScratchpadLimits, ScriptErrorClass,
     };
     use crate::session::{CancelHandle, Redactor};
     use rhai::{FuncRegistration, ImmutableString, Module, Shared};
@@ -1028,5 +1126,201 @@ mod tests {
         }
         let modules = eval(&pad, r#"modules().filter(|m| m.name == "source").len()"#).await;
         assert_eq!(modules.text(), "0", "`source` is not a module either");
+    }
+
+    // Scenario: les capacités brutes sont des coquilles découvertables, jamais exécutables
+    // (`agent-sessions/scratchpad#AC-13`, inspect.sdd tâche #8)
+    #[test]
+    fn capabilities_descriptors_have_one_module_per_registered_name() {
+        let registry = Capabilities::compiled();
+        let descriptors = descriptors_from_capabilities(&registry);
+        let described: Vec<&str> = descriptors.iter().map(|module| module.name.as_str()).collect();
+        let registered: Vec<&str> = registry.modules().map(|(name, _module)| name).collect();
+        assert_eq!(
+            described, registered,
+            "one descriptor per module of the registry, in the registry's order"
+        );
+        let host = descriptors
+            .iter()
+            .find(|module| module.name == "host")
+            .expect("`host` is compiled whatever the features");
+        assert!(
+            host.functions
+                .iter()
+                .any(|function| function.name == "get_env" && function.params.len() == 1),
+            "get_env is described with its single parameter"
+        );
+    }
+
+    // Les noms, les paramètres et la documentation viennent des métadonnées de Rhai (feature `metadata` de
+    // `vynil-core`), comme les descripteurs du catalogue. Une fonction n'est décrite qu'une fois par
+    // (nom, arité) : les surcharges qu'une coquille ne peut pas distinguer ne sont pas listées deux fois.
+    #[test]
+    fn capabilities_descriptors_carry_signatures_and_documentation() {
+        let mut described_module = Module::new();
+        let _registered = FuncRegistration::new("loki_query")
+            .with_comments(["/// Runs a Loki query"])
+            .with_params_info(["query: string", "range: string", "string"])
+            .set_into_module(
+                &mut described_module,
+                |query: ImmutableString, range: ImmutableString| format!("{query}/{range}"),
+            );
+        let _first = FuncRegistration::new("count")
+            .set_into_module(&mut described_module, |text: ImmutableString| text.len());
+        let _second = FuncRegistration::new("count")
+            .set_into_module(&mut described_module, |value: i64| value.saturating_add(1));
+        let registry = Capabilities::compiled()
+            .with_module("grafana", Shared::new(described_module))
+            .expect("a fresh name");
+        let found: Vec<ModuleDescriptor> = descriptors_from_capabilities(&registry)
+            .into_iter()
+            .filter(|descriptor| descriptor.name == "grafana")
+            .collect();
+        assert_eq!(found.len(), 1, "the module is described once");
+        let mut functions = found
+            .first()
+            .map(|descriptor| descriptor.functions.clone())
+            .unwrap_or_default();
+        functions.sort_by(|left, right| left.name.cmp(&right.name));
+        assert_eq!(
+            functions,
+            vec![
+                FunctionDescriptor::new("count", &["arg1"], None),
+                FunctionDescriptor::new("loki_query", &["query", "range"], Some("Runs a Loki query")),
+            ],
+            "the signature and the documentation are read in the Rhai metadata, once per name and arity"
+        );
+    }
+
+    // Un module sans fonction directe n'a pas de descripteur, comme dans le catalogue (inspect.sdd tâche #6).
+    #[test]
+    fn an_empty_capability_module_gives_no_descriptor() {
+        let registry = Capabilities::compiled()
+            .with_module("empty", Shared::new(Module::new()))
+            .expect("a fresh name");
+        let descriptors = descriptors_from_capabilities(&registry);
+        assert!(
+            descriptors.iter().all(|descriptor| descriptor.name != "empty"),
+            "a module with no direct function is not described"
+        );
+    }
+
+    // Borne basse de la règle d'`Accepts` de @descriptors_from_capabilities (inspect.sdd tâche #8) : une seule fonction
+    // directe suffit à décrire un module brut. Zéro fonction ne rend rien (test ci-dessus), une en rend une.
+    #[test]
+    fn a_capability_module_with_one_function_is_described() {
+        let mut described_module = Module::new();
+        let _registered = FuncRegistration::new("loki_query")
+            .with_comments(["/// Runs a Loki query"])
+            .with_params_info(["query: string", "string"])
+            .set_into_module(&mut described_module, |query: ImmutableString| query.to_string());
+        let registry = Capabilities::compiled()
+            .with_module("solo", Shared::new(described_module))
+            .expect("a fresh name");
+        let found: Vec<ModuleDescriptor> = descriptors_from_capabilities(&registry)
+            .into_iter()
+            .filter(|descriptor| descriptor.name == "solo")
+            .collect();
+        assert_eq!(
+            found,
+            vec![
+                ModuleDescriptor::new("solo")
+                    .expect("a valid module name")
+                    .with_function(FunctionDescriptor::new(
+                        "loki_query",
+                        &["query"],
+                        Some("Runs a Loki query"),
+                    ))
+            ],
+            "a module with exactly one direct function gets a descriptor with that one function"
+        );
+    }
+
+    // La capacité brute projetée en coquille : `host::get_env` se liste et tout appel échoue par l'erreur
+    // d'inspection seule, sans lire l'environnement du processus.
+    #[tokio::test]
+    async fn a_capability_shell_refuses_get_env_without_reading_the_environment() {
+        let descriptors = descriptors_from_capabilities(&Capabilities::compiled());
+        let Ok(pad) = InspectionPad::new(
+            &base(),
+            &Presentation::new(),
+            &descriptors,
+            InspectionTarget::Definition,
+        ) else {
+            panic!("the inspection pad must build");
+        };
+        let listed = eval(&pad, r#""host" in modules().map(|m| m.name)"#).await;
+        assert_eq!(
+            listed.text(),
+            "true",
+            "`host` is listed as a compiled capability: {}",
+            listed.text()
+        );
+        let signature = eval(
+            &pad,
+            r#"functions("host").filter(|f| f.path == "host::get_env").len()"#,
+        )
+        .await;
+        assert_eq!(signature.text(), "1", "`get_env` is listed once");
+        let called = eval(&pad, r#"host::get_env("LYMAILLE_ABSENT")"#).await;
+        assert_eq!(
+            failed(&called),
+            ScriptErrorClass::Runtime,
+            "the call is refused, not executed: {}",
+            called.text()
+        );
+        assert!(
+            called.text().contains("host::get_env is not executed"),
+            "the refusal names the function and says it is not executed: {}",
+            called.text()
+        );
+    }
+
+    // `modules()` liste les capacités compilées…
+    #[cfg(feature = "password")]
+    #[tokio::test]
+    async fn modules_list_the_compiled_capabilities() {
+        let descriptors = descriptors_from_capabilities(&Capabilities::compiled());
+        let Ok(pad) = InspectionPad::new(
+            &base(),
+            &Presentation::new(),
+            &descriptors,
+            InspectionTarget::Definition,
+        ) else {
+            panic!("the inspection pad must build");
+        };
+        let listed = eval(&pad, r#""password" in modules().map(|m| m.name)"#).await;
+        assert_eq!(
+            listed.text(),
+            "true",
+            "the compiled `password` feature adds its module: {}",
+            listed.text()
+        );
+    }
+
+    // … et jamais une feature non compilée.
+    #[cfg(not(feature = "password"))]
+    #[tokio::test]
+    async fn modules_never_list_an_uncompiled_feature() {
+        let descriptors = descriptors_from_capabilities(&Capabilities::compiled());
+        let Ok(pad) = InspectionPad::new(
+            &base(),
+            &Presentation::new(),
+            &descriptors,
+            InspectionTarget::Definition,
+        ) else {
+            panic!("the inspection pad must build");
+        };
+        let listed = eval(
+            &pad,
+            r#"let names = modules().map(|m| m.name); "password" in names || "k8s" in names"#,
+        )
+        .await;
+        assert_eq!(
+            listed.text(),
+            "false",
+            "an uncompiled feature adds neither a module nor a name: {}",
+            listed.text()
+        );
     }
 }

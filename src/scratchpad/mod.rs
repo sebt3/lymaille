@@ -23,8 +23,8 @@ pub use error::{
 };
 pub use format::register_format_functions;
 pub use inspect::{
-    FunctionDescriptor, InspectionPad, InspectionTarget, ModuleDescriptor, descriptors_from_catalog,
-    shell_module,
+    FunctionDescriptor, InspectionPad, InspectionTarget, ModuleDescriptor, descriptors_from_capabilities,
+    descriptors_from_catalog, shell_module,
 };
 pub use inspect_tool::rhai_prod_inspect_definition;
 pub use introspect::{

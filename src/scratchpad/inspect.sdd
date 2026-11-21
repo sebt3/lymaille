@@ -26,6 +26,7 @@ Depends on:
 
 Exposes:
   @ModuleDescriptor
+  @ModuleDescriptor::name
   @FunctionDescriptor
   @shell_module
   @InspectionPad
@@ -96,7 +97,8 @@ Scenario: aucun groupe fs ni shell
   Then ni `fs` ni `shell` ne figurent parmi les modules
 
 Tasks:
-  [ ] #8 Lot 0.4.0-H : @descriptors_from_capabilities et son test (un descripteur par module de ./capabilities.sdd, avec signature et documentation de `vynil-core` sous `metadata`) ; `InspectionPad::new` reçoit les descripteurs des capacités brutes en plus de ceux des rôles MCP ; sous `host`, `host::get_env("X")` appelé dans le pad d'inspection échoue par `InspectionOnly` sans lire l'environnement ; `modules()` liste les capacités compilées et jamais celles d'une feature non compilée. `agent-sessions/scratchpad#AC-13`. Dépend de ./capabilities.sdd #1.
+  [x] #8 Lot 0.4.0-H : @descriptors_from_capabilities et son test (un descripteur par module de ./capabilities.sdd, avec signature et documentation de `vynil-core` sous `metadata`) ; `InspectionPad::new` reçoit les descripteurs des capacités brutes en plus de ceux des rôles MCP ; sous `host`, `host::get_env("X")` appelé dans le pad d'inspection échoue par `InspectionOnly` sans lire l'environnement ; `modules()` liste les capacités compilées et jamais celles d'une feature non compilée. `agent-sessions/scratchpad#AC-13`. Dépend de ./capabilities.sdd #1.
+      Validé le 2026-11-21 (validator, tranche H) : preuve d'absence d'E/S observable (le module brut n'entre jamais dans le moteur, la coquille rend `InspectionOnly`) ; 5 tests ajoutés + un test de borne basse (module à une fonction directe, mutant `described > 0` tué) ; `SKIP=deny scripts/check` vert, 1486 tests. Mutants équivalents consignés (:153 `include_standard_packages`, :173 compte interne) et survivants préexistants hors périmètre (:286 `params_of`, :324-:326 refus) — questions distinctes, pas de tâche créée sans décision.
   [x] #1 Tests puis implémentation.
       Validé le 2026-10-29 (validator, mutations manuelles) sous `scripts/check` complet.
   [x] #2 Variante `InspectionOnly` (./error.sdd) : implémentée par T7, en attente de validation.

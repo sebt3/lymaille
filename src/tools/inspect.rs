@@ -2,6 +2,7 @@
 //! pad and runs one script in it, read-only (`agent-sessions/scratchpad#FR-13`, `AC-13`). It lives in `tools` because it
 //! reads the stores of `toolsets`, the listers of `modules` and builds a pad of `scratchpad`. See `src/tools/inspect.sdd`.
 
+use std::collections::BTreeSet;
 use std::fmt;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -12,7 +13,8 @@ use crate::agents::AgentStore;
 use crate::clock::Clock;
 use crate::scratchpad::{
     Capabilities, InspectionPad, InspectionTarget, ModuleDescriptor, Presentation, RunEnv, RunStatus,
-    Scratchpad, ScratchpadEngine, descriptors_from_catalog, rhai_prod_inspect_definition,
+    Scratchpad, ScratchpadEngine, descriptors_from_capabilities, descriptors_from_catalog,
+    rhai_prod_inspect_definition,
 };
 use crate::session::{CancelHandle, InspectionTargetRef, NativeTool, Redactor, SessionId, SessionStore};
 use crate::toolsets::{
@@ -38,21 +40,31 @@ pub trait InspectionHost: Send + Sync {
 
 /// What the inspection tool shares with the configuration session: the base engine that gives the limits, the redactor
 /// that masks the output and the clock that dates the runs.
+///
+/// It also carries the raw capabilities of the host, never executed: they feed the assembly of the toolsets and are
+/// projected as shells.
 #[non_exhaustive]
 pub struct InspectEnv {
     base: ScratchpadEngine,
     redactor: Redactor,
     clock: Arc<dyn Clock>,
+    capabilities: Capabilities,
 }
 
 impl InspectEnv {
-    /// Groups the base engine (limits), the redactor and the clock of the session.
+    /// Groups the base engine (limits), the redactor, the clock and the capabilities of the session.
     #[must_use]
-    pub fn new(base: ScratchpadEngine, redactor: Redactor, clock: Arc<dyn Clock>) -> Self {
+    pub fn new(
+        base: ScratchpadEngine,
+        redactor: Redactor,
+        clock: Arc<dyn Clock>,
+        capabilities: Capabilities,
+    ) -> Self {
         Self {
             base,
             redactor,
             clock,
+            capabilities,
         }
     }
 }
@@ -142,7 +154,8 @@ where
     }
 
     /// The pad of an agent definition read with a context: the presentation of its active toolsets, the shells of their modules
-    /// (read in the catalog of a real engine) and the shells of the MCP roles of the context (described by the host).
+    /// (read in the catalog of a real engine), the shells of the MCP roles of the context (described by the host) and the
+    /// shells of the raw capabilities (read in their Rhai metadata; a capability that would shadow a projected module yields).
     async fn definition_pad(&self, agent: &str, context: &str) -> Result<InspectionPad, String> {
         let definition = self
             .stores
@@ -174,7 +187,7 @@ where
             .map_err(|error| unresolved(&error.to_string()))?;
         let limits = *self.env.base.limits();
         let presentation =
-            assemble(&toolsets, &Capabilities::compiled(), &resolved, &limits).into_presentation();
+            assemble(&toolsets, &self.env.capabilities, &resolved, &limits).into_presentation();
         let real = ScratchpadEngine::builder(limits, presentation.clone())
             .build()
             .map_err(|_error| unresolved("the engine of the target does not build"))?;
@@ -182,6 +195,15 @@ where
         let mut modules = descriptors_from_catalog(real.catalog(), &names);
         let roles = self.host.role_descriptors(resolved.roles()).await?;
         modules.extend(roles);
+        let projected: BTreeSet<String> = modules
+            .iter()
+            .map(|descriptor| descriptor.name().to_owned())
+            .collect();
+        modules.extend(
+            descriptors_from_capabilities(&self.env.capabilities)
+                .into_iter()
+                .filter(|descriptor| !projected.contains(descriptor.name())),
+        );
         InspectionPad::new(
             &self.env.base,
             &presentation,
@@ -270,7 +292,7 @@ mod tests {
     use crate::agents::{AgentDefinition, AgentKind, AgentStore as _, InMemoryCatalog};
     use crate::clock::{ManualClock, Timestamp};
     use crate::scratchpad::{
-        FunctionDescriptor, ModuleDescriptor, Presentation, ScratchpadEngine, ScratchpadLimits,
+        Capabilities, FunctionDescriptor, ModuleDescriptor, Presentation, ScratchpadEngine, ScratchpadLimits,
     };
     use crate::session::{
         AgentRef, CancelHandle, InMemoryStore, InspectionTargetRef, NativeTool, Redactor, SessionId,
@@ -340,6 +362,11 @@ mod tests {
     const OPS: &str = "/// Restarts a pod\nfn restart_pod(pod) { pod }";
 
     fn fixture_with(redactor: Redactor) -> Fixture {
+        fixture_backed_by(redactor, Capabilities::compiled())
+    }
+
+    /// The same fixture over the capabilities the host injected in the registry.
+    fn fixture_backed_by(redactor: Redactor, capabilities: Capabilities) -> Fixture {
         let stores = ConfigStores::new(
             InMemoryCatalog::new(),
             InMemoryToolsets::new(10_000),
@@ -356,6 +383,7 @@ mod tests {
             base,
             redactor,
             Arc::new(ManualClock::new(Timestamp::from_millis(0))),
+            capabilities,
         );
         let tool = InspectTool::new(
             stores,
@@ -495,6 +523,137 @@ mod tests {
         assert!(
             refused.contains("ops::restart_pod") && refused.contains("not executed"),
             "the call is the inspection-only error: {refused}"
+        );
+    }
+
+    // Scenario (amendement proposé à `agent-sessions#AC-6bis`, tools/inspect.sdd tâche #3) : une fonction d'une
+    // capacité brute appelée dans `rhai_prod_inspect` rend l'erreur d'inspection seule, sans lire l'environnement.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_raw_capability_call_returns_the_inspection_only_error() {
+        let fixture = fixture();
+        target_definition(&fixture).await;
+        let listed = call(&fixture, r#""host" in modules().map(|m| m.name)"#).await;
+        assert_eq!(
+            listed,
+            Ok("true".to_owned()),
+            "`host` is projected as a compiled capability"
+        );
+        let result = call(&fixture, r#"host::get_env("LYMAILLE_ABSENT")"#).await;
+        let Err(failure) = result else {
+            panic!("the call must fail: {result:?}");
+        };
+        assert!(
+            failure.contains("host::get_env") && failure.contains("not executed"),
+            "the error names the function and says it is not executed: {failure}"
+        );
+    }
+
+    // tools/inspect.sdd tâche #3 : la cible `Definition` assemble par `assemble(.., &Capabilities, ..)` avec les
+    // capacités brutes de l'hôte, pas avec `Capabilities::compiled()`. Un toolset dont la dépendance déclarée n'est
+    // que dans le module injecté par l'hôte s'assemble et se projette ; mué en `compiled()`, la dépendance manque,
+    // le toolset est omis sans signalement et le module disparaît de `modules()`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_toolset_depending_on_an_injected_capability_is_assembled_and_projected() {
+        let mut module = rhai::Module::new();
+        let _registered =
+            rhai::FuncRegistration::new("ping").set_into_module(&mut module, || "pong".to_owned());
+        let capabilities = Capabilities::compiled()
+            .with_module("injected", rhai::Shared::new(module))
+            .expect("a fresh name");
+        let fixture = fixture_backed_by(Redactor::new(), capabilities);
+        let toolset = Toolset::new(
+            "solo".to_owned(),
+            "Solo work".to_owned(),
+            Semver::parse("1.0.0").expect("a version"),
+            "import \"injected\" as i;\nfn greet() { i::ping() }".to_owned(),
+        )
+        .expect("the toolset builds")
+        .with_dependency("injected".to_owned())
+        .expect("the dependency is declared");
+        let stores = &fixture.tool.stores;
+        stores
+            .toolsets()
+            .put_draft(&toolset)
+            .await
+            .expect("the draft is stored");
+        stores
+            .toolsets()
+            .activate("solo")
+            .expect("the toolset is activated");
+        let agent = AgentDefinition::new("cfg".to_owned(), AgentKind::Work, "You configure.".to_owned());
+        stores
+            .agents()
+            .put_agent(&agent)
+            .await
+            .expect("the agent is stored");
+        let context = ToolsetContext::new("prod".to_owned(), ContextLevel::Shared)
+            .expect("a context")
+            .with_toolset("solo".to_owned())
+            .expect("the toolset is listed");
+        stores
+            .contexts()
+            .put_context(&context)
+            .await
+            .expect("the context is stored");
+        fixture.slot.set(Some(InspectionTargetRef::Definition {
+            agent: "cfg".to_owned(),
+            context: "prod".to_owned(),
+        }));
+        let listed = call(&fixture, r#""solo" in modules().map(|m| m.name)"#).await;
+        assert_eq!(
+            listed,
+            Ok("true".to_owned()),
+            "the toolset assembled against the injected capability is projected"
+        );
+        let functions = call(&fixture, r#"functions("solo")[0].path"#).await;
+        assert_eq!(
+            functions,
+            Ok("solo::greet".to_owned()),
+            "the function of the assembled toolset is listed"
+        );
+        let called = call(&fixture, "solo::greet()").await;
+        let Err(failure) = called else {
+            panic!("the call must fail: {called:?}");
+        };
+        assert!(
+            failure.contains("solo::greet") && failure.contains("not executed"),
+            "the projected function is a shell and refuses the call: {failure}"
+        );
+    }
+
+    // Same amendment, the other face: an MCP role the host also registered as a raw capability keeps its
+    // descriptor (the capability yields the name), and its calls stay the inspection-only error.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_role_described_by_the_host_wins_over_a_capability_of_the_same_name() {
+        let mut module = rhai::Module::new();
+        let _registered =
+            rhai::FuncRegistration::new("direct").set_into_module(&mut module, || "ran".to_owned());
+        let capabilities = Capabilities::compiled()
+            .with_module("grafana", rhai::Shared::new(module))
+            .expect("a fresh name");
+        let fixture = fixture_backed_by(Redactor::new(), capabilities);
+        target_definition(&fixture).await;
+        let listed = call(&fixture, r#""host" in modules().map(|m| m.name)"#).await;
+        assert_eq!(
+            listed,
+            Ok("true".to_owned()),
+            "the other capabilities are still there"
+        );
+        let result = call(&fixture, r#"grafana::query("x")"#).await;
+        let Err(failure) = result else {
+            panic!("the call must fail: {result:?}");
+        };
+        assert!(
+            failure.contains("grafana::query") && failure.contains("not executed"),
+            "the role descriptor of the host keeps the name against the capability: {failure}"
+        );
+        let direct = call(&fixture, "grafana::direct()").await;
+        let Err(direct) = direct else {
+            panic!("a function of the module behind the role is not reachable: {direct:?}");
+        };
+        assert!(
+            direct.contains("direct") && !direct.contains("ran"),
+            "the raw capability module named `grafana` is not projected: {direct}"
         );
     }
 
