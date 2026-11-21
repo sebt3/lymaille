@@ -15,7 +15,7 @@ sous-agents prédéfinis.
 ## Exigences fonctionnelles
 
 - **FR-1 - MUST:** Un agent principal délègue une tâche en choisissant un sous-agent parmi ceux que sa définition
-  autorise et en fournissant la tâche en entrée ; il ne peut ni accorder de toolset à un sous-agent ni en créer un.
+  autorise et en fournissant la tâche en entrée ; il ne peut ni étendre la liste de toolsets d'un sous-agent au-delà de celle du contexte ni en créer un.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-1`
 

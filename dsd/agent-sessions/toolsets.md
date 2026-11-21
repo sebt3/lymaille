@@ -18,15 +18,17 @@ uniquement) s'appliquent.
   des rôles MCP propres, obligatoires ou optionnels.
     - **Source:** user instruction, 2026-10-24
 
-- **FR-2 - MUST:** Les dépendances d'un toolset envers d'autres modules lui sont accessibles sans l'être au LLM : elles
-  n'apparaissent ni dans le scope, ni dans l'introspection, sauf si la définition d'agent les accorde.
-    - **Source:** user instruction, 2026-10-24 ; Observed in: spikes/rhai-1-25 (`private_dependencies`) : les appels sont
+- **FR-2 - MUST:** Les dépendances d'un toolset sont les capacités brutes (modules de `vynil-core` des features compilées,
+  `agent-sessions#NFR-6`, modules MCP, modules ajoutés par l'hôte) : elles lui sont accessibles et ne le sont jamais au LLM productif ;
+  elles n'apparaissent ni dans le scope, ni dans l'introspection de la session productive, sans exception ni accord possible. L'assemblage
+  met d'office à leur disposition les capacités des features compilées ; l'hôte peut y injecter les siennes.
+    - **Source:** user instruction, 2026-10-24 ; révisé, user instruction, 2026-11-21 (`agent-sessions#DEC-16`) ; Observed in: spikes/rhai-1-25 (`private_dependencies`) : les appels sont
       bloqués, mais l'export brut des métadonnées de Rhai expose les dépendances en sous-module du toolset ; l'introspection
       de la librairie doit donc les filtrer
     - **Verified by:** `AC-1`
 
-- **FR-3 - MUST:** Le ToolsetContext est un jeu plat de paramètres nommés et de liaisons de rôles, avec une section
-  optionnelle de surcharge par toolset ; les valeurs par défaut vivent dans la déclaration du toolset.
+- **FR-3 - MUST:** Le ToolsetContext est un jeu plat de paramètres nommés, de liaisons de rôles et de la liste explicite des toolsets de la
+  session (le seul lieu du droit, `agent-sessions#BR-2`, `DEC-16`), avec une section optionnelle de surcharge par toolset ; les valeurs par défaut vivent dans la déclaration du toolset.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-2`
 
@@ -42,7 +44,7 @@ uniquement) s'appliquent.
     - **Source:** user instruction, 2026-10-24 ; agent-sessions#CON-3
 
 - **FR-6 - MUST:** Le prompt système, ainsi que le corps et la description des skills, sont des templates Handlebars rendus avec les données du
-  ToolsetContext et des métadonnées de session figées au rendu (identifiant d'agent, date de début, toolsets accordés avec leur
+  ToolsetContext et des métadonnées de session figées au rendu (identifiant d'agent, date de début, toolsets de la session avec leur
   description, noms des skills accordés sans leur description ni leur corps et, pour un agent principal, capacité de
   sous-agents parallélisables, `agent-sessions/delegation#FR-11`),
   y compris des sections conditionnelles selon la présence d'un rôle. Le prompt système est rendu une
@@ -61,8 +63,8 @@ uniquement) s'appliquent.
       https://agentskills.io/specification (consultée le 2026-10-24)
 
 - **FR-8 - MUST:** Un module permet à un LLM de créer et modifier des toolsets via un trait de stockage. Il n'est
-  accordable qu'à un agent de configuration (`agent-sessions#BR-8`) : la librairie refuse, au chargement ou à l'enregistrement,
-  une définition d'agent qui l'accorde à un agent de travail ou à un sous-agent. Les sessions des
+  donné qu'à un agent de configuration (`agent-sessions#BR-8`, `DEC-16`) : il n'existe dans aucune session de travail ni de sous-agent,
+  quelle que soit la définition de l'agent ou le contenu du contexte. Les sessions des
   agents de configuration sont exclues des candidatures à l'amélioration continue (`agent-sessions#DEC-13`). Ce que
   le module enregistre est un brouillon, que le trait de stockage distingue des versions actives : l'activation est une
   opération de l'hôte, hors du module. Les
@@ -131,7 +133,7 @@ uniquement) s'appliquent.
     - **Source:** user instruction, 2026-10-25 ; agent-sessions#DEC-1
     - **Verified by:** `AC-11`
 
-- **FR-19 - MUST:** Un agent de configuration reçoit trois familles de modules, accordés par sa définition (`agent-sessions#BR-2`) :
+- **FR-19 - MUST:** Un agent de configuration reçoit trois familles de modules, que sa nature de session lui donne (`agent-sessions#BR-2`, `DEC-16`) :
   `contexts` (`check(agent, contexte)` rend les écarts de compatibilité structurelle ; `resolve(agent, contexte)` rend les valeurs (défauts des toolsets de l'agent compris)
   résolues et les noms des rôles liés, jamais de référence), `inspect` (`open_context(agent, contexte)`, `open_session(id)`,
   `close()`, `target()` : une seule cible d'inspection à la fois, une nouvelle ouverture remplace la précédente) et la lecture
@@ -179,6 +181,13 @@ uniquement) s'appliquent.
     - **Source:** `sebt3/lymaille#13` point 3, 2026-11-17
     - **Verified by:** `AC-19`
 
+- **FR-25 - MUST:** La liste de toolsets du ToolsetContext fixe ce que voit l'agent principal de la session : tous ses toolsets, sans autre liste
+  dans sa définition. La définition d'un sous-agent peut restreindre cette liste à un sous-ensemble, jamais l'étendre ; un nom de la restriction qui n'est pas
+  dans la liste du contexte est ignoré avec avertissement, non accordé. Un toolset de la liste dont le contexte ne satisfait pas les exigences (FR-4) suit la
+  règle de FR-4 (démarrage refusé pour l'agent principal, sous-agent retiré).
+    - **Source:** user instruction, 2026-11-21 ; `agent-sessions#DEC-16`
+    - **Verified by:** `AC-20`
+
 ## Questions ouvertes
 
 - **Question (non bloquante):** un nom d'agent par défaut à espace de bord (`ops `) est accepté tel quel par le ContextType (seuls le vide et le blanc sont refusés, FR-21) ; la résolution contre le catalogue échoue alors avec une erreur explicite (agent absent). Faut-il le normaliser ou le refuser plus tôt ? Cas limite relevé à la validation du 2026-11-04, volontairement non traité : aucun hôte ne l'a rencontré (approche XP). À reprendre en issue si un hôte le rencontre ; ne bloque pas la livraison.
@@ -187,7 +196,7 @@ uniquement) s'appliquent.
 
 ## Acceptation
 
-- **AC-1:** Un toolset dépendant d'un module non accordé fonctionne, et ce module reste absent de l'introspection.
+- **AC-1:** Un toolset dépendant d'une capacité brute fonctionne, et cette capacité reste absente du scope et de l'introspection de la session productive, y compris pour une capacité fournie par l'hôte.
 - **AC-2:** Le même toolset lié à deux ToolsetContext rend des prompts et des skills qui diffèrent uniquement par leurs
   valeurs ; une section conditionnelle sur un rôle absent disparaît.
 - **AC-3:** Sur un environnement sans le rôle `k8s`, le sous-agent qui l'exige n'est pas listé et le démarrage réussit.
@@ -234,6 +243,7 @@ uniquement) s'appliquent.
   n'a changé.
 - **AC-19:** Pour un skill sans document annexe, relire le texte qu'il rend donne un skill égal, y compris quand le corps contient une
   ligne `---` ou des fins de ligne CRLF ; un champ facultatif absent n'apparaît pas dans le texte.
+- **AC-20:** Un contexte qui liste les toolsets `a` et `b` donne `a` et `b` à l'agent principal ; un sous-agent restreint à `a` ne voit que `a` ; un sous-agent restreint à `a` et `c` (absent du contexte) ne voit que `a` et l'écart est signalé ; aucun toolset hors de la liste du contexte n'est visible, quelle que soit la définition de l'agent.
 
 ## Réalisation SpecDD
 

@@ -24,7 +24,7 @@ et closures. `agent-sessions#CON-2` place le moteur dans `vynil-core`.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-1`
 
-- **FR-3 - MUST:** L'introspection expose les variables du scope, les modules accordés, leurs fonctions avec signature et
+- **FR-3 - MUST:** L'introspection expose les variables du scope, les modules de la session (`core`, natifs et toolsets), leurs fonctions avec signature et
   documentation, les toolsets et les skills, avec une recherche lexicale sur noms, documentations et titres.
     - **Source:** agent-sessions#FR-2
     - **Verified by:** `AC-2`
@@ -38,13 +38,11 @@ et closures. `agent-sessions#CON-2` place le moteur dans `vynil-core`.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-3`, `AC-7`
 
-- **FR-11 - MUST:** Le moteur enregistre d'office le groupe `core` du socle commun de `vynil-core` (`core_rhai_register` : encodages, texte,
-  glob, YAML, temps dont `sleep`, sans autorité sur l'hôte) ; le groupe hôte (`host_rhai_register` : `get_env`, `log_*`, plus les fichiers et
-  `shell_run` quand les features `fs` et `shell` sont compilées) ne l'est que si la définition d'agent l'accorde, quelles que soient les features
-  avec lesquelles le processus hôte compile `vynil-core`. Les fichiers et le shell ne sont plus accordables séparément de l'hôte depuis
-  `vynil-core` 0.9.1 : ils sont absents d'une construction de `lymaille` qui n'active pas ses features `fs` et `shell` (désactivées par défaut).
-  Décision du développeur principal, 2026-11-12 (option C) ; le découpage fin d'avant (0.9.0) est abandonné.
-    - **Source:** agent-sessions#BR-2, agent-sessions#CON-3 ; user instruction, 2026-10-25
+- **FR-11 - MUST:** Le moteur de session enregistre d'office le groupe `core` du socle commun de `vynil-core` (`core_rhai_register` : encodages, texte,
+  glob, YAML, temps dont `sleep`, sans autorité sur l'hôte, et `quantity` si la feature est compilée) ; il n'enregistre rien d'autre de `vynil-core` :
+  ni le groupe hôte (`get_env`, `log_*`, fichiers, `shell_run`), ni aucune autre capacité brute (`agent-sessions#BR-2`, `DEC-16`). Ces capacités brutes
+  ne sont disponibles qu'au moteur qui construit les modules de toolset, comme dépendances, selon les features compilées (`agent-sessions#NFR-6`).
+    - **Source:** agent-sessions#BR-2, agent-sessions#CON-3 ; user instruction, 2026-10-25 ; révisé, user instruction, 2026-11-21 (`DEC-16`)
     - **Verified by:** `AC-10`
 
 - **FR-12 - MUST:** Le moteur de session et le moteur qui construit les modules de toolset désactivent le mot-clé `const`
@@ -64,7 +62,7 @@ et closures. `agent-sessions#CON-2` place le moteur dans `vynil-core`.
 
 - **FR-6 - MUST:** Une erreur Rhai (syntaxe, exécution, limite) est rendue au LLM avec sa position et un message
   exploitable. Quand une fonction ou un module est introuvable, le message nomme les candidats les plus proches parmi les
-  seuls modules accordés.
+  seuls modules de la session.
     - **Source:** agent-sessions, section Risques ; suggestions de candidats, user instruction, 2026-10-26
     - **Verified by:** `AC-12`
 
@@ -109,7 +107,7 @@ et closures. `agent-sessions#CON-2` place le moteur dans `vynil-core`.
   générée d'un module MCP (`agent-sessions/modules#FR-10`), l'appel attendu est écrit sous la forme Rhai d'une table littérale
   construite d'après le schéma d'entrée du tool (`read_file(#{ path: "…" })`), les champs obligatoires d'abord. Toute fonction de
   module peut déclarer cette ligne d'usage dans sa documentation ; l'introspection la lit (`agent-sessions#FR-2`) et ne la
-  montre qu'avec les éléments accordés (`agent-sessions#BR-2`).
+  montre qu'avec les éléments de la session (`agent-sessions#BR-2`).
     - **Source:** `sebt3/lymaille#3`, 2026-11-03 : « function not found … Closest candidates: read_file(arguments: Map) » ne
       montre pas la syntaxe `#{…}` ; Qwen3.6 et Qwen3.8-flash en ont dérivé dès le premier appel (60 appels et 14 erreurs
       de script pour une tâche de 9-10 appels)
@@ -249,7 +247,7 @@ Source: user instruction, 2026-10-30
 - **AC-1:** Un premier appel définit `let x = 3` et `fn f(a) { a * 2 }` ; un second appel évalue `f(x)` et rend `6`,
   y compris après restauration de session.
 - **AC-2:** La recherche `find("loki")` rend les fonctions et skills dont le nom ou la documentation contient `loki`,
-  limités aux modules accordés.
+  limités aux modules de la session.
 - **AC-3:** Un script qui dépasse la profondeur d'appel autorisée s'arrête avec une erreur rendue au LLM, et un script
   qui dure plus de deux minutes n'est pas interrompu.
 - **AC-4:** Un script dont la valeur finale dépasse le plafond rend un texte tronqué avec avis explicite.
@@ -262,9 +260,9 @@ Source: user instruction, 2026-10-30
 - **AC-8:** Une variable qui contient une closure produit l'avertissement et est absente après restauration, le reste
   du scope étant restauré.
 - **AC-9:** Un appel MCP simulé qui ne rend jamais est abandonné dans le délai d'une annulation, sans attendre sa fin.
-- **AC-10:** Dans le moteur d'un agent qui n'accorde aucun groupe de `vynil-core`, `json_encode` et `sleep` répondent, tandis que
-  `get_env`, `file_read` et `shell_run` sont introuvables et absents de l'introspection, y compris quand le
-  processus est compilé avec les features `fs` et `shell` de `vynil-core`.
+- **AC-10:** Dans le moteur de session, `json_encode` et `sleep` répondent, tandis que `get_env`, `file_read` et `shell_run` sont introuvables et
+  absents de l'introspection, y compris quand le processus est compilé avec les features `fs` et `shell` ; ces mêmes fonctions répondent dans le module
+  d'un toolset qui les déclare comme dépendance quand les features sont compilées, et sont absentes sans elles.
 - **AC-11:** Dans un moteur de session comme dans le moteur de construction des toolsets, `const C = #{a: 1}; C.a = 2` rend une
   erreur de syntaxe rendue au LLM, sans panique, et `let c = #{a: 1}; c.a = 2; c.a` rend `2`.
 - **AC-12:** Un script qui appelle `grafana::loki_queryy` rend une erreur qui nomme `grafana::loki_query` comme candidat le
@@ -289,7 +287,7 @@ Specs créées dans `src/scratchpad/` (une par fichier source prévu, spec de r�
 - `scratchpad.sdd` : spec de répertoire (frontière : aucune E/S ni horloge système, seuls les groupes accordés, `const` désactivé).
 - `error.sdd` : erreur du module, erreurs de Rhai classées et rendues avec position (FR-6, AC-3, AC-7, AC-11).
 - `limits.sdd` : plafonds de mémoire et profondeurs, aucune limite de durée (FR-4, AC-3, AC-7).
-- `grant.sdd` : description abstraite de ce que la définition d'agent accorde (groupes, modules, toolsets, skills ; FR-11, FR-3).
+- `grant.sdd` : description abstraite de ce que le contexte donne à la session (toolsets, leurs modules de présentation, skills ; FR-11, FR-3). À renommer par la réalisation de `DEC-16`.
 - `engine.sdd` : moteur d'une session, groupes accordés, `const`, résolveur fermé, crochet d'annulation (FR-11, FR-12, DEC-3, AC-10, AC-11).
 - `render.sdd` : rendu borné, JSON compact, troncature début et fin avec avis (FR-5, AC-4).
 - `format.sdd` : fonctions de formatage exposées au LLM (FR-8, AC-5).

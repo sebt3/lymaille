@@ -2464,9 +2464,9 @@ checksum = "5c3082ca00d5a5ef149bb8b555a72ae84c9c59f7250f013ac822ac2e49b19c64"
 
 [[package]]
 name = "vynil-core"
-version = "0.9.1"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "437471bb4025629172f1fb93bca08a3c0b17fa8417f98a33768d1a9f1a4f38c7"
+checksum = "2a6174363f297b33f62cf6af10c84ca2dc864cc121d1479a50ebc237c6950efb"
 dependencies = [
  "base64 0.23.1",
  "chrono",

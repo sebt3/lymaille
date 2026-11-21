@@ -4,7 +4,7 @@
 
 Le domaine couvre la conduite d'un LLM comme agent de travail durable : une session conserve son historique, un espace
 de travail programmable (scratchpad Rhai), des mémoires et une todo ; elle découvre à la demande les outils, skills et
-sous-agents que sa définition d'agent lui accorde. Une librairie Rust pure, la crate `lymaille`, réalise ce domaine. Elle est destinée à
+sous-agents que son contexte de travail lui donne. Une librairie Rust pure, la crate `lymaille`, réalise ce domaine. Elle est destinée à
 remplacer l'inférence actuelle de vanyline et à fournir à miryad-core des étapes de workflow pilotées par un LLM.
 
 Statut du document : cadrage initial complet au 2026-10-24. Les points restants sont marqués `TBD`, dans les Open Issues
@@ -17,6 +17,8 @@ Lot 0.2.0 (2026-11-03) : cinq issues des hôtes (vanyline, miryad-core, `sebt3/l
 Avancement au 2026-11-04 : le lot 0.2.0 est livré. Les cinq issues `sebt3/lymaille#1` à `#5` sont réalisées par des specs `.sdd` implémentées et validées : réponse vide et raisonnement conservé (`session`, `context-window`), ligne d'usage des fonctions MCP (`modules`, `scratchpad`), identifiants de ContextType (`toolsets` FR-20), niveau `Shared` des fournisseurs, profils, ToolsetContext et de la Memory (rupture d'API, sans alias), et ContextType qui porte l'agent par défaut et la nature de session avec l'aide `resolve_start` (`toolsets` FR-21). Reste, hors blocage : la version 0.2.0 du crate à publier, et une question ouverte non bloquante sur le nom d'agent à espace de bord (`toolsets`, Questions ouvertes).
 
 Lot 0.3.0 (2026-11-13) : trois issues d'un hôte (miryad-core, `sebt3/lymaille#10` à `#12`) sont traduites en exigences : le profil de modèle d'une définition d'agent devient facultatif (`agents` FR-9), les types de définition dérivent TypeScript derrière une feature optionnelle (`NFR-4`, `agents` FR-10, `toolsets` FR-22), et la porte de tour devient remplaçable par l'hôte pour étendre l'exclusion d'un tour par session à plusieurs processus (`DEC-14`, `session` FR-17). Les specs portent les tâches correspondantes ; rien n'est encore implémenté.
+
+Lot 0.3.2 (2026-11-20) : un hôte (miryad-core, `sebt3/lymaille#18`) a besoin du port d'embedding de texte, et le développeur principal étend le besoin à la recherche sémantique des skills et des Memory (l'« extension réservée : connaissance » de `modules` devient exigence). Le trait `Embedder` et son client `rig` sont décrits dans `agents` FR-12 à FR-14, la recherche sémantique dans `modules` FR-14 à FR-16, la décision d'appui sur `rig` dans `DEC-15` et la feature Cargo `embedder` dans `NFR-5`. Les suites du lot 0.3.1 (`sebt3/lymaille#19`) sont de simples tâches de spec. Rien n'est encore implémenté.
 
 ## Objectif et problème
 
@@ -135,9 +137,14 @@ Le mot « contexte » n'apparaît jamais seul dans les documents de ce domaine :
     - **Source:** BO-1
     - **Verified by:** `AC-4`
 
-- **BR-2 - MUST:** Les capacités du LLM sont exactement celles que la définition de son agent lui accorde par modules et
-  toolsets ; rien de ce que le LLM écrit en session (fonctions du scratchpad comprises) ne peut étendre cet ensemble.
-    - **Source:** user instruction, 2026-10-24
+- **BR-2 - MUST:** Les capacités d'un LLM productif sont exactement : les toolsets que le ToolsetContext de sa session liste
+  (l'agent principal les voit tous ; la définition d'un sous-agent peut seulement en restreindre la liste), les modules
+  natifs que sa nature de session lui donne (`DEC-16`), et le groupe `core` de `vynil-core` (utilitaires sans autorité sur l'hôte,
+  dont la mise en forme des données). Rien de ce que le LLM écrit en session (fonctions du scratchpad comprises) ne peut étendre
+  cet ensemble. Les capacités brutes (modules de `vynil-core`, modules MCP) ne sont jamais présentées au LLM productif, même
+  en lecture seule : elles ne servent que de dépendances aux toolsets de présentation (`toolsets` FR-2). Le droit d'accès n'a
+  qu'un seul lieu : la liste de toolsets du ToolsetContext.
+    - **Source:** user instruction, 2026-10-24 ; révisé, user instruction, 2026-11-21 (deux couches, `DEC-16`)
     - **Verified by:** `AC-1`
 
 - **BR-3 - MUST:** Les valeurs propres à un environnement cible viennent du ToolsetContext et jamais de la définition
@@ -241,6 +248,22 @@ Le mot « contexte » n'apparaît jamais seul dans les documents de ce domaine :
     - **Source:** `sebt3/lymaille#10` (consommateur : miryad-core#72), 2026-11-13
     - **Verified by:** `agent-sessions/agents#AC-4`, `agent-sessions/toolsets#AC-17`
 
+- **NFR-5 - MUST:** L'embedding et la recherche sémantique sont une capacité optionnelle derrière la feature Cargo `embedder`, hors
+  des features par défaut : un hôte sans modèle d'embedding ne paie rien (ni code, ni dépendance, ni fonction Rhai) et rien ne casse.
+  La feature suppose `rig` (`DEC-15`) et ne retire aucune feature par défaut existante.
+    - **Source:** `sebt3/lymaille#18` (« feature gating »), 2026-11-20
+    - **Verified by:** `agent-sessions/agents#AC-8`
+
+- **NFR-6 - MUST:** Les capacités brutes de `vynil-core` que le scratchpad peut offrir aux toolsets se projettent en features Cargo de `lymaille`
+  qui relaient chacune la feature de même nom de `vynil-core` : `fs`, `shell`, `password`, `quantity`, `crypto`, `http`, `k8s`, `oci`,
+  `s3`, `feeds`, `prometheus` et `loki`. Aucune n'est dans les features par défaut (un hôte ne doit pas avoir à passer en `no-default`
+  pour s'en défaire), et les features par défaut existantes ne changent pas. Une feature compilée rend ses fonctions disponibles
+  comme dépendances des toolsets (`toolsets` FR-2), jamais au LLM directement (BR-2) ; une feature non compilée n'ajoute ni code ni
+  fonction. L'hôte choisit donc ses capacités par ses features, et peut en ajouter par ses propres modules (`modules` FR-8).
+  `prometheus` et `loki` demandent un client configuré que seul l'hôte construit : une instance par type, que l'hôte fournit et que le moteur de construction des toolsets enregistre en module `prometheus` et `loki`.
+    - **Source:** user instruction, 2026-11-21
+    - **Verified by:** `agent-sessions/scratchpad#AC-10`, `agent-sessions/toolsets#AC-1`
+
 - **CON-1:** La librairie est pure : elle n'effectue aucune E/S de stockage persistant et définit des traits que l'hôte
   implémente (session, Memory, ToolsetContext, définitions d'agents et de projets, toolsets, skills). Elle possède en
   revanche les connexions MCP et celles aux moteurs d'inférence.
@@ -326,8 +349,8 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
     - **Context:** un agent déclenché par une alerte agit sans humain présent.
     - **Decision:** les droits du LLM sont définis par les toolsets accordés ; aucun mécanisme d'approbation n'existe.
     - **Alternatives:** classement lecture/écriture des fonctions avec politique d'approbation côté hôte, rejeté.
-    - **Consequences:** la conception des toolsets porte la responsabilité (BR-7) ; la définition d'agent est la seule
-      frontière de sécurité (BR-2).
+    - **Consequences:** la conception des toolsets porte la responsabilité (BR-7) ; la liste de toolsets du ToolsetContext et la
+      nature de la session sont la frontière de sécurité (BR-2, `DEC-16`).
     - **Source:** user instruction, 2026-10-24
 
 - **DEC-3 - Librairie pure, connexions MCP incluses**
@@ -446,6 +469,63 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
       tour étant `Cancelled`. La détection des écritures concurrentes du stockage reste hors de la librairie (`session`, DEC-1).
     - **Source:** `sebt3/lymaille#12`, 2026-11-13 ; forme du trait et comportement à la perte du bail : user instruction, 2026-11-13
 
+- **DEC-15 - Embedding et recherche sémantique : `rig` autant que possible, garde-fous de lymaille, index chez l'hôte**
+    - **Context:** `sebt3/lymaille#18` demande un port d'embedding ; le développeur principal veut en outre la recherche sémantique des
+      skills et des Memory (2026-11-20) et préfère le tooling de `rig` à un code maison. Mesuré (`spikes/rig-embed-probe`, rig-core
+      0.43.0, faux serveur) : `rig` sait parler à `POST <base>/embeddings` (OpenAI-compatible) et expose `id()` du modèle ; il couple
+      les vecteurs aux entrées par la position et ignore le champ `index` de la réponse ; il n'impose aucune taille de lot sur un
+      appel ; il ne vérifie la dimension que si elle est déclarée ; il ne rend pas d'erreur structurée pour un nombre de vecteurs
+      erroné ; le `Display` de ses erreurs HTTP contient l'adresse complète et le corps. Un faux modèle déterministe se fabrique sans
+      HTTP (`driver::Local` et un `Transport` maison) et se branche sur un index en mémoire de `rig`.
+    - **Decision:** (1) le port est un trait de lymaille, `Embedder` (`agents` FR-12), qui porte ce que `rig` ne garantit pas : erreurs
+      typées sans fuite, dimension toujours vérifiée, découpage des lots, troncature explicite, `model_id`. (2) Son implémentation de
+      production s'appuie sur le client d'embedding de `rig`, avec la configuration de fournisseur existante (`agents` FR-13) ;
+      son implémentation de test est déterministe et sans réseau. (3) La recherche sémantique s'appuie sur `VectorStoreIndex` de
+      `rig` : l'hôte construit l'index, avec le modèle d'embedding de son choix, et en fournit un par portée ; un adaptateur rend un
+      `Embedder` utilisable comme modèle d'un index de `rig`, pour que l'index passe par les garde-fous de l'`Embedder`. (4) Aucune
+      donnée vectorielle n'est stockée par la librairie (`CON-1`) : la persistance des vecteurs, leur réindexation à chaque changement et le
+      rattachement du `model_id` aux vecteurs persistés sont à l'hôte, qui invalide son index quand le `model_id` change.
+    - **Alternatives:** un trait d'index propre à lymaille, écarté : l'index de `rig` couvre le besoin et le choix du développeur est de
+      réutiliser `rig` ; passer le modèle de `rig` tel quel comme port, écarté : les garde-fous de (1) manqueraient et l'erreur de `rig`
+      fuit l'adresse (`CON-3`) ; un décorateur de stockage qui réindexe à chaque écriture, écarté : il lierait l'écriture d'une Memory à
+      l'inférence.
+    - **Consequences:** la dépendance `rig` devient requise par la feature `embedder` (`NFR-5`) ; le contrat que l'hôte implémente pour la
+      recherche est celui de `rig` (version épinglée, comme `CON-2` et `CON-9`) ; lymaille ne déclare aucune localité (local ou externe) de
+      modèle, voir la décision du 2026-11-20 des Open Issues.
+    - **Source:** `sebt3/lymaille#18` ; user instruction, 2026-11-20 (recherche sémantique des skills et Memory, appui sur `rig`)
+
+- **DEC-16 - Deux couches : capacités brutes et toolsets de présentation ; le droit vit dans le contexte**
+    - **Context:** la première réalisation traitait les modules (groupe hôte de `vynil-core`, modules fournis) comme une liste de
+      droits que la définition d'agent accordait au LLM (`Grants`, `granted_modules`), y compris des modules bruts. Or un module brut,
+      même en lecture seule, ne se présente pas bien à un LLM : il n'a ni skill qui dise dans quel cadre l'employer, ni mise en forme.
+    - **Decision:** (1) Capacités brutes : modules de `vynil-core` (`NFR-6`) et modules MCP. Jamais présentées au LLM productif ; elles
+      n'existent que comme dépendances des toolsets. (2) Toolset de présentation : seule face visible d'une capacité brute pour un LLM
+      productif ; il peut se limiter à forwarder les fonctions d'une capacité brute, et porte les skills qui enseignent dans quel cadre
+      d'actions il sert. (3) Le ToolsetContext liste explicitement les toolsets de la session : l'agent principal les voit tous ; la
+      définition d'un sous-agent peut seulement restreindre cette liste, jamais l'étendre. C'est le seul lieu du droit (`BR-2`) :
+      la définition d'agent ne porte ni liste de toolsets (hors restriction de sous-agent) ni liste de modules ni droit de Memory.
+      (4) Modules natifs : la nature de la session les détermine, sans liste. L'introspection du pad (variables, modules, fonctions, toolsets et skills ; metadata de Rhai, `scratchpad` FR-2 et FR-3) est offerte à toutes
+      les natures : ce n'est pas un module.
+      Agent principal productif : `todo`, `memory_session` (chaque agent a les siens), `memory_shared` (selon le contexte),
+      `memory_user` en lecture, `delegation`, `session`. Sous-agent : `todo`, `memory_session`, `memory_user` en lecture, ce que le
+      contexte lui laisse de `memory_shared` et, seulement s'il a une session parente, `session` ; pas de `delegation`. Un sous-agent a deux
+      usages : sous-agent d'un agent principal, il porte le titre de sa session et doit pouvoir le poser ; sous-agent d'un processus automatisé,
+      il n'a pas de session humaine de rattachement, donc pas de titre à donner et pas de module `session`. Le critère est la présence d'une session
+      parente (`session` FR-2) ; `session` est donné d'office aux agents de travail et de configuration. Agent de configuration : `todo`,
+      `memory_session` (peu coûteux, et il découvre ainsi l'existence de ces outils pour les suggérer dans les skills qu'il écrit),
+      `memory_user` en lecture et écriture, `session`, et seul `toolset_creator`, `contexts`, `sessions` et `inspect` (`open_context`, `open_session` : inspection d'un contexte ou d'une session, action de configuration), qu'aucun agent productif ne reçoit.
+      (5) `core` est d'office dans tout moteur de session. (6) La session de
+      configuration découvre les capacités brutes et les modules MCP par `rhai_prod_inspect` (second pad, coquilles non exécutables,
+      `BR-8`) sans pouvoir les exécuter.
+    - **Alternatives:** une allowlist de modules accordés par la définition d'agent, écartée : elle expose du brut et fait vivre le droit
+      à deux endroits ; un masquage de ce qui est présenté (tout visible sauf liste noire), écarté : une capacité brute ajoutée par
+      une montée de version de `vynil-core` deviendrait visible sans décision.
+    - **Consequences:** `Grants`, `CoreGroup::Host`, `with_group`, `with_module`, `granted_modules`, `AgentDefinition::modules` et les
+      droits de Memory de la définition disparaissent ou changent de sens ; les règles de nature de `toolsets` FR-8 et `agents` FR-1
+      se lisent sur les modules natifs ; la sortie de `Host` du moteur de session retire `get_env`, `log_*`, `file_*` et `shell_run` du
+      LLM productif. Rupture d'API publique (version 0.4.0).
+    - **Source:** user instruction, 2026-11-21
+
 ## Risques
 
 - **Rhai est un langage de niche.** Le modèle doit déjà le connaître, ce qui borne la cible aux modèles assez capables
@@ -536,6 +616,12 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
 
 - **Décidé 2026-11-18:** contrat du détecteur de secrets par défaut (`CON-3`, `toolsets` FR-3), option (b) : détection à toute position sur frontière de mot, `sk-` et `Bearer` suivis d'un jeton plausible (≥ 16 caractères) ; `sk-` en début de texte garde la règle d'origine sans minimum (asymétrie connue et assumée). Frontières non figées, sans hôte demandeur : préfixe collé à une lettre non-ASCII, tabulation après `Bearer`. Le détecteur est une barrière de sécurité : aucune extension sans décision. Contrat dans `src/secret.sdd`, tâches #3 et #4.
     - **Source:** `sebt3/lymaille#16`, 2026-11-17
+
+- **Décidé 2026-11-20:** lymaille ne porte aucune notion de localité ou de sensibilité des modèles (local ou externe), ni pour l'embedding ni pour
+  l'inférence : le client ne peut pas la connaître (le smart-proxy de l'écosystème mêle modèles internes et externes), et la confidentialité
+  est le choix de l'utilisateur final, qui configure des modèles locaux s'il la veut. Ce n'est pas un contrat de code. La section « Sensibilité » de
+  `sebt3/lymaille#18` est écartée ; `miryad-core#96` n'attend donc rien de lymaille à ce sujet.
+    - **Source:** user instruction, 2026-11-20
 
 ## Références
 

@@ -14,12 +14,12 @@ fournit l'abstraction des fournisseurs.
 ## Exigences fonctionnelles
 
 - **FR-1 - MUST:** Une définition d'agent comprend : identifiant, nature (`Work`, `Config` ou `Sub`, voir `agent-sessions#BR-8`), prompt système
-  templaté, modèle et paramètres, modules et toolsets accessibles, droits de la Memory par niveau, limites de sandbox,
-  stratégie de fenêtre de contexte et, pour un agent de travail, ses sous-agents délégables ; pour un sous-agent, le schéma de
-  sa sortie. La nature impose des règles de validation : un agent de travail n'a ni module de création de toolsets ni module
-  d'inspection ; un agent de configuration n'a aucun sous-agent délégable ni schéma de sortie, et n'ouvre aucune connexion MCP d'appel (règle du démarrage de session) ; seul lui
-  reçoit le module de création de toolsets, les modules d'inspection et de lecture de sessions ; un sous-agent n'a ni sous-agent
-  délégable, ni module de création, ni module d'inspection.
+  templaté, modèle et paramètres, limites de sandbox, stratégie de fenêtre de contexte et, pour un agent de travail, ses sous-agents
+  délégables ; pour un sous-agent, le schéma de sa sortie et, facultativement, une restriction de la liste de toolsets du ToolsetContext. Elle ne porte
+  ni liste de modules, ni droit de Memory, ni liste de toolsets pour un agent principal : les toolsets viennent du ToolsetContext, les modules natifs de
+  la nature de la session (`agent-sessions#BR-2`, `DEC-16`). La nature impose des règles de validation : un agent de configuration n'a aucun sous-agent
+  délégable ni schéma de sortie, et n'ouvre aucune connexion MCP d'appel (règle du démarrage de session) ; seul lui reçoit le module de création de
+  toolsets et les modules d'inspection (`inspect`), `contexts` et de lecture de sessions ; un sous-agent n'a ni sous-agent délégable ni restriction qui étende la liste du contexte.
     - **Source:** user instruction, 2026-10-24
     - **Verified by:** `AC-1`
 
@@ -88,6 +88,29 @@ et ce que l'agent consomme.
     - **Source:** `sebt3/lymaille#17` point 1, 2026-11-17
     - **Verified by:** `AC-5`
 
+- **FR-12 - MUST:** La librairie définit le port d'embedding de texte, le trait `Embedder` (feature `embedder`, `agent-sessions#NFR-5`), au
+  même niveau que le fournisseur d'inférence. Il expose l'identifiant du modèle (`model_id`) et la dimension des vecteurs
+  (`dimensions`), et embede un lot de textes : autant de vecteurs que d'entrées, dans l'ordre des entrées, tous de la dimension annoncée.
+  Un vecteur persisté se stocke avec le `model_id` qui l'a produit (changer de modèle invalide l'index) : c'est le contrat avec les
+  stockages de l'hôte. Les échecs sont typés : service indisponible, entrée trop longue, réponse mal formée, dimension inattendue,
+  nombre de vecteurs erroné. Aucune de ces erreurs ne montre l'adresse du serveur, la clé ni le texte embedé (`agent-sessions#CON-3`).
+    - **Source:** `sebt3/lymaille#18`, 2026-11-20 ; la localité du modèle n'est pas portée (`agent-sessions#DEC-15`, Open Issues du 2026-11-20)
+    - **Verified by:** `AC-6`, `AC-7`
+
+- **FR-13 - MUST:** Le client d'embedding de production réutilise la définition de fournisseur (`FR-6`) et le profil de modèle (`FR-7`),
+  sans configuration parallèle : l'adresse et l'authentification sont celles du fournisseur, un profil désigne le modèle d'embedding et
+  porte sa dimension attendue et la taille maximale d'un lot. Le profil d'un modèle d'embedding ne porte ni taille de contexte de
+  discussion ni paramètre d'échantillonnage. L'implémentation s'appuie sur le client d'embedding de `rig` (`agent-sessions#DEC-15`).
+    - **Source:** `sebt3/lymaille#18`, 2026-11-20 ; user instruction, 2026-11-20 (`rig` autant que possible)
+    - **Verified by:** `AC-6`
+
+- **FR-14 - MUST:** Un lot plus grand que la taille maximale du profil est découpé de façon transparente, l'ordre des vecteurs suivant
+  celui des entrées. Une entrée plus longue que ce que le modèle accepte suit une politique de troncature explicite et documentée, jamais
+  silencieuse : la troncature se signale à l'appelant (erreur ou indicateur, choix de la spec). Une implémentation de test déterministe,
+  sans réseau, rend un vecteur dérivé du texte : mêmes entrées, mêmes vecteurs ; entrées différentes, vecteurs différents.
+    - **Source:** `sebt3/lymaille#18`, 2026-11-20
+    - **Verified by:** `AC-6`, `AC-7`
+
 ## Questions ouvertes
 
 - **Résolu (2026-11-01):** détection des modèles : `rig` ne reporte pas `max_model_len` dans `context_length` (mesuré, `spikes/rig-probe`) ; `detect_models` de l'adaptateur (`rig.sdd`) lit `GET <base>/models` lui-même (vLLM : `max_model_len` 262144 pour `qwen3.8-flash-next`, `spikes/rig-e2e`). La passerelle annonce 8192 à tort (`kydah/kydah-ai-proxy#113`) : la surcharge du profil est nécessaire. Texte d'origine : détection des modèles (à vérifier : report de `max_model_len` par `rig`). `list_models` existe dans `rig` 0.43 sur les clients OpenAI, Anthropic, Ollama, Copilot et
@@ -119,6 +142,16 @@ et ce que l'agent consomme.
   erreurs que le fournisseur nu, et les requêtes restent lisibles par le fournisseur partagé ; le flux de fragments passe aussi par
   l'`Arc`.
 
+- **AC-6:** Avec l'implémentation de test, un lot nominal rend autant de vecteurs que d'entrées, de la dimension annoncée, dans l'ordre ; deux
+  appels identiques rendent les mêmes vecteurs et deux entrées différentes des vecteurs différents. Avec un faux serveur qui répond des vecteurs
+  d'une autre dimension que celle du profil, ou un nombre de vecteurs erroné, ou un corps illisible, ou qui est injoignable, l'erreur est typée
+  distinctement et son texte ne contient ni l'adresse, ni la clé, ni le texte embedé. Un lot dépassant la taille maximale part en plusieurs
+  requêtes et rend les vecteurs dans l'ordre des entrées.
+- **AC-7:** Une entrée plus longue que la limite du modèle suit la politique de troncature documentée et la signale ; la même entrée n'est jamais
+  tronquée en silence.
+- **AC-8:** Sans la feature `embedder`, ni le trait `Embedder`, ni son client, ni la recherche sémantique ne sont compilés et le comportement des features
+  par défaut est inchangé ; avec la feature, ils le sont.
+
 ## Réalisation SpecDD
 
 Specs dans `src/agents/`, implémentées (des tâches de durcissement restent listées dans les `Tasks` de certaines specs) :
@@ -130,6 +163,7 @@ Specs dans `src/agents/`, implémentées (des tâches de durcissement restent li
 - `catalog.sdd` : traits de stockage, stockage mémoire et cascade `Layered` par niveau (FR-5).
 - `inference.sdd` : trait du fournisseur d'inférence, classement des erreurs, streaming de fragments, fournisseur scripté, partage par `Arc` (FR-11).
 - `summarizer.sdd` : résumeur de production au-dessus d'un fournisseur d'inférence (`context-window` FR-11).
+- `embedder.sdd` (lot 0.3.2, à écrire) : trait `Embedder`, erreurs typées, lots, troncature, implémentation de test, client de production sur `rig` et adaptateur vers le modèle d'un index de `rig` (FR-12 à FR-14, AC-6 à AC-8).
 - `error.sdd` : erreur typée du module.
 
 État au 2026-11-01 : tout est livré. La **sérialisation frontmatter + corps** d'une définition (FR-3, `agents.sdd` #5, `definition.sdd` #18 et #19, `yaml_serde`) ; le **manifeste de projet** (FR-4, `agents.sdd` #3, `manifest.sdd`, lot M1) ; l'**adaptateur `rig`** (`rig.sdd`, lots R0 à R3, derrière la feature Cargo `rig`) : clients OpenAI compatibles, `list_models` et détection des modèles, décodage et rejeu du raisonnement. Le TBD de détection des modèles est levé par les mesures de `spikes/rig-probe` et `spikes/rig-e2e`.

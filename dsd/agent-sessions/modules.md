@@ -29,10 +29,11 @@ d'extension pour les modules fournis par l'hôte.
 - **FR-3 - MUST:** La liste des Memory ne rend que l'identifiant et le titre ; le corps se lit à la demande.
     - **Source:** user instruction, 2026-10-24
 
-- **FR-4 - MUST:** La Memory est exposée par trois modules, un par niveau (utilisateur, partagé, session ; `memory_user`, `memory_shared`, `memory_session`). L'accès d'un
-  agent à un niveau, y compris la lecture seule, se décide par les toolsets de sa définition (`agent-sessions#BR-2`) : la
-  définition d'agent ne porte aucun droit de Memory, et toute vérification passe par un toolset.
-    - **Source:** agent-sessions#BR-2 ; user instruction, 2026-10-27
+- **FR-4 - MUST:** La Memory est exposée par trois modules, un par niveau (utilisateur, partagé, session ; `memory_user`, `memory_shared`, `memory_session`). L'accès
+  d'un agent à un niveau se décide par la nature de sa session et son contexte (`agent-sessions#DEC-16`) : `memory_session` est celle de la
+  session de chaque agent ; `memory_shared` dépend du ToolsetContext et ne concerne que les agents productifs ; `memory_user` est en lecture
+  pour tous et en écriture pour l'agent de configuration seul. La définition d'agent ne porte aucun droit de Memory.
+    - **Source:** agent-sessions#BR-2 ; user instruction, 2026-10-27 ; révisé, user instruction, 2026-11-21
 
 - **FR-5 - MUST:** Les changements de Memory émettent un événement.
     - **Source:** agent-sessions#BR-5
@@ -48,7 +49,7 @@ d'extension pour les modules fournis par l'hôte.
     - **Source:** agent-sessions/delegation#FR-10
 
 - **FR-8 - MUST:** L'hôte peut enregistrer des modules Rhai supplémentaires, par exemple le module de gestion de
-  workflows de vanyline ; ils sont soumis à la même règle d'accord par définition d'agent.
+  workflows de vanyline ; ils sont des capacités brutes (`agent-sessions#DEC-16`) : disponibles comme dépendances des toolsets, jamais présentés directement au LLM productif.
     - **Source:** user instruction, 2026-10-24
 
 - **FR-9 - MUST:** Quand un serveur MCP devient injoignable en cours de run, la librairie tente de se reconnecter quelques
@@ -89,16 +90,33 @@ d'extension pour les modules fournis par l'hôte.
     - **Source:** `sebt3/lymaille#17` point 3 et `sebt3/lymaille#13` point 2, 2026-11-17
     - **Verified by:** `AC-9`
 
-## Extension réservée : connaissance
+- **FR-14 - MUST:** Sous la feature `embedder` (`agent-sessions#NFR-5`), les Memory se cherchent par similarité sémantique. Chaque module
+  Memory (`memory_user`, `memory_shared`, `memory_session`) gagne une fonction de recherche, une requête texte et un nombre maximal de résultats en entrée,
+  qui rend, par ordre de pertinence, l'identifiant, le titre et le score de chaque Memory trouvée, jamais le corps (`FR-3`). L'accès suit
+  les toolsets de la définition d'agent comme tout le reste (`FR-4`) : un agent qui n'a pas le niveau n'y cherche pas. La recherche d'un niveau
+  ne rend que les Memory de sa portée (`FR-2`).
+    - **Source:** user instruction, 2026-11-20 ; extension « connaissance » du 2026-10-24 devenue exigence
+    - **Verified by:** `AC-10`
 
-Hors du premier jalon et sans exigence, le besoin n'étant pas avéré. Principe consigné : un module Rhai optionnel de
-connaissance s'appuierait sur le trait de recherche vectorielle de `rig`, avec un stockage fourni par l'hôte
-(`agent-sessions#CON-1` interdit l'E/S de stockage, pas l'usage de `rig`), et le modèle d'embedding serait désigné par
-un profil de modèle de type « embedding » (`agent-sessions/agents#FR-7`).
+- **FR-15 - MUST:** Sous la même feature, les skills se cherchent de la même façon : une recherche sémantique rend le nom, la description et le score,
+  jamais le corps, que le tool `skill` lit à la demande. Elle complète sans remplacer la recherche lexicale de `find` (`scratchpad` FR-3).
+    - **Source:** user instruction, 2026-11-20
+    - **Verified by:** `AC-11`
 
-Source: user instruction, 2026-10-24
+- **FR-16 - MUST:** La recherche s'appuie sur `VectorStoreIndex` de `rig` (`agent-sessions#DEC-15`) : l'hôte fournit à la librairie, par portée de
+  Memory et pour les skills, un index qu'il a construit avec le modèle d'embedding de son choix et qu'il maintient. La librairie interroge l'index
+  par identifiants (elle n'impose aucun type de document), relit titre ou nom auprès du stockage de l'hôte et ne stocke aucun vecteur
+  (`agent-sessions#CON-1`). Elle fournit le texte à embeder pour une Memory (titre et corps) et pour un skill (nom, description et corps), borné par
+  la politique de troncature de `agents` FR-14, mais ne réindexe rien d'elle-même : à chaque changement d'une Memory ou d'un skill, l'hôte réindexe
+  explicitement. Un index absent pour une portée donne une erreur Rhai explicite, pas un résultat vide.
+    - **Source:** user instruction, 2026-11-20
+    - **Verified by:** `AC-10`, `AC-11`, `AC-12`
 
 ## Questions ouvertes
+
+- **Exposition de la recherche sémantique des skills** : fonction Rhai dans un module dédié, ou extension du tool natif `skill` (qui liste et lit
+  aujourd'hui sans passer par Rhai, `agent-sessions#FR-1`) ? À trancher dans `toolsets.md` et la spec, avant le lot. Recommandation : le tool
+  `skill`, qui est déjà le point d'accès aux skills ; un module Rhai séparé ne s'ajouterait que si un hôte le demande.
 
 
 ## Acceptation
@@ -124,6 +142,13 @@ Source: user instruction, 2026-10-24
   rendu est lisible par l'accesseur et le `Debug` du jeu d'en-têtes ne contient aucune valeur ; avec la feature `mcp-http`, le
   connecteur réel accepte la même authentification.
 
+- **AC-10:** Avec l'implémentation de test de l'`Embedder` et un index en mémoire de `rig`, trois Memory dont une proche d'une requête : la fonction de recherche du
+  niveau rend d'abord cette Memory, avec son identifiant, son titre et un score, sans corps ; une Memory du même identifiant dans un autre niveau n'apparaît
+  pas ; un agent à qui sa nature de session ou son contexte ne donne pas le niveau n'a pas la fonction.
+- **AC-11:** Avec les mêmes moyens, une recherche de skills rend le nom, la description et le score, sans corps, et la lecture par le tool `skill` rend le corps.
+- **AC-12:** Une portée sans index fournit une erreur Rhai explicite ; après un changement de Memory que l'hôte réindexe, la recherche rend la version à jour ;
+  la librairie ne réindexe pas d'elle-même (un changement non réindexé n'est pas trouvé).
+
 ## Réalisation SpecDD
 
 Specs dans `src/modules/`, implémentées (des tâches de durcissement restent listées dans les `Tasks` de certaines specs) :
@@ -139,3 +164,5 @@ Specs dans `src/modules/`, implémentées (des tâches de durcissement restent l
 État au 2026-11-01 : tout est livré, y compris `FR-7` (notifications MCP vers les watchers) : le connecteur MCP appelle `notify` sur la source `mcp` (`delegation/sources.sdd` #2, confirmé par le validateur le 2026-11-01 ; tests de notifications et d'annulation ajoutés). FR-8 (modules de l'hôte) ne demande aucun code : un module construit par l'hôte entre dans `Grants`.
 
 État au 2026-11-04 (lot 0.2.0) : livré, `FR-12` (ligne d'usage des fonctions MCP) et le niveau `Shared` de la Memory (`FR-2`, `FR-4`, `AC-2` : `MemoryLevel::Shared`, module `memory_shared`, sans alias).
+
+État au 2026-11-20 (lot 0.3.2) : l'« extension réservée : connaissance » devient `FR-14` à `FR-16` ; specs à écrire (`memory_search.sdd`, recherche des skills dans `src/toolsets/`). Rien n'est implémenté.
