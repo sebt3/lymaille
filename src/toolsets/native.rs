@@ -370,7 +370,6 @@ pub fn builtin_rhai_pad_skill(limits: &ScratchpadLimits) -> ToolsetsResult<Skill
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
     use std::sync::Arc;
 
     use serde_json::json;
@@ -382,7 +381,8 @@ mod tests {
     };
     use crate::clock::{ManualClock, Timestamp};
     use crate::scratchpad::{
-        PresentedSkill, RunEnv, RunOutcome, RunStatus, Scratchpad, ScratchpadEngine, ScratchpadLimits,
+        Capabilities, PresentedSkill, RunEnv, RunOutcome, RunStatus, Scratchpad, ScratchpadEngine,
+        ScratchpadLimits,
     };
     use crate::session::{CancelHandle, NativeTool, Redactor};
     use crate::toolsets::{
@@ -463,8 +463,13 @@ mod tests {
 
     /// Scratchpad over the presentation of `toolsets`, with `session_context()` registered from `context` and `redactor`.
     fn pad_with(toolsets: &[Toolset], context: &ResolvedContext, redactor: Arc<Redactor>) -> Scratchpad {
-        let presentation =
-            assemble(toolsets, &[], &BTreeMap::new(), context, &ScratchpadLimits::new()).into_presentation();
+        let presentation = assemble(
+            toolsets,
+            &Capabilities::compiled(),
+            context,
+            &ScratchpadLimits::new(),
+        )
+        .into_presentation();
         let engine = ScratchpadEngine::builder(ScratchpadLimits::new(), presentation)
             .with_registration(session_context_registration(context.clone(), redactor))
             .build()
@@ -1207,7 +1212,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn built_in_claims_on_vars_skills_module_calls_and_truncation_hold() {
         let limits = ScratchpadLimits::new().with_render_cap_chars(300);
-        let presentation = assemble(&[ops_toolset()], &[], &BTreeMap::new(), &context(), &limits)
+        let presentation = assemble(&[ops_toolset()], &Capabilities::compiled(), &context(), &limits)
             .into_presentation()
             .with_skill(
                 PresentedSkill::new("deploy", "Deploy to production", None).expect("a valid presented skill"),

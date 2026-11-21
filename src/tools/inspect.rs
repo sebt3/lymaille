@@ -2,7 +2,6 @@
 //! pad and runs one script in it, read-only (`agent-sessions/scratchpad#FR-13`, `AC-13`). It lives in `tools` because it
 //! reads the stores of `toolsets`, the listers of `modules` and builds a pad of `scratchpad`. See `src/tools/inspect.sdd`.
 
-use std::collections::BTreeMap;
 use std::fmt;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -12,8 +11,8 @@ use serde_json::Value;
 use crate::agents::{AgentKind, AgentStore};
 use crate::clock::Clock;
 use crate::scratchpad::{
-    InspectionPad, InspectionTarget, ModuleDescriptor, Presentation, RunEnv, RunStatus, Scratchpad,
-    ScratchpadEngine, descriptors_from_catalog, rhai_prod_inspect_definition,
+    Capabilities, InspectionPad, InspectionTarget, ModuleDescriptor, Presentation, RunEnv, RunStatus,
+    Scratchpad, ScratchpadEngine, descriptors_from_catalog, rhai_prod_inspect_definition,
 };
 use crate::session::{CancelHandle, InspectionTargetRef, NativeTool, Redactor, SessionId, SessionStore};
 use crate::toolsets::{ConfigStores, ContextStore, InspectionSlot, Toolset, ToolsetStore, assemble};
@@ -177,7 +176,8 @@ where
             .resolve(defaults_of(&toolsets))
             .map_err(|error| unresolved(&error.to_string()))?;
         let limits = *self.env.base.limits();
-        let presentation = assemble(&toolsets, &[], &BTreeMap::new(), &resolved, &limits).into_presentation();
+        let presentation =
+            assemble(&toolsets, &Capabilities::compiled(), &resolved, &limits).into_presentation();
         let real = ScratchpadEngine::builder(limits, presentation.clone())
             .build()
             .map_err(|_error| unresolved("the engine of the target does not build"))?;

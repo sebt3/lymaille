@@ -2,18 +2,17 @@
 //! presented skills for each toolset that builds, and the reason for each one that does not (`agent-sessions/toolsets#FR-2`,
 //! `AC-1`, `agent-sessions/scratchpad#FR-3`).
 //!
-//! The module of a toolset is evaluated on a construction engine that knows the dependencies of that toolset, and only
-//! those. No dependency is presented by that: the import sub-modules are emptied before the module is presented. Nothing here
-//! performs I/O.
-
-use std::collections::BTreeMap;
+//! The module of a toolset is evaluated on a construction engine that knows the dependencies that toolset declares, taken
+//! from the [`Capabilities`] register, and only those. No dependency is presented by that: the import sub-modules are
+//! emptied before the module is presented. Nothing here performs I/O.
 
 use rhai::module_resolvers::StaticModuleResolver;
 use rhai::{Module, Scope, Shared};
 
 use super::{ResolvedContext, Toolset, ToolsetsError};
 use crate::scratchpad::{
-    Presentation, PresentedModule, PresentedSkill, PresentedToolset, ScratchpadLimits, base_engine,
+    Capabilities, Presentation, PresentedModule, PresentedSkill, PresentedToolset, ScratchpadLimits,
+    base_engine,
 };
 
 /// What the scratchpad receives from the toolsets of an agent: the presentation, and the toolsets that could not be built.
@@ -31,7 +30,7 @@ impl Assembled {
         &self.presentation
     }
 
-    /// Consumes the result and gives the presentation, to which the definition adds its groups.
+    /// Consumes the result and gives the presentation: the modules, toolsets and skills the session receives.
     #[must_use]
     pub fn into_presentation(self) -> Presentation {
         self.presentation
@@ -46,31 +45,25 @@ impl Assembled {
 
 /// Assembles the toolsets of an agent.
 ///
-/// `presented_modules` are the modules the definition presents; they are kept as they are. `dependencies` are the modules that
-/// toolsets may depend on, by name: a toolset reaches only the ones it declares, while its module is evaluated, and the
-/// LLM reaches them only when the definition presents them too. Each toolset is evaluated on an engine built from
-/// `base_engine` with `limits`; one that cannot be built is left out and reported, the others are presented.
+/// `capabilities` are the raw capabilities of the session (the modules of the compiled features, the MCP modules and the
+/// host's own modules, already gathered): a toolset reaches only the ones it declares, while its module is evaluated, and
+/// no raw module is ever presented by that. Each toolset is evaluated on an engine built from `base_engine` with `limits`;
+/// one that cannot be built is left out and reported, the others are presented.
 ///
 /// The resolved `context` is not read here: `session_context()` is registered on the engine of the session and read when
 /// a function of a module is called, not when the module is evaluated.
 #[must_use]
 pub fn assemble(
     toolsets: &[Toolset],
-    presented_modules: &[PresentedModule],
-    dependencies: &BTreeMap<String, Shared<Module>>,
+    capabilities: &Capabilities,
     _context: &ResolvedContext,
     limits: &ScratchpadLimits,
 ) -> Assembled {
     let mut presentation = Presentation::new();
-    for module in presented_modules {
-        if let Some(extended) = presentation.clone().with_module(module.clone()) {
-            presentation = extended;
-        }
-    }
     let mut failures = Vec::new();
     for toolset in toolsets {
         let outcome =
-            build(toolset, dependencies, limits).and_then(|module| present(&presentation, toolset, module));
+            build(toolset, capabilities, limits).and_then(|module| present(&presentation, toolset, module));
         match outcome {
             Ok(extended) => presentation = extended,
             Err(failure) => failures.push(failure),
@@ -91,15 +84,16 @@ fn failure(toolset: &Toolset, reason: &'static str, detail: String) -> ToolsetsE
     }
 }
 
-/// Evaluates the module of a toolset and empties its import sub-modules.
+/// Evaluates the module of a toolset and empties its import sub-modules. A declared dependency that the register does
+/// not hold fails the whole toolset: it is never presented by halves.
 fn build(
     toolset: &Toolset,
-    dependencies: &BTreeMap<String, Shared<Module>>,
+    capabilities: &Capabilities,
     limits: &ScratchpadLimits,
 ) -> Result<Module, ToolsetsError> {
     let mut resolver = StaticModuleResolver::new();
     for name in toolset.dependencies() {
-        let Some(dependency) = dependencies.get(name) else {
+        let Some(dependency) = capabilities.get(name) else {
             return Err(failure(toolset, "a dependency is not available", name.clone()));
         };
         resolver.insert(name.as_str(), Module::clone(dependency));
@@ -156,7 +150,6 @@ fn present(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
     use std::sync::Arc;
 
     use rhai::{FuncRegistration, Module, Shared};
@@ -166,8 +159,8 @@ mod tests {
     use crate::clock::{Clock, ManualClock, Timestamp};
     use crate::modules::{InMemoryMemoryStore, MemoryLevel, MemoryScopes, memory_module, memory_module_name};
     use crate::scratchpad::{
-        PresentedModule, PresentedSkill, PresentedToolset, RunEnv, RunOutcome, RunStatus, Scratchpad,
-        ScratchpadEngine, ScratchpadLimits, ScriptErrorClass,
+        Capabilities, PresentedModule, PresentedSkill, PresentedToolset, RunEnv, RunOutcome, RunStatus,
+        Scratchpad, ScratchpadEngine, ScratchpadLimits, ScriptErrorClass,
     };
     use crate::session::{CancelHandle, EventSink, RecordingSink, Redactor, SessionId};
     use crate::toolsets::{ResolvedContext, Skill, Toolset, ToolsetContext, ToolsetsError};
@@ -210,9 +203,24 @@ mod tests {
         Shared::new(module)
     }
 
-    /// The dependency table with `helpers` in it.
-    fn with_helpers() -> BTreeMap<String, Shared<Module>> {
-        BTreeMap::from([("helpers".to_owned(), helpers())])
+    /// A module `grafana` with `query(k)`, as a host module added to the register.
+    fn grafana() -> Shared<Module> {
+        let mut module = Module::new();
+        let _query =
+            FuncRegistration::new("query").set_into_module(&mut module, |k: &str| format!("grafana:{k}"));
+        Shared::new(module)
+    }
+
+    /// The register of a build: the compiled features, nothing added.
+    fn capabilities() -> Capabilities {
+        Capabilities::compiled()
+    }
+
+    /// The register with `helpers` added by the host.
+    fn capabilities_with_helpers() -> Capabilities {
+        capabilities()
+            .with_module("helpers", helpers())
+            .expect("a fresh name")
     }
 
     fn context() -> ResolvedContext {
@@ -222,18 +230,8 @@ mod tests {
             .expect("an empty context resolves")
     }
 
-    fn run_assemble(
-        toolsets: &[Toolset],
-        presented: &[PresentedModule],
-        dependencies: &BTreeMap<String, Shared<Module>>,
-    ) -> Assembled {
-        assemble(
-            toolsets,
-            presented,
-            dependencies,
-            &context(),
-            &ScratchpadLimits::new(),
-        )
+    fn run_assemble(toolsets: &[Toolset], capabilities: &Capabilities) -> Assembled {
+        assemble(toolsets, capabilities, &context(), &ScratchpadLimits::new())
     }
 
     /// A pad over the presentation of an assembly.
@@ -283,11 +281,19 @@ mod tests {
     const OPS: &str =
         "import \"helpers\" as h;\nfn twice(x) { h::double(x) }\nfn token_len() { h::secret().len() }";
 
+    /// A toolset whose only dependency is `k8s`, absent from the register of this crate (no such feature).
+    fn k8s_toolset(name: &str) -> Toolset {
+        depending_on(
+            toolset(name, "import \"k8s\" as k;\nfn pods() { k::list() }"),
+            "k8s",
+        )
+    }
+
     // Scenario: la dépendance fonctionne mais reste cachée
     #[tokio::test(flavor = "multi_thread")]
     async fn dependency_works_but_stays_hidden() {
         let toolsets = [depending_on(toolset("ops", OPS), "helpers")];
-        let assembled = run_assemble(&toolsets, &[], &with_helpers());
+        let assembled = run_assemble(&toolsets, &capabilities_with_helpers());
         assert!(assembled.failures().is_empty(), "got {:?}", assembled.failures());
         assert_eq!(module_names(&assembled), ["ops"], "helpers is not presented");
         let pad = pad(assembled);
@@ -307,10 +313,39 @@ mod tests {
         );
     }
 
+    // Scenario: une capacité de l'hôte reste cachée aussi
+    #[tokio::test(flavor = "multi_thread")]
+    async fn host_capability_stays_hidden_too() {
+        let dash = depending_on(
+            toolset("dash", "import \"grafana\" as g;\nfn ask(k) { g::query(k) }"),
+            "grafana",
+        );
+        let assembled = run_assemble(
+            &[dash],
+            &capabilities()
+                .with_module("grafana", grafana())
+                .expect("a fresh name"),
+        );
+        assert!(assembled.failures().is_empty(), "got {:?}", assembled.failures());
+        assert_eq!(module_names(&assembled), ["dash"], "grafana is not presented");
+        let pad = pad(assembled);
+
+        let through = run(&pad, "dash::ask(\"up\")").await;
+        assert_eq!(through.status(), RunStatus::Ok, "got {}", through.text());
+        assert_eq!(through.text(), "grafana:up");
+        let direct = run(&pad, "grafana::query(\"up\")").await;
+        assert_eq!(
+            direct.status(),
+            RunStatus::Failed(ScriptErrorClass::NotFound),
+            "a host capability stays out of reach: {}",
+            direct.text()
+        );
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn dependency_is_absent_from_introspection() {
         let toolsets = [depending_on(toolset("ops", OPS), "helpers")];
-        let pad = pad(run_assemble(&toolsets, &[], &with_helpers()));
+        let pad = pad(run_assemble(&toolsets, &capabilities_with_helpers()));
         for script in [
             "modules()",
             "functions()",
@@ -340,7 +375,7 @@ mod tests {
     #[test]
     fn import_sub_modules_are_emptied() {
         let toolsets = [depending_on(toolset("ops", OPS), "helpers")];
-        let assembled = run_assemble(&toolsets, &[], &with_helpers());
+        let assembled = run_assemble(&toolsets, &capabilities_with_helpers());
         let presented = assembled
             .presentation()
             .modules()
@@ -357,30 +392,18 @@ mod tests {
     }
 
     #[test]
-    fn dependency_presented_by_the_definition_is_presented() {
-        let toolsets = [depending_on(toolset("ops", OPS), "helpers")];
-        let presented = [PresentedModule::new("helpers", helpers()).expect("a valid name")];
-        let assembled = run_assemble(&toolsets, &presented, &with_helpers());
-        assert!(assembled.failures().is_empty());
-        assert_eq!(module_names(&assembled), ["helpers", "ops"]);
-    }
-
-    #[test]
     fn undeclared_dependency_is_unreachable() {
         let toolsets = [toolset("ops", OPS)];
-        let assembled = run_assemble(&toolsets, &[], &with_helpers());
+        let assembled = run_assemble(&toolsets, &capabilities_with_helpers());
         assert_eq!(failed_names(&assembled), ["ops"], "an import not declared fails");
         assert_eq!(module_names(&assembled).len(), 0);
     }
 
     // Scenario: dépendance indisponible
-    #[test]
-    fn missing_dependency_fails_the_toolset_only() {
-        let toolsets = [
-            depending_on(toolset("ops", OPS), "helpers"),
-            toolset("plain", "fn one() { 1 }"),
-        ];
-        let assembled = run_assemble(&toolsets, &[], &BTreeMap::new());
+    #[tokio::test(flavor = "multi_thread")]
+    async fn missing_dependency_fails_the_toolset_only() {
+        let toolsets = [k8s_toolset("ops"), toolset("plain", "fn one() { 1 }")];
+        let assembled = run_assemble(&toolsets, &capabilities());
         assert_eq!(failed_names(&assembled), ["ops"]);
         assert_eq!(module_names(&assembled), ["plain"]);
         let presented: Vec<&str> = assembled
@@ -392,9 +415,36 @@ mod tests {
         assert_eq!(presented, ["plain"], "the failed toolset is not presented at all");
         let reason = assembled.failures().first().expect("a failure").to_string();
         assert!(
-            reason.contains("helpers"),
+            reason.contains("k8s"),
             "the reason names the dependency: {reason}"
         );
+        // never granted by halves: no function of the failed toolset is reachable
+        let pad = pad(assembled);
+        let called = run(&pad, "ops::pods()").await;
+        assert_eq!(
+            called.status(),
+            RunStatus::Failed(ScriptErrorClass::NotFound),
+            "the failed toolset grants nothing: {}",
+            called.text()
+        );
+        let fine = run(&pad, "plain::one()").await;
+        assert_eq!(fine.status(), RunStatus::Ok, "got {}", fine.text());
+    }
+
+    // engine.sdd #19 (posed in assemble.rs, slice E): the construction engine resolves `host`, which
+    // capabilities.sdd keeps in the register whatever the features compiled.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn host_dependency_resolves_and_get_env_returns_the_empty_string() {
+        let source = "import \"host\" as h;\nfn probe() { h::get_env(\"LYMAILLE_ABSENT\") }";
+        let toolsets = [depending_on(toolset("env_probe", source), "host")];
+        let assembled = run_assemble(&toolsets, &capabilities());
+        assert!(assembled.failures().is_empty(), "got {:?}", assembled.failures());
+        assert_eq!(module_names(&assembled), ["env_probe"], "host is not presented");
+        let pad = pad(assembled);
+
+        let called = run(&pad, "env_probe::probe()").await;
+        assert_eq!(called.status(), RunStatus::Ok, "got {}", called.text());
+        assert_eq!(called.text(), "", "an absent variable renders the empty string");
     }
 
     #[test]
@@ -404,7 +454,7 @@ mod tests {
             toolset("thrower", "throw \"boom-token\";"),
             toolset("fine", "fn f() { 1 }"),
         ];
-        let assembled = run_assemble(&toolsets, &[], &BTreeMap::new());
+        let assembled = run_assemble(&toolsets, &capabilities());
         assert_eq!(failed_names(&assembled), ["broken", "thrower"]);
         assert_eq!(module_names(&assembled), ["fine"]);
         for failure in assembled.failures() {
@@ -415,35 +465,34 @@ mod tests {
     }
 
     #[test]
-    fn toolset_name_taken_by_a_presented_module_fails() {
-        let presented = [PresentedModule::new("ops", Shared::new(Module::new())).expect("a valid name")];
-        let toolsets = [toolset("ops", "fn f() { 1 }"), toolset("other", "fn g() { 1 }")];
-        let assembled = run_assemble(&toolsets, &presented, &BTreeMap::new());
-        assert_eq!(failed_names(&assembled), ["ops"]);
+    fn duplicate_toolset_name_fails_the_second_whole() {
+        let toolsets = [toolset("ops", "fn f() { 1 }"), toolset("ops", "fn g() { 2 }")];
+        let assembled = run_assemble(&toolsets, &capabilities());
+        assert_eq!(failed_names(&assembled), ["ops"], "the second is refused");
         assert_eq!(
             module_names(&assembled),
-            ["ops", "other"],
-            "the definition's module is kept"
+            ["ops"],
+            "the first module is kept, not the second"
         );
     }
 
     // Scenario: les skills suivent leur toolset
     #[test]
     fn skills_follow_their_toolset() {
-        let presented_toolset = with_skill(toolset("ops", "fn f() { 1 }"), "ops-skill");
-        let _not_presented = with_skill(toolset("other", "fn g() { 1 }"), "other-skill");
-        let assembled = run_assemble(&[presented_toolset], &[], &BTreeMap::new());
+        let failing = with_skill(k8s_toolset("ops"), "ops-skill");
+        let fine = with_skill(toolset("fine", "fn f() { 1 }"), "fine-skill");
+        let assembled = run_assemble(&[failing, fine], &capabilities());
         let skills = assembled.presentation().skills();
-        assert_eq!(skills.len(), 1);
+        assert_eq!(skills.len(), 1, "only the skill of the toolset that built");
         let skill = skills.first().expect("one skill");
-        assert_eq!(skill.name(), "ops-skill");
-        assert_eq!(skill.description(), "the skill ops-skill");
-        assert_eq!(skill.toolset(), Some("ops"));
+        assert_eq!(skill.name(), "fine-skill");
+        assert_eq!(skill.description(), "the skill fine-skill");
+        assert_eq!(skill.toolset(), Some("fine"));
         let toolsets = assembled.presentation().toolsets();
         assert_eq!(toolsets.len(), 1);
         assert_eq!(
             toolsets.first().map(PresentedToolset::description),
-            Some("the toolset ops")
+            Some("the toolset fine")
         );
     }
 
@@ -453,7 +502,7 @@ mod tests {
             with_skill(depending_on(toolset("ops", OPS), "helpers"), "ops-skill"),
             with_skill(toolset("fine", "fn f() { 1 }"), "fine-skill"),
         ];
-        let assembled = run_assemble(&toolsets, &[], &BTreeMap::new());
+        let assembled = run_assemble(&toolsets, &capabilities());
         let names: Vec<&str> = assembled
             .presentation()
             .skills()
@@ -469,7 +518,7 @@ mod tests {
             with_skill(toolset("a", "fn f() { 1 }"), "shared"),
             with_skill(toolset("b", "fn g() { 1 }"), "shared"),
         ];
-        let assembled = run_assemble(&toolsets, &[], &BTreeMap::new());
+        let assembled = run_assemble(&toolsets, &capabilities());
         assert_eq!(failed_names(&assembled), ["b"]);
         assert_eq!(module_names(&assembled), ["a"], "not presented by halves");
     }
@@ -498,8 +547,8 @@ mod tests {
 
         let source = "import \"memory_user\" as m;\nfn ids() { m::list() }\nfn get(id) { m::read(id) }";
         let toolsets = [depending_on(toolset("notes", source), name)];
-        let dependencies = BTreeMap::from([(name.to_owned(), memory)]);
-        let assembled = run_assemble(&toolsets, &[], &dependencies);
+        let capabilities = capabilities().with_module(name, memory).expect("a fresh name");
+        let assembled = run_assemble(&toolsets, &capabilities);
         assert!(assembled.failures().is_empty(), "got {:?}", assembled.failures());
         assert_eq!(module_names(&assembled), ["notes"]);
         let pad = pad(assembled);
