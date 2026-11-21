@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-use crate::agents::AgentStore;
+use crate::agents::{AgentKind, AgentStore};
 use crate::clock::Clock;
 use crate::scratchpad::{
     InspectionPad, InspectionTarget, ModuleDescriptor, Presentation, RunEnv, RunStatus, Scratchpad,
@@ -158,7 +158,13 @@ where
             .map_err(|_error| unresolved("the context store failed"))?
             .ok_or_else(|| unresolved(&format!("unknown toolset context `{context}`")))?;
         let mut toolsets = Vec::new();
-        for name in definition.toolsets() {
+        let listed = match definition.kind() {
+            AgentKind::Sub => definition
+                .toolset_restriction()
+                .unwrap_or_else(|| stored.toolset_names()),
+            AgentKind::Work | AgentKind::Config => stored.toolset_names(),
+        };
+        for name in listed {
             let found = self
                 .stores
                 .toolsets()
@@ -392,8 +398,7 @@ mod tests {
             .toolsets()
             .activate("ops")
             .expect("the toolset is activated");
-        let agent = AgentDefinition::new("cfg".to_owned(), AgentKind::Work, "You configure.".to_owned())
-            .with_toolsets(vec!["ops".to_owned()]);
+        let agent = AgentDefinition::new("cfg".to_owned(), AgentKind::Work, "You configure.".to_owned());
         stores
             .agents()
             .put_agent(&agent)
@@ -402,7 +407,9 @@ mod tests {
         let context = ToolsetContext::new("prod".to_owned(), ContextLevel::Shared)
             .expect("a context")
             .with_role("grafana".to_owned(), "ref".to_owned())
-            .expect("the role is bound");
+            .expect("the role is bound")
+            .with_toolset("ops".to_owned())
+            .expect("the toolset is listed");
         stores
             .contexts()
             .put_context(&context)

@@ -397,8 +397,7 @@ mod tests {
         )
         .with_profile("strix-qwen".to_owned())
         .with_sampling(sampling())
-        .with_modules(vec!["files".to_owned()])
-        .with_toolsets(vec!["k8s".to_owned()])
+        .with_toolset_restriction(vec!["k8s".to_owned()])
         .with_sandbox(sandbox())
         .with_context_strategy("summarize".to_owned())
         .with_delegable(vec!["reviewer".to_owned()])
@@ -495,6 +494,8 @@ mod tests {
             .expect("the role is accepted")
             .with_override("k8s".to_owned(), "namespace".to_owned(), json!("other"))
             .expect("the override is accepted")
+            .with_toolset("k8s".to_owned())
+            .expect("the toolset is listed")
     }
 
     fn minimal_context() -> ToolsetContext {

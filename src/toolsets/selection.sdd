@@ -54,4 +54,5 @@ Scenario: une restriction vide ne laisse rien
   Then les noms sont vides
 
 Tasks:
-  [ ] #1 Lot 0.4.0-D : tests puis implémentation de ./selection.rs ; déclarer le module dans ./mod.rs et ré-exporter dans ../lib.rs. Dépend de ../agents/definition.sdd #25 (restriction de sous-agent) et de ./toolset_context.sdd #11.
+  [x] #1 Lot 0.4.0-D : tests puis implémentation de ./selection.rs ; déclarer le module dans ./mod.rs et ré-exporter dans ../lib.rs. Dépend de ../agents/definition.sdd #25 (restriction de sous-agent) et de ./toolset_context.sdd #11.
+      Validé le 2026-11-21 (validator, tranche D groupée) : 4 Scenarios testés, intersection d'ordre contexte, `ignored()` d'ordre restriction, mutants 0 survivant. Le branchement de ./compat.rs sur @select_toolsets n'est PAS fait ici : il casse cinq fixtures de compat (contextes sans toolsets) et rend `ToolsetMissing` inatteignable sans `ignored()` — renvoyé à ./compat.sdd #10/#11 (constat consigné là-bas).

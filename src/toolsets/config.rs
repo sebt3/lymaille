@@ -18,7 +18,7 @@ use super::{
     ContextStore, ContextType, ContextTypeStore, ResolvedContext, Toolset, ToolsetContext, ToolsetStore,
     ToolsetsError, delegable_subagents,
 };
-use crate::agents::{AgentDefinition, AgentStore};
+use crate::agents::{AgentDefinition, AgentKind, AgentStore};
 use crate::clock::Clock;
 use crate::scratchpad::{ScratchpadResult, ScriptErrorClass};
 use crate::session::{
@@ -678,14 +678,21 @@ fn context_of<C: ContextStore>(contexts: &C, name: &str) -> Result<ToolsetContex
         .ok_or_else(|| Box::new(runtime_error(format!("unknown toolset context `{name}`"))))
 }
 
-/// The active toolsets that the agent names, in the order of its definition. A name that is not available is left out:
-/// the check reports it as a gap.
+/// The active toolsets of the session, in the order of the list of the context, restricted by the definition when it
+/// carries a restriction. A name that is not available is left out: the check reports it as a gap.
 fn toolsets_of<T: ToolsetStore>(
     toolsets: &T,
     agent: &AgentDefinition,
+    context: &ToolsetContext,
 ) -> Result<Vec<Toolset>, Box<EvalAltResult>> {
+    let names = match agent.kind() {
+        AgentKind::Sub => agent
+            .toolset_restriction()
+            .unwrap_or_else(|| context.toolset_names()),
+        AgentKind::Work | AgentKind::Config => context.toolset_names(),
+    };
     let mut found = Vec::new();
-    for name in agent.toolsets() {
+    for name in names {
         if let Some(toolset) = await_store(toolsets.get_active(name))? {
             found.push(toolset);
         }
@@ -732,7 +739,7 @@ fn gaps_of<T: ToolsetStore, Y: ContextTypeStore>(
     agent: &AgentDefinition,
     context: &ToolsetContext,
 ) -> Result<Vec<String>, Box<EvalAltResult>> {
-    let found = toolsets_of(toolsets, agent)?;
+    let found = toolsets_of(toolsets, agent, context)?;
     let failure = Mutex::new(None);
     let lookup = |name: &str| find_type(types, name, &failure);
     let outcome = delegable_subagents(agent, &[], &found, context, &lookup);
@@ -814,8 +821,8 @@ where
         "resolve",
         move |agent: ImmutableString, context: ImmutableString| -> Result<Dynamic, Box<EvalAltResult>> {
             let definition = agent_of(agents.as_ref(), agent.as_str())?;
-            let found = toolsets_of(toolsets.as_ref(), &definition)?;
             let stored = context_of(contexts.as_ref(), context.as_str())?;
+            let found = toolsets_of(toolsets.as_ref(), &definition, &stored)?;
             let resolved = stored
                 .resolve(defaults_of(&found))
                 .map_err(|error| Box::new(runtime_error(error.to_string())))?;
@@ -1003,7 +1010,7 @@ mod tests {
     use vynil_core::Semver;
 
     use super::*;
-    use crate::agents::{AgentKind, InMemoryCatalog};
+    use crate::agents::InMemoryCatalog;
     use crate::clock::{ManualClock, Timestamp};
     use crate::scratchpad::{
         Presentation, RunEnv, RunOutcome, RunStatus, Scratchpad, ScratchpadEngine, ScratchpadLimits,
@@ -1140,10 +1147,9 @@ mod tests {
         Semver::parse(text).expect("a sample version must parse")
     }
 
-    /// A work agent that lists the toolsets `toolsets`.
-    fn work_agent(id: &str, toolsets: &[&str]) -> AgentDefinition {
+    /// A work agent. Its toolsets are the ones the session's context lists.
+    fn work_agent(id: &str) -> AgentDefinition {
         AgentDefinition::new(id.to_owned(), AgentKind::Work, "You are a work agent.".to_owned())
-            .with_toolsets(toolsets.iter().map(|name| (*name).to_owned()).collect())
     }
 
     /// The `cluster` type of version 1.0.0: the parameter `namespace` and the role `k8s`, both required.
@@ -1194,12 +1200,15 @@ mod tests {
             .await
             .expect("the draft is stored");
         host.toolsets.activate("grafana").expect("the draft is activated");
+        let context = empty_context("prod")
+            .with_toolset("grafana".to_owned())
+            .expect("the toolset is listed");
         host.contexts
-            .put_context(&empty_context("prod"))
+            .put_context(&context)
             .await
             .expect("the context is stored");
         host.agents
-            .put_agent(&work_agent("work-agent", &["grafana"]))
+            .put_agent(&work_agent("work-agent"))
             .await
             .expect("the agent is stored");
         let outcome = run(&host.pad(), r#"contexts::check("work-agent", "prod")"#).await;
@@ -1242,13 +1251,15 @@ mod tests {
             .with_parameter("namespace".to_owned(), json!("apps"))
             .expect("the parameter is added")
             .with_role("k8s".to_owned(), "prod-k8s".to_owned())
-            .expect("the role is bound");
+            .expect("the role is bound")
+            .with_toolset("grafana".to_owned())
+            .expect("the toolset is listed");
         host.contexts
             .put_context(&context)
             .await
             .expect("the context is stored");
         host.agents
-            .put_agent(&work_agent("work-agent", &["grafana"]))
+            .put_agent(&work_agent("work-agent"))
             .await
             .expect("the agent is stored");
         let outcome = run(&host.pad(), r#"contexts::check("work-agent", "prod")"#).await;
@@ -1269,12 +1280,15 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn check_reports_an_unavailable_toolset() {
         let host = Host::new(Index::listing(Vec::new()), InMemoryStore::new());
+        let context = empty_context("prod")
+            .with_toolset("absent".to_owned())
+            .expect("the unavailable toolset is listed");
         host.contexts
-            .put_context(&empty_context("prod"))
+            .put_context(&context)
             .await
             .expect("the context is stored");
         host.agents
-            .put_agent(&work_agent("work-agent", &["absent"]))
+            .put_agent(&work_agent("work-agent"))
             .await
             .expect("the agent is stored");
         let outcome = run(&host.pad(), r#"contexts::check("work-agent", "prod")"#).await;
@@ -1324,7 +1338,7 @@ mod tests {
             .await
             .expect("the context is stored");
         host.agents
-            .put_agent(&work_agent("work-agent", &[]))
+            .put_agent(&work_agent("work-agent"))
             .await
             .expect("the agent is stored");
         let outcome = run(&host.pad(), r#"contexts::resolve("work-agent", "ctx")"#).await;
@@ -1377,13 +1391,15 @@ mod tests {
         host.toolsets.activate("grafana").expect("the draft is activated");
         let context = empty_context("ctx")
             .with_parameter("region".to_owned(), json!("us-east"))
-            .expect("a parameter");
+            .expect("a parameter")
+            .with_toolset("grafana".to_owned())
+            .expect("the toolset is listed");
         host.contexts
             .put_context(&context)
             .await
             .expect("the context is stored");
         host.agents
-            .put_agent(&work_agent("work-agent", &["grafana"]))
+            .put_agent(&work_agent("work-agent"))
             .await
             .expect("the agent is stored");
         let outcome = run(&host.pad(), r#"contexts::resolve("work-agent", "ctx")"#).await;
@@ -1441,7 +1457,7 @@ mod tests {
             .await
             .expect("the context is stored");
         host.agents
-            .put_agent(&work_agent("work-agent", &[]))
+            .put_agent(&work_agent("work-agent"))
             .await
             .expect("the agent is stored");
         let slot = Arc::clone(&host.slot);
@@ -1482,7 +1498,7 @@ mod tests {
             .await
             .expect("the context is stored");
         host.agents
-            .put_agent(&work_agent("work-agent", &[]))
+            .put_agent(&work_agent("work-agent"))
             .await
             .expect("the agent is stored");
         let sink = Arc::clone(&host.sink);
@@ -1578,7 +1594,7 @@ mod tests {
             .await
             .expect("the context is stored");
         host.agents
-            .put_agent(&work_agent("work-agent", &[]))
+            .put_agent(&work_agent("work-agent"))
             .await
             .expect("the agent is stored");
         let sink = Arc::new(SlotWatchingSink {
@@ -1629,7 +1645,7 @@ mod tests {
             .await
             .expect("the context is stored");
         host.agents
-            .put_agent(&work_agent("work-agent", &[]))
+            .put_agent(&work_agent("work-agent"))
             .await
             .expect("the agent is stored");
         let sink = Arc::clone(&host.sink);
@@ -1676,7 +1692,7 @@ mod tests {
     async fn refused_openings_emit_nothing() {
         let host = Host::new(Index::listing(Vec::new()), InMemoryStore::new());
         host.agents
-            .put_agent(&work_agent("work-agent", &[]))
+            .put_agent(&work_agent("work-agent"))
             .await
             .expect("the agent is stored");
         let sink = Arc::clone(&host.sink);
@@ -1710,7 +1726,7 @@ mod tests {
     async fn open_context_names_the_unknown_context() {
         let host = Host::new(Index::listing(Vec::new()), InMemoryStore::new());
         host.agents
-            .put_agent(&work_agent("work-agent", &[]))
+            .put_agent(&work_agent("work-agent"))
             .await
             .expect("the agent is stored");
         let slot = Arc::clone(&host.slot);
@@ -2657,12 +2673,16 @@ mod tests {
         let stores = empty_stores();
         stores
             .agents
-            .put_agent(&work_agent("work-agent", &[]))
+            .put_agent(&work_agent("work-agent"))
             .await
             .expect("the agent is stored");
         stores
             .contexts
-            .put_context(&empty_context("prod"))
+            .put_context(
+                &empty_context("prod")
+                    .with_toolset("grafana".to_owned())
+                    .expect("the toolset is listed"),
+            )
             .await
             .expect("the context is stored");
         let slot = Arc::new(InspectionSlot::new());
@@ -2754,7 +2774,7 @@ mod tests {
         let stores = empty_stores();
         stores
             .agents
-            .put_agent(&work_agent("work-agent", &["grafana"]))
+            .put_agent(&work_agent("work-agent"))
             .await
             .expect("the agent is stored");
         stores
@@ -2768,7 +2788,11 @@ mod tests {
             .expect("the draft is activated");
         stores
             .contexts
-            .put_context(&empty_context("prod"))
+            .put_context(
+                &empty_context("prod")
+                    .with_toolset("grafana".to_owned())
+                    .expect("the toolset is listed"),
+            )
             .await
             .expect("the context is stored");
         let stores = ConfigStores::new(stores.agents, stores.toolsets, BrokenTypes, stores.contexts);
@@ -2804,7 +2828,7 @@ mod tests {
         let stores = empty_stores();
         stores
             .agents
-            .put_agent(&work_agent("work-agent", &["grafana"]))
+            .put_agent(&work_agent("work-agent"))
             .await
             .expect("the agent is stored");
         stores
@@ -2823,7 +2847,11 @@ mod tests {
             .expect("the draft is activated");
         stores
             .contexts
-            .put_context(&empty_context("prod"))
+            .put_context(
+                &empty_context("prod")
+                    .with_toolset("grafana".to_owned())
+                    .expect("the toolset is listed"),
+            )
             .await
             .expect("the context is stored");
         let pad = build_pad(

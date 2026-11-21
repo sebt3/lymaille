@@ -262,7 +262,6 @@ mod tests {
             AgentKind::Work,
             "You are the assistant.".to_owned(),
         )
-        .with_toolsets(vec!["k8s".to_owned()])
     }
 
     fn profile(name: &str) -> ModelProfile {

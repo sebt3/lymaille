@@ -10,6 +10,7 @@ mod context_type;
 mod contract;
 mod error;
 mod native;
+mod selection;
 mod skill;
 mod start;
 mod store;
@@ -21,8 +22,7 @@ mod version;
 pub use assemble::{Assembled, assemble};
 pub use builder::{DraftEntry, DraftKind, DraftStore, builder_registration};
 pub use compat::{
-    Delegation, Gap, GapKind, RemovalReason, RemovedSubagent, check_context, check_creation_rule,
-    check_session_module_rule, delegable_subagents,
+    Delegation, Gap, GapKind, RemovalReason, RemovedSubagent, check_context, delegable_subagents,
 };
 pub use config::{
     ConfigEnv, ConfigStores, InspectionSlot, ScriptError, SessionFilter, SessionIndex, SessionSummary,
@@ -32,6 +32,7 @@ pub use context_type::{ContextType, FlatContextType, RoleSpec};
 pub use contract::{Contract, VersionWarning, check_declared_version, extract_contract};
 pub use error::{ToolsetsError, ToolsetsResult};
 pub use native::{SkillTool, builtin_rhai_pad_skill, session_context_registration, skill_definition};
+pub use selection::{Selection, select_toolsets};
 pub use skill::Skill;
 pub use start::{StartTarget, resolve_start};
 pub use store::{ContextStore, ContextTypeStore, InMemoryToolsets, ToolsetStore};

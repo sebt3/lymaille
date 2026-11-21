@@ -1,8 +1,10 @@
 //! Agent definition, work, configuration or sub-agent: identifier, kind, templated system prompt, optional model
-//! profile name and parameters, reachable modules and toolsets, sandbox limits, context strategy, delegable sub-agents
-//! or output schema, and its
+//! profile name and parameters, optional toolset restriction of a sub-agent, sandbox limits, context strategy,
+//! delegable sub-agents or output schema, and its
 //! fingerprint (`agent-sessions/agents#FR-1`, `FR-2`, `FR-8`, `FR-9`, `agent-sessions/session#FR-2`). The definition carries no
-//! Memory right: access to a Memory level is decided by the toolsets (`agent-sessions/modules#FR-4`).
+//! right: no module list, no Memory right and, for a work or configuration agent, no toolset list: the toolsets are the
+//! ones the `ToolsetContext` of the session lists (`agent-sessions#BR-2`, `agent-sessions#DEC-16`); the definition of a
+//! sub-agent may only restrict that list.
 
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -22,7 +24,8 @@ pub enum AgentKind {
     /// A work agent, chosen at the start of a session. It may delegate to sub-agents and returns no output schema.
     #[serde(alias = "main")]
     Work,
-    /// A configuration agent. It does not delegate, has no MCP module and receives the modules reserved to configuration.
+    /// A configuration agent. It does not delegate and receives no MCP module: the toolsets of a configuration session
+    /// are those its `ToolsetContext` lists.
     Config,
     /// A sub-agent, delegated to by a work agent. It returns an output schema and does not delegate.
     Sub,
@@ -133,10 +136,10 @@ pub struct AgentDefinition {
     profile: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     sampling: Option<SamplingParams>,
-    #[serde(default)]
-    modules: Vec<String>,
-    #[serde(default)]
-    toolsets: Vec<String>,
+    /// The toolsets a sub-agent restricts itself to, a subset of the list of the `ToolsetContext`. Absent, the sub-agent
+    /// sees the whole list; empty, none. Never written for a work or configuration agent, which carry none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    toolsets: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     sandbox: Option<SandboxLimits>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -149,7 +152,7 @@ pub struct AgentDefinition {
 
 impl AgentDefinition {
     /// Builds a definition from its identifier, its nature and its system prompt template. It carries no profile: call
-    /// [`AgentDefinition::with_profile`] to set one. Every capability starts empty.
+    /// [`AgentDefinition::with_profile`] to set one. It restricts no toolset.
     #[must_use]
     pub const fn new(id: String, kind: AgentKind, prompt: String) -> Self {
         Self {
@@ -158,8 +161,7 @@ impl AgentDefinition {
             prompt,
             profile: None,
             sampling: None,
-            modules: Vec::new(),
-            toolsets: Vec::new(),
+            toolsets: None,
             sandbox: None,
             context_strategy: None,
             delegable: Vec::new(),
@@ -182,17 +184,13 @@ impl AgentDefinition {
         self
     }
 
-    /// Sets the modules reachable by the agent.
+    /// Sets the toolsets a sub-agent restricts itself to. The restriction is reserved to the nature `Sub`: it must be a
+    /// subset of the list of the `ToolsetContext` (`agent-sessions#BR-2`, `agent-sessions#DEC-16`). Absent, the sub-agent
+    /// sees the whole list of the context; empty, no toolset. A work or configuration agent that carries one is refused
+    /// by [`AgentDefinition::validate`]. A restriction holding a duplicate is refused too.
     #[must_use]
-    pub fn with_modules(mut self, modules: Vec<String>) -> Self {
-        self.modules = modules;
-        self
-    }
-
-    /// Sets the toolsets reachable by the agent.
-    #[must_use]
-    pub fn with_toolsets(mut self, toolsets: Vec<String>) -> Self {
-        self.toolsets = toolsets;
+    pub fn with_toolset_restriction(mut self, toolsets: Vec<String>) -> Self {
+        self.toolsets = Some(toolsets);
         self
     }
 
@@ -256,16 +254,11 @@ impl AgentDefinition {
         self.sampling.as_ref()
     }
 
-    /// Returns the modules reachable by the agent.
+    /// Returns the toolsets a sub-agent restricts itself to, or `None` when the definition carries no restriction: an
+    /// absent restriction means the whole list of the `ToolsetContext`, an empty one no toolset.
     #[must_use]
-    pub fn modules(&self) -> &[String] {
-        &self.modules
-    }
-
-    /// Returns the toolsets reachable by the agent.
-    #[must_use]
-    pub fn toolsets(&self) -> &[String] {
-        &self.toolsets
+    pub fn toolset_restriction(&self) -> Option<&[String]> {
+        self.toolsets.as_deref()
     }
 
     /// Returns the sandbox limits, if any.
@@ -299,9 +292,9 @@ impl AgentDefinition {
     /// Returns [`AgentsError::InvalidDefinition`] when the identifier or the prompt is empty, when a profile is set but
     /// its name is empty or blank (an absent profile is accepted), when a
     /// sub-agent or a configuration agent declares delegable sub-agents, when a work or configuration agent declares an
-    /// output schema, when a configuration module is presented to a work agent or a sub-agent, when a sub-agent is
-    /// presented the `session` module, when a delegable sub-agent
-    /// is the agent itself or is listed twice, when the toolsets or the modules contain a duplicate, or when a memory
+    /// output schema, when a work or configuration agent carries a toolset restriction (their toolsets come from the
+    /// `ToolsetContext`, `agent-sessions#DEC-16`), when a delegable sub-agent
+    /// is the agent itself or is listed twice, when a toolset restriction contains a duplicate, or when a memory
     /// limit of the sandbox is zero.
     pub fn validate(&self) -> AgentsResult<()> {
         if self.id.trim().is_empty() {
@@ -323,33 +316,23 @@ impl AgentDefinition {
         if matches!(self.kind, AgentKind::Work | AgentKind::Config) && self.output_schema.is_some() {
             return self.refuse("a work or configuration agent cannot declare an output schema");
         }
+        if matches!(self.kind, AgentKind::Work | AgentKind::Config) && self.toolsets.is_some() {
+            return self.refuse(
+                "the toolsets of a work or configuration agent are the ones the ToolsetContext lists: only a sub-agent may restrict them",
+            );
+        }
         if self.delegable.contains(&self.id) {
             return self.refuse("a delegable sub-agent is the agent itself");
         }
         if has_duplicate(&self.delegable) {
             return self.refuse("duplicate delegable sub-agent");
         }
-        if has_duplicate(&self.toolsets) {
+        if self
+            .toolsets
+            .as_ref()
+            .is_some_and(|toolsets| has_duplicate(toolsets))
+        {
             return self.refuse("duplicate toolset");
-        }
-        if has_duplicate(&self.modules) {
-            return self.refuse("duplicate module");
-        }
-        if matches!(self.kind, AgentKind::Work | AgentKind::Sub)
-            && self
-                .modules
-                .iter()
-                .any(|module| CONFIGURATION_MODULES.contains(&module.as_str()))
-        {
-            return self.refuse("a configuration module is presented to a work agent or a sub-agent");
-        }
-        if self.kind == AgentKind::Sub
-            && self
-                .modules
-                .iter()
-                .any(|module| module.as_str() == SESSION_MODULE_NAME)
-        {
-            return self.refuse(SESSION_MODULE_RULE);
         }
         if self
             .sandbox
@@ -445,18 +428,6 @@ impl AgentDefinition {
         })
     }
 }
-
-/// Modules reserved to a configuration agent: a work agent and a sub-agent never receive them (`agent-sessions#BR-8`).
-const CONFIGURATION_MODULES: [&str; 4] = ["toolset_creator", "inspect", "contexts", "sessions"];
-
-/// The name the host registers the `session` scratchpad module under: the module carries no name of its own
-/// (`../modules/session_module.sdd`, decision of the 2026-11-01).
-const SESSION_MODULE_NAME: &str = "session";
-
-/// Rule of the `session` module: a work agent or a configuration agent may hold it, a sub-agent never does. The message
-/// names the rule; its copy in `toolsets` is pinned by tests on both sides, so they stay in step.
-const SESSION_MODULE_RULE: &str = "the session module (title and flag for analysis) is reserved to a work or \
-     configuration agent: a sub-agent cannot hold it";
 
 /// Tells whether two entries of `items` are equal.
 fn has_duplicate(items: &[String]) -> bool {
@@ -616,8 +587,6 @@ mod tests {
         AgentDefinition::new(id.to_owned(), kind, prompt.to_owned())
             .with_profile(profile.to_owned())
             .with_sampling(sampling)
-            .with_modules(vec!["files".to_owned(), "git".to_owned()])
-            .with_toolsets(vec!["k8s".to_owned(), "logs".to_owned()])
             .with_sandbox(sandbox(30, 10_000, Some(1_000), Some(500), Some(200)))
             .with_context_strategy("summarize".to_owned())
             .with_delegable(vec!["reviewer".to_owned()])
@@ -932,26 +901,23 @@ mod tests {
             back.fingerprint(),
             "the fingerprint must survive a JSON round trip"
         );
-        let changed = definition.with_toolsets(vec!["k8s".to_owned(), "other".to_owned()]);
+        let changed = definition.with_toolset_restriction(vec!["k8s".to_owned(), "other".to_owned()]);
         assert_ne!(
             first,
             changed.fingerprint(),
-            "changing one toolset must change the fingerprint"
+            "restricting to other toolsets must change the fingerprint"
         );
         assert_eq!(first.len(), 16, "the fingerprint has 16 hexadecimal digits");
     }
 
+    // Scenario: aucune capacité par défaut
     #[test]
     fn no_capability_by_default() {
         let text = r#"{"id":"main","kind":"main","prompt":"hello","profile":"strix-qwen"}"#;
         let definition: AgentDefinition = serde_json::from_str(text).expect("the required fields are enough");
         assert!(
-            definition.modules().is_empty(),
-            "no module is presented by default"
-        );
-        assert!(
-            definition.toolsets().is_empty(),
-            "no toolset is presented by default"
+            definition.toolset_restriction().is_none(),
+            "the toolset restriction is absent: a sub-agent without one sees the whole list of the context"
         );
     }
 
@@ -993,8 +959,8 @@ mod tests {
     fn self_delegation_and_duplicates_refused() {
         let self_delegation = main_agent().with_delegable(vec!["main".to_owned()]);
         assert_invalid(&self_delegation, "a main agent listing itself as delegable");
-        let duplicated = main_agent().with_toolsets(vec!["k8s".to_owned(), "k8s".to_owned()]);
-        assert_invalid(&duplicated, "a definition with a duplicated toolset");
+        let duplicated = sub_agent().with_toolset_restriction(vec!["k8s".to_owned(), "k8s".to_owned()]);
+        assert_invalid(&duplicated, "a restriction listing the same toolset twice");
     }
 
     #[test]
@@ -1044,12 +1010,8 @@ mod tests {
             ),
             ("sampling", full_main_agent().with_sampling(sampling)),
             (
-                "modules",
-                full_main_agent().with_modules(vec!["files".to_owned()]),
-            ),
-            (
-                "toolsets",
-                full_main_agent().with_toolsets(vec!["k8s".to_owned()]),
+                "toolset restriction",
+                full_main_agent().with_toolset_restriction(vec!["k8s".to_owned()]),
             ),
             (
                 "sandbox script timeout",
@@ -1168,12 +1130,6 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_module_refused() {
-        let duplicated = main_agent().with_modules(vec!["files".to_owned(), "files".to_owned()]);
-        assert_invalid(&duplicated, "a definition with a duplicated module");
-    }
-
-    #[test]
     fn memory_limits_absent_by_default() {
         let limits = SandboxLimits::new(Duration::from_secs(30), 10_000);
         assert_eq!(
@@ -1273,10 +1229,10 @@ mod tests {
         );
     }
 
-    /// Builds a definition of nature `kind` that presents the modules `modules`.
-    fn with_modules_of(kind: AgentKind, modules: &[&str]) -> AgentDefinition {
+    /// Builds a definition of nature `kind` that lists the toolsets `names` as its restriction.
+    fn with_restriction_of(kind: AgentKind, names: &[&str]) -> AgentDefinition {
         AgentDefinition::new("agent".to_owned(), kind, "You are an agent.".to_owned())
-            .with_modules(modules.iter().map(|module| (*module).to_owned()).collect())
+            .with_toolset_restriction(names.iter().map(|name| (*name).to_owned()).collect())
     }
 
     // Scenario: un agent de configuration ne peut pas déléguer
@@ -1291,85 +1247,73 @@ mod tests {
         assert_invalid(&config, "a configuration agent declaring a delegable sub-agent");
     }
 
-    // Scenario: un agent de configuration avec ses modules est valide
+    // Scenario: une restriction de toolsets sur un agent de travail est refusée
     #[test]
-    fn configuration_agent_with_its_modules_is_valid() {
-        let config = with_modules_of(
-            AgentKind::Config,
-            &["toolset_creator", "inspect", "contexts", "sessions"],
-        );
-        let valid = config.validate();
-        assert!(
-            matches!(valid, Ok(())),
-            "a configuration agent presented the configuration modules must be valid, got {valid:?}"
-        );
-    }
-
-    // Scenario: un agent de travail ne peut pas recevoir le module de création
-    #[test]
-    fn work_agent_cannot_receive_the_creation_module() {
-        let work = with_modules_of(AgentKind::Work, &["toolset_creator"]);
-        assert_invalid(&work, "a work agent presented the toolset-creation module");
-    }
-
-    // Scenario: un sous-agent ne peut pas recevoir un module d'inspection
-    #[test]
-    fn sub_agent_cannot_receive_an_inspection_module() {
-        let sub = with_modules_of(AgentKind::Sub, &["inspect"]);
-        assert_invalid(&sub, "a sub-agent presented the inspection module");
-    }
-
-    // Scenario: module session refusé pour un sous-agent, au chargement, par la raison qui nomme la règle
-    #[test]
-    fn sub_agent_cannot_hold_the_session_module() {
-        let sub = with_modules_of(AgentKind::Sub, &["session"]);
-        let error = sub
-            .validate()
-            .expect_err("a sub-agent presented the session module must be refused");
-        match error {
-            AgentsError::InvalidDefinition { id, reason } => {
-                assert_eq!(id, "agent", "the refusal names the definition");
-                assert_eq!(
-                    reason,
-                    "the session module (title and flag for analysis) is reserved to a work or \
-     configuration agent: a sub-agent cannot hold it",
-                    "the refusal names the rule"
-                );
-            }
-            error @ (AgentsError::UnknownProfile { .. }
-            | AgentsError::UnknownProvider { .. }
-            | AgentsError::ContextSizeUnknown { .. }
-            | AgentsError::Store(_)) => {
-                panic!("a sub-agent is refused with InvalidDefinition, got {error:?}")
-            }
-        }
-    }
-
-    // Scenario: le module session est gardé pour Work et Config
-    #[test]
-    fn work_and_config_agents_may_hold_the_session_module() {
+    fn toolset_restriction_on_a_work_or_configuration_agent_is_refused() {
         for kind in [AgentKind::Work, AgentKind::Config] {
-            let definition = with_modules_of(kind, &["session"]);
-            assert!(
-                matches!(definition.validate(), Ok(())),
-                "a {kind:?} agent presented the session module must be valid, got {definition:?}"
-            );
+            let definition = with_restriction_of(kind, &["k8s"]);
+            match definition.validate() {
+                Err(error @ AgentsError::InvalidDefinition { reason, .. }) => {
+                    assert!(
+                        reason.contains("ToolsetContext"),
+                        "the reason sends back to the ToolsetContext, got {error:?}"
+                    );
+                }
+                other => panic!(
+                    "a restriction on a {kind:?} agent must fail with InvalidDefinition, got {other:?}"
+                ),
+            }
         }
     }
 
-    /// Every reserved module refused for a work agent and for a sub-agent: the list is that of the definition.
+    // Scenario: la restriction d'un sous-agent fait l'aller-retour et compte dans l'empreinte
     #[test]
-    fn every_reserved_module_refused_for_work_and_sub_agents() {
-        for module in ["toolset_creator", "inspect", "contexts", "sessions"] {
-            assert_invalid(
-                &with_modules_of(AgentKind::Work, &[module]),
-                &format!("a work agent presented `{module}`"),
-            );
-            assert_invalid(
-                &with_modules_of(AgentKind::Sub, &[module]),
-                &format!("a sub-agent presented `{module}`"),
-            );
+    fn sub_agent_restriction_round_trips_and_counts_in_the_fingerprint() {
+        let restricted = sub_agent().with_toolset_restriction(vec!["a".to_owned(), "b".to_owned()]);
+        let unrestricted = sub_agent();
+        let emptied = sub_agent().with_toolset_restriction(Vec::new());
+        for definition in [&restricted, &unrestricted, &emptied] {
+            let json = serde_json::to_string(definition).expect("a definition serializes");
+            let back: AgentDefinition = serde_json::from_str(&json).expect("the JSON reads back");
+            assert_eq!(back, *definition, "the JSON round trip is identical: {json}");
+            let text = definition.to_text().expect("a definition is written");
+            let read = AgentDefinition::from_text(&text).expect("the text reads back");
+            assert_eq!(read, *definition, "the text round trip is identical: {text}");
         }
+        assert_eq!(
+            restricted.toolset_restriction(),
+            Some(["a".to_owned(), "b".to_owned()].as_slice()),
+            "the restriction is held as given"
+        );
+        let json = serde_json::to_string(&restricted).expect("a definition serializes");
+        let read: AgentDefinition = serde_json::from_str(&json).expect("the JSON reads back");
+        assert_eq!(
+            read.toolset_restriction(),
+            Some(["a".to_owned(), "b".to_owned()].as_slice()),
+            "the restriction is read back identically through JSON: {json}"
+        );
+        assert_eq!(
+            emptied.toolset_restriction(),
+            Some(Vec::new().as_slice()),
+            "an empty restriction is held"
+        );
+        let empty_json = serde_json::to_string(&emptied).expect("a definition serializes");
+        let empty_read: AgentDefinition = serde_json::from_str(&empty_json).expect("the JSON reads back");
+        assert_eq!(
+            empty_read.toolset_restriction(),
+            Some(Vec::new().as_slice()),
+            "an empty restriction stays distinct from an absence: {empty_json}"
+        );
+        assert!(
+            unrestricted.toolset_restriction().is_none(),
+            "an absence reads as an absence"
+        );
+        let first = restricted.fingerprint();
+        let second = unrestricted.fingerprint();
+        let third = emptied.fingerprint();
+        assert_ne!(first, second, "a restriction changes the fingerprint");
+        assert_ne!(second, third, "an empty restriction differs from an absence");
+        assert_ne!(first, third, "the three definitions differ by their restriction");
     }
 
     #[test]
@@ -1401,19 +1345,17 @@ mod tests {
     }
 
     /// The fingerprint of the reference definition (`full_main_agent` fields) under the profile `strix-qwen`, and its
-    /// JSON and text, taken with the code before the profile became optional (task #21): they must not move once the
-    /// field is `Option<String>`.
-    const REFERENCE_FINGERPRINT: &str = "f101c4eca7528257";
-    const REFERENCE_JSON: &str = r#"{"id":"main","kind":"work","prompt":"You are the assistant of {{project}}.","profile":"strix-qwen","sampling":{"temperature":0.7,"top_p":0.9,"top_k":40,"extra":{"seed":42}},"modules":["files","git"],"toolsets":["k8s","logs"],"sandbox":{"script_timeout":{"secs":30,"nanos":0},"render_cap_chars":10000,"max_string_bytes":1000,"max_array_len":500,"max_map_len":200},"context_strategy":"summarize","delegable":["reviewer"]}"#;
+    /// JSON and text, taken with the code before the profile became optional (task #21). The frozen values were retaken
+    /// for 0.4.0: `modules` is gone and a work agent no longer lists toolsets (breaking change, `agent-sessions#DEC-16`,
+    /// definition.sdd #25); the profile rule itself is unchanged.
+    const REFERENCE_FINGERPRINT: &str = "65bd848d9a77bde9";
+    const REFERENCE_JSON: &str = r#"{"id":"main","kind":"work","prompt":"You are the assistant of {{project}}.","profile":"strix-qwen","sampling":{"temperature":0.7,"top_p":0.9,"top_k":40,"extra":{"seed":42}},"sandbox":{"script_timeout":{"secs":30,"nanos":0},"render_cap_chars":10000,"max_string_bytes":1000,"max_array_len":500,"max_map_len":200},"context_strategy":"summarize","delegable":["reviewer"]}"#;
     const REFERENCE_TEXT: &str = "---
 context_strategy: summarize
 delegable:
 - reviewer
 id: main
 kind: work
-modules:
-- files
-- git
 profile: strix-qwen
 sampling:
   extra:
@@ -1429,9 +1371,6 @@ sandbox:
   script_timeout:
     nanos: 0
     secs: 30
-toolsets:
-- k8s
-- logs
 ---
 You are the assistant of {{project}}.";
 
@@ -1445,8 +1384,6 @@ You are the assistant of {{project}}.";
             .with_extra("seed".to_owned(), serde_json::json!(42));
         AgentDefinition::new("main".to_owned(), AgentKind::Work, PROMPT.to_owned())
             .with_sampling(sampling)
-            .with_modules(vec!["files".to_owned(), "git".to_owned()])
-            .with_toolsets(vec!["k8s".to_owned(), "logs".to_owned()])
             .with_sandbox(sandbox(30, 10_000, Some(1_000), Some(500), Some(200)))
             .with_context_strategy("summarize".to_owned())
             .with_delegable(vec!["reviewer".to_owned()])
@@ -1472,7 +1409,7 @@ You are the assistant of {{project}}.";
     #[test]
     fn definition_without_profile_serializes_without_the_key() {
         let definition = AgentDefinition::new("main".to_owned(), AgentKind::Work, PROMPT.to_owned())
-            .with_toolsets(vec!["k8s".to_owned()]);
+            .with_toolset_restriction(vec!["k8s".to_owned()]);
         let json = serde_json::to_string(&definition).expect("a definition serializes");
         assert!(
             !json.contains("profile"),

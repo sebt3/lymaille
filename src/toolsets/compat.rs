@@ -1,7 +1,8 @@
 //! Structural compatibility of a toolset context with the context types that the toolsets of an agent require, and the
 //! rules of agent definitions that concern toolsets (`agent-sessions/toolsets#FR-4`, `FR-8`, `agent-sessions#DEC-11`,
-//! `AC-3`, `AC-4`, `AC-8`). The check is structural: the context satisfies a type when the flattened required parameters
-//! are present and the required roles are bound, with no declaration of conformity.
+//! `AC-3`, `AC-4`, `AC-8`, `agent-sessions#DEC-16`). The check is structural: the context satisfies a type when the flattened required parameters
+//! are present and the required roles are bound, with no declaration of conformity. The rules of the native modules
+//! (toolset creation, `session`) are no longer here: the nature of the session decides them.
 
 use std::fmt;
 
@@ -13,14 +14,19 @@ use super::{
     ContextType, ResolvedContext, Toolset, ToolsetContext, ToolsetsError, ToolsetsResult, TypeRequirement,
 };
 
-/// Rule of the toolset-creation module: it is reserved to a configuration agent, whatever the other definitions say.
-const CREATION_NATURE_RULE: &str = "the toolset-creation module is reserved to a configuration agent (nature Config): \
-     a work agent or a sub-agent cannot hold it";
-
-/// Rule of the `session` module: a work or configuration agent may hold it, a sub-agent never does. The copy in `agents`
-/// is pinned by tests on both sides, so the two texts stay in step.
-const SESSION_MODULE_RULE: &str = "the session module (title and flag for analysis) is reserved to a work or \
-     configuration agent: a sub-agent cannot hold it";
+/// Returns the toolset names a definition sees: the list of the context, restricted for a sub-agent that carries a
+/// restriction. A work or configuration agent sees the whole list (`agent-sessions#BR-2`, `agent-sessions#DEC-16`).
+fn listed_toolsets<'names>(
+    definition: &'names AgentDefinition,
+    context: &'names ToolsetContext,
+) -> &'names [String] {
+    match definition.kind() {
+        AgentKind::Sub => definition
+            .toolset_restriction()
+            .unwrap_or_else(|| context.toolset_names()),
+        AgentKind::Work | AgentKind::Config => context.toolset_names(),
+    }
+}
 
 /// One gap between what a toolset requires and what the toolset context provides.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -309,9 +315,11 @@ fn select<'table>(names: &[String], table: &'table [Toolset]) -> (Vec<&'table To
 
 /// Computes the delegable sub-agents of a work agent (`Work`) in this session, in the order of its definition.
 ///
-/// A work agent whose toolsets have gaps against `context` fails with [`ToolsetsError::Incompatible`]. A sub-agent with a
-/// gap, a toolset that is not available, or no definition in `subagents`, is removed from the list without error and
-/// reported in [`Delegation::removed`] with its [`RemovalReason`].
+/// A work agent whose toolsets have gaps against `context` fails with [`ToolsetsError::Incompatible`]. Its toolsets are
+/// the ones `context` lists (`agent-sessions#DEC-16`). A sub-agent with a gap, a toolset that is not available, or no
+/// definition in `subagents`, is removed from the list without error and
+/// reported in [`Delegation::removed`] with its [`RemovalReason`]. A sub-agent sees the list of the context, restricted
+/// by its definition when it carries a restriction.
 ///
 /// # Errors
 ///
@@ -326,7 +334,7 @@ pub fn delegable_subagents<F>(
 where
     F: Fn(&str) -> Option<ContextType>,
 {
-    let (found, missing) = select(main.toolsets(), toolsets);
+    let (found, missing) = select(listed_toolsets(main, context), toolsets);
     let mut issues: Vec<Gap> = missing
         .into_iter()
         .map(|name| Gap {
@@ -353,7 +361,7 @@ where
             removed.push(removal(RemovalReason::DefinitionMissing));
             continue;
         };
-        let (sub_found, sub_missing) = select(sub.toolsets(), toolsets);
+        let (sub_found, sub_missing) = select(listed_toolsets(sub, context), toolsets);
         if !sub_missing.is_empty() {
             removed.push(removal(RemovalReason::ToolsetMissing));
             continue;
@@ -368,61 +376,6 @@ where
     Ok(Delegation { kept, removed })
 }
 
-/// Checks the rule of the toolset-creation module: only a configuration agent may hold it, among `agent` and `subagents`.
-///
-/// # Errors
-///
-/// Returns [`ToolsetsError::Forbidden`] when the agent, or one of `subagents`, is presented `creation_module` against the
-/// rule. The message names the rule.
-pub fn check_creation_rule(
-    agent: &AgentDefinition,
-    subagents: &[AgentDefinition],
-    creation_module: &str,
-) -> ToolsetsResult<()> {
-    let presents = |definition: &AgentDefinition| {
-        definition
-            .modules()
-            .iter()
-            .any(|module| module.as_str() == creation_module)
-    };
-    // Only a configuration agent may hold the module: the nature decides, not the delegation.
-    let refused =
-        |definition: &AgentDefinition| presents(definition) && definition.kind() != AgentKind::Config;
-    if refused(agent) || subagents.iter().any(refused) {
-        return Err(ToolsetsError::Forbidden {
-            rule: CREATION_NATURE_RULE,
-        });
-    }
-    Ok(())
-}
-
-/// Checks the rule of the `session` module: it is presented to a work agent or a configuration agent, never to a sub-agent,
-/// among `agent` and `subagents`.
-///
-/// # Errors
-///
-/// Returns [`ToolsetsError::Forbidden`] when `agent`, or one of `subagents`, is a sub-agent presented `session_module`. The
-/// message names the rule.
-pub fn check_session_module_rule(
-    agent: &AgentDefinition,
-    subagents: &[AgentDefinition],
-    session_module: &str,
-) -> ToolsetsResult<()> {
-    let refused = |definition: &AgentDefinition| {
-        definition.kind() == AgentKind::Sub
-            && definition
-                .modules()
-                .iter()
-                .any(|module| module.as_str() == session_module)
-    };
-    if refused(agent) || subagents.iter().any(refused) {
-        return Err(ToolsetsError::Forbidden {
-            rule: SESSION_MODULE_RULE,
-        });
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -430,17 +383,12 @@ mod tests {
     use serde_json::{Value, json};
     use vynil_core::Semver;
 
-    use super::{
-        Gap, GapKind, RemovalReason, check_context, check_creation_rule, check_session_module_rule,
-        delegable_subagents,
-    };
+    use super::{Gap, GapKind, RemovalReason, check_context, delegable_subagents};
     use crate::agents::{AgentDefinition, AgentKind};
     use crate::toolsets::{
         ContextLevel, ContextType, RoleDecl, RoleSpec, Toolset, ToolsetContext, ToolsetsError,
         TypeRequirement,
     };
-
-    const CREATION_MODULE: &str = "toolset_authoring";
 
     fn version(text: &str) -> Semver {
         Semver::parse(text).expect("a sample version must parse")
@@ -485,6 +433,17 @@ mod tests {
         ToolsetContext::new("empty".to_owned(), ContextLevel::Session).expect("the context builds")
     }
 
+    /// A context that lists the toolsets `names` and holds nothing else.
+    fn context_listing(names: &[&str]) -> ToolsetContext {
+        let mut built = empty_context();
+        for name in names {
+            built = built
+                .with_toolset((*name).to_owned())
+                .expect("the toolset name is listed");
+        }
+        built
+    }
+
     fn grafana_requiring_cluster(text: &str) -> Toolset {
         Toolset::new(
             "grafana".to_owned(),
@@ -508,7 +467,7 @@ mod tests {
 
     fn sub_agent(id: &str, toolsets: Vec<String>) -> AgentDefinition {
         AgentDefinition::new(id.to_owned(), AgentKind::Sub, "You are a sub-agent.".to_owned())
-            .with_toolsets(toolsets)
+            .with_toolset_restriction(toolsets)
     }
 
     // Scenario: un sous-agent retiré est signalé avec sa raison
@@ -614,10 +573,10 @@ mod tests {
     // Scenario: l'agent principal ne démarre pas
     #[test]
     fn main_agent_fails_to_start_with_every_gap() {
-        let main = main_agent(Vec::new()).with_toolsets(vec!["grafana".to_owned()]);
+        let main = main_agent(Vec::new());
         let toolsets = vec![grafana_requiring_cluster("cluster@1.0")];
         let lookup = lookup_of(vec![("cluster", cluster("1.0.0"))]);
-        let result = delegable_subagents(&main, &[], &toolsets, &empty_context(), &lookup);
+        let result = delegable_subagents(&main, &[], &toolsets, &context_listing(&["grafana"]), &lookup);
         match result {
             Err(ToolsetsError::Incompatible { issues }) => {
                 assert_eq!(
@@ -717,111 +676,6 @@ mod tests {
         );
     }
 
-    // Scenario: module de création refusé pour un sous-agent
-    #[test]
-    fn creation_module_refused_for_a_sub_agent() {
-        let sub = AgentDefinition::new(
-            "author".to_owned(),
-            AgentKind::Sub,
-            "You write toolsets.".to_owned(),
-        )
-        .with_modules(vec![CREATION_MODULE.to_owned()]);
-        let result = check_creation_rule(&sub, &[], CREATION_MODULE);
-        match result {
-            Err(ToolsetsError::Forbidden { rule }) => {
-                assert!(
-                    rule.contains("configuration agent"),
-                    "the message names the nature rule: {rule}"
-                );
-            }
-            other => panic!("expected Forbidden, got {other:?}"),
-        }
-    }
-
-    // Scenario: module de création refusé pour un agent de travail
-    // Obsolete wording (compat.sdd, 2026-10-29): the rule now depends on the nature `Work`, not on delegation. This
-    // test keeps the Scenario's setup (a work agent with delegable sub-agents) and checks the nature rule.
-    #[test]
-    fn creation_module_refused_with_delegable_sub_agents() {
-        let main = main_agent(vec!["worker".to_owned()]).with_modules(vec![CREATION_MODULE.to_owned()]);
-        let subagents = vec![sub_agent("worker", Vec::new())];
-        let result = check_creation_rule(&main, &subagents, CREATION_MODULE);
-        match result {
-            Err(ToolsetsError::Forbidden { rule }) => {
-                assert!(
-                    rule.contains("configuration agent"),
-                    "the message names the nature rule: {rule}"
-                );
-            }
-            other => panic!("expected Forbidden, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn creation_module_refused_for_a_work_agent_without_delegation() {
-        let work = main_agent(Vec::new()).with_modules(vec![CREATION_MODULE.to_owned()]);
-        let result = check_creation_rule(&work, &[], CREATION_MODULE);
-        assert!(
-            matches!(&result, Err(ToolsetsError::Forbidden { rule }) if rule.contains("configuration agent")),
-            "a work agent is refused by its nature, delegation aside, got {result:?}"
-        );
-    }
-
-    #[test]
-    fn creation_module_presented_to_a_configuration_agent_is_accepted() {
-        let config = AgentDefinition::new(
-            "setup".to_owned(),
-            AgentKind::Config,
-            "You create toolsets.".to_owned(),
-        )
-        .with_modules(vec![CREATION_MODULE.to_owned()]);
-        assert!(
-            check_creation_rule(&config, &[], CREATION_MODULE).is_ok(),
-            "a configuration agent may hold the creation module"
-        );
-    }
-
-    // Scenario: module session refusé pour un sous-agent
-    #[test]
-    fn session_module_refused_for_a_sub_agent() {
-        let sub = sub_agent("worker", Vec::new()).with_modules(vec!["session".to_owned()]);
-        match check_session_module_rule(&sub, &[], "session") {
-            Err(ToolsetsError::Forbidden { rule }) => assert_eq!(
-                rule,
-                "the session module (title and flag for analysis) is reserved to a work or \
-     configuration agent: a sub-agent cannot hold it",
-                "the message names the rule: {rule}"
-            ),
-            other => panic!("expected Forbidden, got {other:?}"),
-        }
-        let main = main_agent(vec!["worker".to_owned()]);
-        let listed = check_session_module_rule(&main, &[sub], "session");
-        assert!(
-            matches!(&listed, Err(ToolsetsError::Forbidden { rule }) if rule.contains("sub-agent")),
-            "a listed sub-agent holding the module is refused too, got {listed:?}"
-        );
-    }
-
-    #[test]
-    fn session_module_presented_to_work_and_configuration_agents_is_accepted() {
-        let work = main_agent(Vec::new()).with_modules(vec!["session".to_owned()]);
-        assert!(
-            check_session_module_rule(&work, &[], "session").is_ok(),
-            "a work agent may hold the session module"
-        );
-        let config = AgentDefinition::new("setup".to_owned(), AgentKind::Config, "You configure.".to_owned())
-            .with_modules(vec!["session".to_owned()]);
-        assert!(
-            check_session_module_rule(&config, &[], "session").is_ok(),
-            "a configuration agent may hold the session module"
-        );
-        let plain_sub = sub_agent("worker", Vec::new());
-        assert!(
-            check_session_module_rule(&work, &[plain_sub], "session").is_ok(),
-            "a sub-agent without the module is accepted"
-        );
-    }
-
     #[test]
     fn delegable_order_follows_the_definition() {
         let main = main_agent(vec!["beta".to_owned(), "alpha".to_owned()]);
@@ -851,11 +705,17 @@ mod tests {
 
     #[test]
     fn main_agent_with_unknown_toolset_fails() {
-        let main = main_agent(Vec::new()).with_toolsets(vec!["missing".to_owned()]);
-        let result = delegable_subagents(&main, &[], &[], &empty_context(), &lookup_of(Vec::new()));
+        let main = main_agent(Vec::new());
+        let result = delegable_subagents(
+            &main,
+            &[],
+            &[],
+            &context_listing(&["missing"]),
+            &lookup_of(Vec::new()),
+        );
         assert!(
             matches!(result, Err(ToolsetsError::Incompatible { .. })),
-            "a main agent naming an unavailable toolset fails to start"
+            "a session listing an unavailable toolset fails to start"
         );
     }
 
@@ -891,23 +751,6 @@ mod tests {
             Some(&RemovalReason::Incompatible(Vec::new())),
             "the removal is signalled as incompatible, without gaps"
         );
-    }
-
-    // Task #4 of compat.sdd: the table of sub-agents is checked even when the main agent does not hold the module.
-    #[test]
-    fn creation_module_refused_when_a_listed_sub_agent_holds_it() {
-        let main = main_agent(vec!["worker".to_owned()]);
-        let subagents = vec![sub_agent("worker", Vec::new()).with_modules(vec![CREATION_MODULE.to_owned()])];
-        let result = check_creation_rule(&main, &subagents, CREATION_MODULE);
-        match result {
-            Err(ToolsetsError::Forbidden { rule }) => {
-                assert!(
-                    rule.contains("configuration agent"),
-                    "the message names the nature rule: {rule}"
-                );
-            }
-            other => panic!("expected Forbidden, got {other:?}"),
-        }
     }
 
     // Task #4 of compat.sdd: an optional role of the toolset itself, left unbound, is not a gap.

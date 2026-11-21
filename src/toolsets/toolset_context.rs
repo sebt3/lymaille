@@ -1,4 +1,5 @@
-//! Toolset context: a flat set of named parameters and role bindings, with a section of overrides per toolset. It is a
+//! Toolset context: a flat set of named parameters and role bindings, with a section of overrides per toolset, and the
+//! explicit list of the toolsets of the session (`agent-sessions/toolsets#FR-3`, `FR-25`). It is a
 //! named entity of one level, and it holds no secret: parameters and references only (`agent-sessions/toolsets#FR-3`,
 //! `FR-5`, `FR-17`, `agent-sessions#DEC-5`, `agent-sessions#CON-3`).
 
@@ -66,6 +67,12 @@ pub struct ToolsetContext {
     parameters: BTreeMap<String, Value>,
     roles: BTreeMap<String, String>,
     overrides: BTreeMap<String, BTreeMap<String, Value>>,
+    /// Names of the toolsets of the session, in the order of the additions, without duplicates. It is the only place
+    /// where the right of access to toolsets lives (`agent-sessions#BR-2`, `agent-sessions/toolsets#FR-3`, `FR-25`).
+    /// An empty list is not written; a stored context without the key reads with an empty list. Under `ts-rs`, the
+    /// `skip_serializing_if` makes the declared field optional (`serde-compat`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    toolsets: Vec<String>,
     #[serde(skip)]
     detector: SharedDetector,
 }
@@ -79,20 +86,23 @@ impl fmt::Debug for ToolsetContext {
             .field("parameters", &self.parameters)
             .field("roles", &self.roles)
             .field("overrides", &self.overrides)
+            .field("toolsets", &self.toolsets)
             .finish_non_exhaustive()
     }
 }
 
 /// Values resolved for a session.
 ///
-/// It holds the parameters of each toolset, the parameters shared with the rest of the context, and the sorted names of
-/// the bound roles. The references of the roles do not appear here.
+/// It holds the parameters of each toolset, the parameters shared with the rest of the context, the sorted names of
+/// the bound roles, and the names of the toolsets of the session, in the order of the context. The references of the
+/// roles do not appear here.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[non_exhaustive]
 pub struct ResolvedContext {
     toolsets: BTreeMap<String, BTreeMap<String, Value>>,
     shared: BTreeMap<String, Value>,
     roles: Vec<String>,
+    session_toolsets: Vec<String>,
 }
 
 impl ResolvedContext {
@@ -112,6 +122,13 @@ impl ResolvedContext {
     #[must_use]
     pub fn roles(&self) -> &[String] {
         &self.roles
+    }
+
+    /// Returns the names of the toolsets of the session, a copy of the context list in its order. A context without a
+    /// toolset presents no toolset (`agent-sessions#DEC-16`).
+    #[must_use]
+    pub fn toolset_names(&self) -> &[String] {
+        &self.session_toolsets
     }
 }
 
@@ -134,6 +151,7 @@ impl ToolsetContext {
             parameters: BTreeMap::new(),
             roles: BTreeMap::new(),
             overrides: BTreeMap::new(),
+            toolsets: Vec::new(),
             detector: SharedDetector::default(),
         })
     }
@@ -227,6 +245,32 @@ impl ToolsetContext {
         Ok(self)
     }
 
+    /// Lists one toolset of the session. The list is ordered by addition and holds no duplicate: a name already listed
+    /// is kept as is. An empty or blank name is refused, like the other fields of the context. This list is the only
+    /// place where the right of access to toolsets lives (`agent-sessions#BR-2`, `agent-sessions/toolsets#FR-3`, `FR-25`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ToolsetsError::InvalidContext`] when the name is empty or blank.
+    pub fn with_toolset(mut self, name: String) -> ToolsetsResult<Self> {
+        if name.trim().is_empty() {
+            return Err(ToolsetsError::InvalidContext {
+                name,
+                reason: "the toolset name is empty",
+            });
+        }
+        if !self.toolsets.contains(&name) {
+            self.toolsets.push(name);
+        }
+        Ok(self)
+    }
+
+    /// Returns the names of the toolsets of the session, in the order of the additions.
+    #[must_use]
+    pub fn toolset_names(&self) -> &[String] {
+        &self.toolsets
+    }
+
     /// Resolves the context against the default values declared by the toolsets of the agent, given as
     /// `(toolset, parameter, value)`. For a toolset parameter, the override wins over the context parameter, which wins
     /// over the default. Two defaults for the same toolset and parameter are refused, never settled silently.
@@ -281,6 +325,7 @@ impl ToolsetContext {
             toolsets,
             shared: self.parameters.clone(),
             roles,
+            session_toolsets: self.toolsets.clone(),
         })
     }
 }
@@ -294,6 +339,8 @@ impl<'de> Deserialize<'de> for ToolsetContext {
             parameters: BTreeMap<String, Value>,
             roles: BTreeMap<String, String>,
             overrides: BTreeMap<String, BTreeMap<String, Value>>,
+            #[serde(default)]
+            toolsets: Vec<String>,
         }
         let record = Record::deserialize(deserializer)?;
         let fail = |error: ToolsetsError| <D::Error as serde::de::Error>::custom(error);
@@ -308,6 +355,9 @@ impl<'de> Deserialize<'de> for ToolsetContext {
             for (name, value) in entries {
                 built = built.with_override(toolset.clone(), name, value).map_err(fail)?;
             }
+        }
+        for name in record.toolsets {
+            built = built.with_toolset(name).map_err(fail)?;
         }
         Ok(built)
     }
@@ -608,10 +658,17 @@ mod tests {
             .with_role("k8s".to_owned(), "prod-k8s".to_owned())
             .expect("a role binding is accepted")
             .with_override("tool".to_owned(), "limit".to_owned(), json!(9))
-            .expect("a plain override is accepted");
+            .expect("a plain override is accepted")
+            .with_toolset("tool".to_owned())
+            .expect("a toolset name is accepted");
         let text = serde_json::to_string(&context).expect("a context serializes");
         let back: ToolsetContext = serde_json::from_str(&text).expect("a context deserializes");
         assert_eq!(back, context, "the round trip must be identical");
+        assert_eq!(
+            back.toolset_names(),
+            ["tool".to_owned()].as_slice(),
+            "a non-empty list is written and read back"
+        );
     }
 
     // Scenario: le niveau partagé fait l'aller-retour et l'ancien nom est relu
@@ -644,6 +701,83 @@ mod tests {
         assert!(
             serde_json::from_str::<ToolsetContext>(text).is_err(),
             "a secret-like value must fail to deserialize"
+        );
+    }
+
+    // Scenario: la liste de toolsets garde l'ordre et refuse les doublons
+    #[test]
+    fn toolset_list_keeps_the_order_and_refuses_duplicates() {
+        let context = ToolsetContext::new("ctx".to_owned(), ContextLevel::Session)
+            .expect("a named context builds")
+            .with_toolset("b".to_owned())
+            .expect("a first toolset name is accepted")
+            .with_toolset("a".to_owned())
+            .expect("a second toolset name is accepted")
+            .with_toolset("b".to_owned())
+            .expect("an already listed name is not an error");
+        assert_eq!(
+            context.toolset_names(),
+            ["b".to_owned(), "a".to_owned()].as_slice(),
+            "the list keeps the order of the additions, without the duplicate"
+        );
+        let resolved = context
+            .resolve(Vec::<(String, String, Value)>::new())
+            .expect("the context resolves");
+        assert_eq!(
+            resolved.toolset_names(),
+            ["b".to_owned(), "a".to_owned()].as_slice(),
+            "the resolved copy carries the same list"
+        );
+    }
+
+    // Scenario: un nom de toolset vide est refusé
+    #[test]
+    fn empty_or_blank_toolset_name_refused() {
+        let base =
+            || ToolsetContext::new("ctx".to_owned(), ContextLevel::User).expect("a named context builds");
+        for name in ["", "  "] {
+            match base().with_toolset(name.to_owned()) {
+                Err(ToolsetsError::InvalidContext { .. }) => {}
+                other => panic!("the toolset name {name:?} must fail with InvalidContext, got {other:?}"),
+            }
+        }
+        assert!(
+            base()
+                .with_toolset(" ".to_owned())
+                .err()
+                .is_some_and(|_error| base().toolset_names().is_empty()),
+            "the refused names leave the list empty"
+        );
+    }
+
+    // Scenario: un ancien contexte sans liste se relit
+    #[test]
+    fn old_context_without_the_toolsets_key_reads_empty_and_writes_none() {
+        let old: ToolsetContext = serde_json::from_str(
+            r#"{"name":"ctx","level":"shared","parameters":{},"roles":{},"overrides":{}}"#,
+        )
+        .expect("a 0.3 context without the `toolsets` key reads");
+        assert!(
+            old.toolset_names().is_empty(),
+            "an old context reads with an empty toolset list"
+        );
+        let text = serde_json::to_string(&old).expect("the context is rewritten");
+        assert!(
+            !text.contains(r#""toolsets""#),
+            "an empty list is not written: {text}"
+        );
+    }
+
+    // Must: a context without toolsets presents none to the session (agent-sessions#DEC-16).
+    #[test]
+    fn a_context_without_toolsets_presents_none() {
+        let context = ToolsetContext::new("ctx".to_owned(), ContextLevel::Session).expect("a context builds");
+        let resolved = context
+            .resolve(Vec::<(String, String, Value)>::new())
+            .expect("the context resolves");
+        assert!(
+            resolved.toolset_names().is_empty(),
+            "a context without a toolset presents no toolset"
         );
     }
 
