@@ -387,9 +387,11 @@ mod tests {
     }
 
     fn full_definition() -> AgentDefinition {
-        // The complete value fills every optional field and every collection, as the contract requires. The
-        // Work/output-schema combination is refused by `AgentDefinition::validate`, a domain rule of the agents spec:
-        // this contract is about the serialized shape versus the declaration, and the public constructor accepts it.
+        // The complete value fills every optional field and every collection, as the contract requires. Since 0.4.0
+        // `toolsets` is the sub-agent restriction only: `AgentDefinition::validate` refuses it on a work agent, like an
+        // output schema. This contract compares the serialized shape with the declaration and never calls `validate`;
+        // the public constructors accept the pair, and the restriction must be set here for the complete value to write
+        // the key the declaration marks optional. `modules` is gone: no field and no key carry it.
         AgentDefinition::new(
             "main".to_owned(),
             AgentKind::Work,
@@ -494,6 +496,9 @@ mod tests {
             .expect("the role is accepted")
             .with_override("k8s".to_owned(), "namespace".to_owned(), json!("other"))
             .expect("the override is accepted")
+            // Since 0.4.0 the context lists the toolsets of the session: the complete value writes the `toolsets`
+            // key, which the declaration marks optional through `skip_serializing_if` (serde-compat, no `ts(optional)`
+            // on a non-`Option` field); the minimal value below omits it.
             .with_toolset("k8s".to_owned())
             .expect("the toolset is listed")
     }

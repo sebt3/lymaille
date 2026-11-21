@@ -10,8 +10,9 @@ use crate::session::{SessionEdits, normalize_title};
 
 /// Builds the Rhai module `session`: `set_title(text)`, `title()` and `flag(reason)`.
 ///
-/// `edits` receives the requests; `current_title` reads the title the session has now, supplied by the host. Present it to a
-/// work or configuration agent as the module `session`; a sub-agent never receives it.
+/// `edits` receives the requests; `current_title` reads the title the session has now, supplied by the host. The module is
+/// given by the nature of the session: to a work or configuration agent, and to a sub-agent that has a parent session;
+/// never to a sub-agent of an automated process, which has no title to give. No definition check: the nature decides.
 #[must_use]
 pub fn session_module<T>(edits: Arc<SessionEdits>, current_title: T) -> Module
 where

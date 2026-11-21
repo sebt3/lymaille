@@ -325,6 +325,9 @@ where
 {
     let selection = select_toolsets(context, main);
     let (found, missing) = select(selection.names(), toolsets);
+    // The main agent is a work agent and carries no toolset restriction, so `select_toolsets` always gives it the whole
+    // context list with an empty `ignored()`: chaining the ignored names is reachable only defensively, keeping the
+    // report total should a future kind restrict here. See compat.sdd task #12.
     let mut issues: Vec<Gap> = missing
         .into_iter()
         .chain(selection.ignored().iter().cloned())
@@ -360,6 +363,9 @@ where
         }
         match gaps_of(context, sub_found, lookup) {
             Ok(gaps) if gaps.is_empty() => kept.push(id.clone()),
+            // A sub-agent's selection is a subset of the main's, so any gap computed here was computed for the main
+            // above and would already have failed its start: this arm is reachable only defensively. See compat.sdd
+            // task #12.
             Ok(gaps) => removed.push(removal(RemovalReason::Incompatible(gaps))),
             // Fail closed: an inconsistent type removes the sub-agent, with no gap to name. Reachable only
             // defensively: the main's check above flattens the same types and propagates the error first.
