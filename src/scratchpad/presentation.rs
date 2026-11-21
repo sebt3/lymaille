@@ -1,23 +1,10 @@
-//! Abstract description of what the agent definition presents to the scratchpad: the host group of the `vynil-core` common
-//! core, Rhai modules, toolsets and skills. The scratchpad receives it from the host or from the toolsets domain; it knows
-//! neither toolsets nor MCP modules. Nothing is presented by default.
+//! Abstract description of what the `ToolsetContext` presents to the scratchpad: the toolsets' Rhai modules, their
+//! descriptions, and the skills. The scratchpad receives it from the `toolsets` domain; it knows neither toolsets nor MCP
+//! modules. Nothing is presented by default.
 
-use std::collections::BTreeSet;
 use std::fmt;
 
 use rhai::{Module, Shared};
-
-/// Group of functions of the `vynil-core` common core that the definition may present. The core group (`sleep`, encodings,
-/// text, glob, YAML, time) is always registered and is not listed here.
-///
-/// `Host` covers `get_env` and `log_*`, and the file functions and `shell_run` when this build of `lymaille` compiles the
-/// `vynil-core` features `fs` and `shell`: those two cannot be presented apart from `Host` (`vynil-core` 0.9.1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-#[non_exhaustive]
-pub enum CoreGroup {
-    /// Host functions: `get_env`, `log_*`, and, under the `fs` and `shell` features, the files and `shell_run`.
-    Host,
-}
 
 /// A Rhai module presented to the scratchpad, callable as `name::function()`. Its content is code and bindings that the
 /// host has already resolved; its `Debug` shows only the name.
@@ -131,12 +118,11 @@ impl PresentedSkill {
     }
 }
 
-/// What the agent definition presents. Built by the constructors and the `with_*` methods; each addition is refused when its
+/// What the `ToolsetContext` presents. Built by the constructors and the `with_*` methods; each addition is refused when its
 /// name is already taken by another item of the same category.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct Presentation {
-    groups: BTreeSet<CoreGroup>,
     modules: Vec<PresentedModule>,
     toolsets: Vec<PresentedToolset>,
     skills: Vec<PresentedSkill>,
@@ -149,16 +135,10 @@ impl Presentation {
         Self::default()
     }
 
-    /// Presents a group of the common core. Adding a group twice has no further effect.
+    /// Presents a module. Returns nothing when another presented module has the same name. Only the `toolsets` domain
+    /// (`assemble`) produces presented modules; the host adds none.
     #[must_use]
-    pub fn with_group(mut self, group: CoreGroup) -> Self {
-        let _added = self.groups.insert(group);
-        self
-    }
-
-    /// Presents a module. Returns nothing when another presented module has the same name.
-    #[must_use]
-    pub fn with_module(mut self, module: PresentedModule) -> Option<Self> {
+    pub(crate) fn with_module(mut self, module: PresentedModule) -> Option<Self> {
         if self.modules.iter().any(|presented| presented.name == module.name) {
             return None;
         }
@@ -188,12 +168,6 @@ impl Presentation {
         }
         self.skills.push(skill);
         Some(self)
-    }
-
-    /// Presented groups, in order.
-    #[must_use]
-    pub const fn groups(&self) -> &BTreeSet<CoreGroup> {
-        &self.groups
     }
 
     /// Presented modules, in the order they were added.
@@ -236,7 +210,7 @@ fn is_blank(text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{CoreGroup, Presentation, PresentedModule, PresentedSkill, PresentedToolset};
+    use super::{Presentation, PresentedModule, PresentedSkill, PresentedToolset};
     use rhai::{Module, Shared};
 
     fn module_named(name: &str) -> PresentedModule {
@@ -246,19 +220,9 @@ mod tests {
     #[test]
     fn nothing_is_presented_by_default() {
         let presentation = Presentation::new();
-        assert!(presentation.groups().is_empty(), "no group");
         assert!(presentation.modules().is_empty(), "no module");
         assert!(presentation.toolsets().is_empty(), "no toolset");
         assert!(presentation.skills().is_empty(), "no skill");
-    }
-
-    #[test]
-    fn groups_accumulate_in_a_set() {
-        let presentation = Presentation::new()
-            .with_group(CoreGroup::Host)
-            .with_group(CoreGroup::Host);
-        let groups: Vec<CoreGroup> = presentation.groups().iter().copied().collect();
-        assert_eq!(groups, vec![CoreGroup::Host], "a set: Host once");
     }
 
     #[test]
@@ -310,7 +274,6 @@ mod tests {
     #[test]
     fn presentation_types_are_send_and_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<CoreGroup>();
         assert_send_sync::<PresentedModule>();
         assert_send_sync::<PresentedToolset>();
         assert_send_sync::<PresentedSkill>();

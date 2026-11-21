@@ -144,7 +144,8 @@ Scenario: les modules des fonctions visibles sont nommés une seule fois chacun
   Then `grafana` est suggéré une seule fois
 
 Tasks:
-  [ ] #9 Lot 0.4.0-B : aucune suggestion ne nomme une capacité brute : vérifier par test qu'un module de ../scratchpad/capabilities.sdd (par exemple `host::get_env`) n'entre jamais dans le @CandidateSet de la session ; adapter le Scenario du groupe Host (déjà réécrit en spec).
+  [x] #9 Lot 0.4.0-B : aucune suggestion ne nomme une capacité brute : vérifier par test qu'un module de ../scratchpad/capabilities.sdd (par exemple `host::get_env`) n'entre jamais dans le @CandidateSet de la session ; adapter le Scenario du groupe Host (déjà réécrit en spec).
+      Validé le 2026-11-21 (validator) : test unitaire + end-to-end sur moteur réel (`suggest_end_to_end_never_suggests_a_raw_capability`), variantes cfg `fs`/`shell`.
   [x] #6 @CandidateSet::with_usage et le rendu `call it as:` à distance zéro (lot 0.2-B2, `agent-sessions/scratchpad#FR-14`, `sebt3/lymaille#3`) : trois Scenarios ci-dessus, tests puis implémentation. Dépend de ./introspect.sdd #12.
       Validé le 2026-11-04 (validator : `scripts/check` complet vert ; les 5 mutants des lignes du diff tués ; le test « l'usage d'une fonction proche n'est pas montré » est un garde-fou vert d'emblée mais porteur — il tue le mutant de distance ; le filtrage à la construction s'observe par comparaison structurelle, seule observation possible, et il tue son mutant). API posée, non branchée : l'appel vient dans ./run.sdd #18. Deux mutants équivalents préexistants de `levenshtein` (`unwrap_or` inatteignable) consignés, hors diff, non régressifs.
   [x] #1 Tests puis implémentation, vérifié le 2026-10-30.

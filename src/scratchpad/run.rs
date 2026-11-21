@@ -1041,7 +1041,7 @@ mod tests {
     use crate::clock::{ManualClock, Timestamp};
     use crate::scratchpad::UnpersistableReason;
     use crate::scratchpad::{
-        CoreGroup, Presentation, PresentedModule, ScratchpadEngine, ScratchpadLimits, ScriptErrorClass,
+        Presentation, PresentedModule, ScratchpadEngine, ScratchpadLimits, ScriptErrorClass,
     };
     use crate::session::{CancelHandle, Redactor, TaggedValue};
 
@@ -1877,10 +1877,7 @@ mod tests {
         let Some(reader) = PresentedModule::new("reader", Shared::new(reader)) else {
             panic!("a valid module name");
         };
-        let Some(presentation) = Presentation::new()
-            .with_group(CoreGroup::Host)
-            .with_module(reader)
-        else {
+        let Some(presentation) = Presentation::new().with_module(reader) else {
             panic!("the module is accepted");
         };
         let pad = Scratchpad::new(engine_with(presentation, ScratchpadLimits::new(), |_engine| {}));
@@ -2208,7 +2205,7 @@ mod tests {
         let Some(api) = PresentedModule::new("api", Shared::new(module)) else {
             panic!("a valid module name");
         };
-        let Some(presentation) = Presentation::new().with_group(CoreGroup::Host).with_module(api) else {
+        let Some(presentation) = Presentation::new().with_module(api) else {
             panic!("the module is accepted");
         };
         let pad = Scratchpad::new(engine_with(presentation, ScratchpadLimits::new(), |_engine| {}));

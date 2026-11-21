@@ -651,10 +651,11 @@ mod tests {
         );
     }
 
-    // Scenario: aucun groupe fs ni shell (le groupe Host est absent aussi)
+    // Scenario: aucun groupe fs ni shell (le groupe Host n'existe plus : le moteur de session n'enregistre
+    // aucune capacité brute, présentée ou non)
     #[tokio::test]
-    async fn host_group_is_absent_even_when_the_target_presents_it() {
-        let target = Presentation::new().with_group(crate::scratchpad::CoreGroup::Host);
+    async fn host_group_is_absent_from_the_inspection_pad() {
+        let target = Presentation::new();
         let Ok(pad) = InspectionPad::new(&base(), &target, &[grafana()], InspectionTarget::Definition) else {
             panic!("the inspection pad must build");
         };

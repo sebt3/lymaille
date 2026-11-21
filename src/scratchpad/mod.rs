@@ -35,7 +35,7 @@ pub use persist::{
     FunctionSource, PersistWarning, Recompiled, RestoreWarning, ScopeSnapshot, UnpersistableReason,
     extract_function_sources, recompile_functions, restore_scope, snapshot_scope, to_dynamic, to_tagged,
 };
-pub use presentation::{CoreGroup, Presentation, PresentedModule, PresentedSkill, PresentedToolset};
+pub use presentation::{Presentation, PresentedModule, PresentedSkill, PresentedToolset};
 pub use render::{Rendered, full_text, render_value, truncate_middle};
 pub use run::{PadSnapshot, Restored, RunEnv, RunOutcome, RunStatus, Scratchpad};
 pub use suggest::{CandidateSet, nearest, suggest_for};

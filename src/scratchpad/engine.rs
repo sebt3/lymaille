@@ -1,4 +1,4 @@
-//! Engine of a session: the Rhai engine built from the common core of `vynil-core`, restricted to the presented groups and
+//! Engine of a session: the Rhai engine built from the common core of `vynil-core`, extended only with the presented
 //! modules, with the scratchpad's own functions, its limits, a closed module resolver, a captured output and the
 //! cancellation hook. See `src/scratchpad/engine.sdd`.
 
@@ -19,7 +19,7 @@ use super::error::ScratchpadResult;
 use super::format::register_format_functions;
 use super::introspect::{Catalog, IntrospectionSource, Origin, register_introspection, registration_step};
 use super::limits::ScratchpadLimits;
-use super::presentation::{CoreGroup, Presentation};
+use super::presentation::Presentation;
 use crate::session::CancelHandle;
 
 /// A registration closure of the host or of a trusted domain, run once when the engine is built.
@@ -36,10 +36,10 @@ pub struct ScratchpadEngine {
     introspection: Arc<IntrospectionSource>,
 }
 
-/// Builder of a [`ScratchpadEngine`]. Its groups and modules come from the presentation.
+/// Builder of a [`ScratchpadEngine`]. Its modules come from the presentation.
 ///
-/// The registration closures run once, at build time, after the core group, the format functions and the presented group
-/// and modules.
+/// The registration closures run once, at build time, after the core group, the format functions and the presented
+/// modules.
 #[non_exhaustive]
 pub struct EngineBuilder {
     limits: ScratchpadLimits,
@@ -121,9 +121,8 @@ impl EngineBuilder {
         self
     }
 
-    /// Builds the engine: the base engine, the core group, the format functions, the presented host group, the presented
-    /// modules, the registration closures, then the catalog and the introspection, and last the unlisted registration
-    /// closures.
+    /// Builds the engine: the base engine, the core group, the format functions, the presented modules, the registration
+    /// closures, then the catalog and the introspection, and last the unlisted registration closures.
     ///
     /// # Errors
     ///
@@ -148,17 +147,6 @@ impl EngineBuilder {
             register_format_functions(engine);
             Ok(())
         })?);
-        for group in presentation.groups() {
-            let group = *group;
-            steps.push(registration_step(
-                &mut engine,
-                Origin::Core(group_name(group).to_owned()),
-                |engine| {
-                    register_group(engine, group);
-                    Ok(())
-                },
-            )?);
-        }
         for module in presentation.modules() {
             let _module = engine.register_static_module(module.name(), Shared::clone(module.module()));
         }
@@ -230,23 +218,9 @@ fn register_standard_packages(engine: &mut RhaiEngine) {
     let _more_strings = engine.register_global_module(MoreStringPackage::new().as_shared_module());
 }
 
-/// Name of the core group in the catalog, as `modules()` shows it. The core group is always registered.
+/// Name of the core group in the catalog, as `modules()` shows it. The core group is always registered, and it is the
+/// only `vynil-core` group the session engine registers: raw capabilities live in `capabilities.rs`, never here.
 const CORE_GROUP: &str = "core";
-
-/// Registers the presented host group of the common core: `get_env`, `log_*`, and the files and `shell_run` when this build
-/// compiles the `vynil-core` features `fs` and `shell`.
-fn register_group(engine: &mut RhaiEngine, group: CoreGroup) {
-    match group {
-        CoreGroup::Host => vynil_core::engine::host_rhai_register(engine),
-    }
-}
-
-/// Name of a presented group in the catalog, as `modules()` shows it.
-const fn group_name(group: CoreGroup) -> &'static str {
-    match group {
-        CoreGroup::Host => "host",
-    }
-}
 
 thread_local! {
     /// The run open on this thread, if any: its cancellation handle and what its `print` and `debug` calls captured.
@@ -374,7 +348,7 @@ mod tests {
 
     use super::{EngineBuilder, RunScope, ScratchpadEngine, base_engine, captured_output};
     use crate::scratchpad::{
-        CandidateSet, CoreGroup, Origin, Presentation, PresentedModule, ScratchpadError, ScratchpadLimits,
+        CandidateSet, Origin, Presentation, PresentedModule, ScratchpadError, ScratchpadLimits,
         ScriptErrorClass, suggest_for,
     };
     use crate::session::CancelHandle;
@@ -458,7 +432,8 @@ mod tests {
         CandidateSet::new(functions, modules, Vec::new())
     }
 
-    // Scenario: seul le groupe core par défaut (le groupe `core` est enregistré d’office, sans présentation)
+    // Scenario: seul le groupe core par défaut (le groupe `core` est enregistré d'office, sans présentation ;
+    // `get_env`, `file_read` et `shell_run` sont des fonctions introuvables dans le moteur de session)
     #[test]
     fn only_the_core_group_by_default() {
         let engine = built(Presentation::new());
@@ -488,8 +463,10 @@ mod tests {
         }
     }
 
+    // Scenario: les capacités brutes sont absentes de l'introspection (`get_env`, `file_read`, `shell_run`
+    // ne figurent au catalogue, sans les features comme avec)
     #[test]
-    fn not_presented_groups_are_absent_from_introspection() {
+    fn raw_capabilities_are_absent_from_introspection() {
         let engine = built(Presentation::new());
         let global = column(&engine, "functions(\"global\")", "path");
         assert!(
@@ -531,57 +508,59 @@ mod tests {
         assert!(!doc.is_empty(), "documented: {row:?}");
     }
 
+    // Scenario: seul le groupe core par défaut, même si le processus lie `vynil-core` avec les fonctionnalités
+    // `fs` et `shell` : le moteur de session n'enregistre aucune capacité brute, quelles que soient les features.
+    #[cfg(all(feature = "fs", feature = "shell"))]
     #[test]
-    fn presented_host_group_is_registered() {
-        let engine = built(Presentation::new().with_group(CoreGroup::Host));
+    fn only_the_core_group_by_default_even_with_the_fs_and_shell_features() {
+        let engine = built(Presentation::new());
         assert_eq!(
-            value(&engine, "get_env(\"LYMAILLE_ABSENT\")")
+            value(&engine, "json_encode(#{a: 1})")
                 .into_string()
                 .ok()
                 .as_deref(),
-            Some(""),
-            "the presented host group answers"
+            Some("{\"a\":1}"),
+            "the core group answers"
         );
         assert_eq!(
             value(&engine, "sleep(0)").as_unit().ok(),
             Some(()),
-            "sleep is in core, always there"
+            "sleep is in the core group, always present"
         );
-        if !cfg!(feature = "fs") {
+        for script in [
+            "get_env(\"PATH\")",
+            "file_read(\"/etc/hostname\")",
+            "shell_run(\"ls\")",
+        ] {
             assert_eq!(
-                failure(&engine, "file_read(\"/etc/hostname\")").class(),
+                failure(&engine, script).class(),
                 ScriptErrorClass::NotFound,
-                "file_read is absent without the vynil-core fs feature"
-            );
-        }
-        if !cfg!(feature = "shell") {
-            assert_eq!(
-                failure(&engine, "shell_run(\"ls\")").class(),
-                ScriptErrorClass::NotFound,
-                "shell_run is absent without the vynil-core shell feature"
+                "`{script}` is compiled into this build but absent from the session engine"
             );
         }
     }
 
+    // Scenario: les capacités brutes sont absentes de l'introspection (avec les features `fs` et `shell` compilées,
+    // `file_read` et `shell_run` non plus ne figurent au catalogue de session).
     #[cfg(feature = "fs")]
     #[test]
-    fn presented_host_group_catalogues_files_under_the_fs_feature() {
-        let engine = built(Presentation::new().with_group(CoreGroup::Host));
+    fn raw_capabilities_are_absent_from_the_catalog_under_the_fs_feature() {
+        let engine = built(Presentation::new());
         let global = column(&engine, "functions(\"global\")", "path");
         assert!(
-            global.iter().any(|path| path == "file_read"),
-            "the host group carries the files with the fs feature: {global:?}"
+            !global.iter().any(|path| path == "file_read"),
+            "the files are compiled into this build but absent from the session catalog: {global:?}"
         );
     }
 
     #[cfg(feature = "shell")]
     #[test]
-    fn presented_host_group_catalogues_shell_under_the_shell_feature() {
-        let engine = built(Presentation::new().with_group(CoreGroup::Host));
+    fn raw_capabilities_are_absent_from_the_catalog_under_the_shell_feature() {
+        let engine = built(Presentation::new());
         let global = column(&engine, "functions(\"global\")", "path");
         assert!(
-            global.iter().any(|path| path == "shell_run"),
-            "the host group carries shell_run with the shell feature: {global:?}"
+            !global.iter().any(|path| path == "shell_run"),
+            "shell_run is compiled into this build but absent from the session catalog: {global:?}"
         );
     }
 
@@ -694,6 +673,11 @@ mod tests {
             failure(&engine, "other::f()").class(),
             ScriptErrorClass::NotFound,
             "the module that was not presented is absent"
+        );
+        assert_eq!(
+            failure(&engine, "host::get_env(\"X\")").class(),
+            ScriptErrorClass::NotFound,
+            "no raw capability of `capabilities.sdd` is a session module"
         );
     }
 
@@ -981,14 +965,48 @@ mod tests {
         );
     }
 
+    // Scenario: une capacité brute n'est jamais suggérée (le moteur de session n'a ni `host` ni aucune capacité
+    // brute de ./capabilities.sdd : `get_env` comme `host::get_env` n'entrent jamais dans le CandidateSet).
     #[test]
-    fn suggest_end_to_end_never_suggests_a_not_presented_group() {
+    fn suggest_end_to_end_never_suggests_a_raw_capability() {
         let engine = built(Presentation::new());
         let error = failure(&engine, "get_envv(\"X\")");
         let message = suggest_for(error, &candidates_of(&engine)).to_string();
         assert_eq!(
             message, "function not found at line 1, column 1: get_envv",
-            "no suggestion names get_env, which is not presented"
+            "no suggestion names get_env, which is not in the session engine"
+        );
+        let module_error = failure(&engine, "host::get_envv(\"X\")");
+        let module_message = suggest_for(module_error, &candidates_of(&engine)).to_string();
+        assert!(
+            !module_message.contains("Closest candidates"),
+            "the raw module `host` offers no candidate: {module_message}"
+        );
+    }
+
+    // Scenario: une capacité brute n'est jamais suggérée, même quand la feature compile la fonction
+    // (la capacité ne vit que dans le registre brut, jamais dans le moteur de session).
+    #[cfg(feature = "fs")]
+    #[test]
+    fn suggest_end_to_end_never_suggests_a_file_function_under_the_fs_feature() {
+        let engine = built(Presentation::new());
+        let error = failure(&engine, "file_rea(\"x\")");
+        let message = suggest_for(error, &candidates_of(&engine)).to_string();
+        assert!(
+            !message.contains("Closest candidates"),
+            "`file_read` is compiled but not in the session engine: {message}"
+        );
+    }
+
+    #[cfg(feature = "shell")]
+    #[test]
+    fn suggest_end_to_end_never_suggests_shell_run_under_the_shell_feature() {
+        let engine = built(Presentation::new());
+        let error = failure(&engine, "shell_rnu(\"ls\")");
+        let message = suggest_for(error, &candidates_of(&engine)).to_string();
+        assert!(
+            !message.contains("Closest candidates"),
+            "`shell_run` is compiled but not in the session engine: {message}"
         );
     }
 }

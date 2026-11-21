@@ -26,7 +26,8 @@ const USAGE_PREFIX: &str = "Usage: ";
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Origin {
-    /// A function of a group of the `vynil-core` common core, named after the group (`core`, `host`).
+    /// A function of a group of the `vynil-core` common core, named after the group. The session engine only registers
+    /// the `core` group; raw capabilities are never catalogued here.
     Core(String),
     /// A formatting function of the scratchpad.
     Format,
@@ -1373,6 +1374,64 @@ mod tests {
         assert!(
             engine.eval::<Array>("functions()").is_ok(),
             "functions still answer"
+        );
+    }
+
+    // Scenario: les capacités brutes sont absentes (introspect.sdd #13 : le moteur de session n'enregistrant
+    // plus le groupe hôte du socle, aucune fonction brute `host` ne figure au catalogue de session).
+    #[test]
+    fn no_raw_host_function_is_in_the_session_catalog() {
+        let engine =
+            crate::scratchpad::ScratchpadEngine::builder(ScratchpadLimits::new(), Presentation::new())
+                .build()
+                .expect("the session engine builds");
+        let paths: Vec<&str> = engine
+            .catalog()
+            .functions()
+            .iter()
+            .map(FunctionEntry::path)
+            .collect();
+        for name in ["get_env", "log_info", "file_read", "shell_run"] {
+            assert!(
+                !paths.contains(&name) && !paths.iter().any(|path| path.contains(&format!("::{name}"))),
+                "`{name}` is a raw capability, never in the session catalog: {paths:?}"
+            );
+        }
+    }
+
+    // Le catalogue ignore la fonction brute même quand la feature `fs` la compile dans ce build.
+    #[cfg(feature = "fs")]
+    #[test]
+    fn no_file_function_is_in_the_session_catalog_under_the_fs_feature() {
+        let engine =
+            crate::scratchpad::ScratchpadEngine::builder(ScratchpadLimits::new(), Presentation::new())
+                .build()
+                .expect("the session engine builds");
+        assert!(
+            !engine
+                .catalog()
+                .functions()
+                .iter()
+                .any(|entry| entry.path().contains("file_")),
+            "no compiled file function reaches the session catalog"
+        );
+    }
+
+    // Le catalogue ignore `shell_run` même quand la feature `shell` la compile dans ce build.
+    #[cfg(feature = "shell")]
+    #[test]
+    fn no_shell_function_is_in_the_session_catalog_under_the_shell_feature() {
+        let engine =
+            crate::scratchpad::ScratchpadEngine::builder(ScratchpadLimits::new(), Presentation::new())
+                .build()
+                .expect("the session engine builds");
+        assert!(
+            !engine
+                .catalog()
+                .functions()
+                .iter()
+                .any(|entry| entry.path().contains("shell_")),
+            "no compiled shell function reaches the session catalog"
         );
     }
 }

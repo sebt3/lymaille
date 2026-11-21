@@ -317,8 +317,9 @@ mod tests {
         );
     }
 
+    // Scenario: une capacité brute n'est jamais suggérée (module de ./capabilities.sdd absent du CandidateSet)
     #[test]
-    fn not_presented_group_function_is_never_suggested() {
+    fn raw_capability_is_never_suggested() {
         let candidates = CandidateSet::new(
             vec![(
                 "json_encode".to_owned(),
