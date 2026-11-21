@@ -1,4 +1,4 @@
-//! Engine of a session: the Rhai engine built from the common core of `vynil-core`, restricted to the granted groups and
+//! Engine of a session: the Rhai engine built from the common core of `vynil-core`, restricted to the presented groups and
 //! modules, with the scratchpad's own functions, its limits, a closed module resolver, a captured output and the
 //! cancellation hook. See `src/scratchpad/engine.sdd`.
 
@@ -17,44 +17,44 @@ use rhai::{Dynamic, Engine as RhaiEngine, Position, Shared};
 
 use super::error::ScratchpadResult;
 use super::format::register_format_functions;
-use super::grant::{CoreGroup, Grants};
 use super::introspect::{Catalog, IntrospectionSource, Origin, register_introspection, registration_step};
 use super::limits::ScratchpadLimits;
+use super::presentation::{CoreGroup, Presentation};
 use crate::session::CancelHandle;
 
 /// A registration closure of the host or of a trusted domain, run once when the engine is built.
 type Registration = Box<dyn FnOnce(&mut RhaiEngine) -> ScratchpadResult<()>>;
 
-/// The Rhai engine of a session, with its granted surface, its limits and its introspection. It is `Send + Sync`: one
+/// The Rhai engine of a session, with its presented surface, its limits and its introspection. It is `Send + Sync`: one
 /// engine serves every run of its session, behind an `Arc`.
 #[non_exhaustive]
 pub struct ScratchpadEngine {
     engine: RhaiEngine,
-    grants: Grants,
+    presentation: Presentation,
     limits: ScratchpadLimits,
     catalog: Catalog,
     introspection: Arc<IntrospectionSource>,
 }
 
-/// Builder of a [`ScratchpadEngine`]. Its groups and modules come from the grants.
+/// Builder of a [`ScratchpadEngine`]. Its groups and modules come from the presentation.
 ///
-/// The registration closures run once, at build time, after the core group, the format functions and the granted group
+/// The registration closures run once, at build time, after the core group, the format functions and the presented group
 /// and modules.
 #[non_exhaustive]
 pub struct EngineBuilder {
     limits: ScratchpadLimits,
-    grants: Grants,
+    presentation: Presentation,
     registrations: Vec<Registration>,
     unlisted: Vec<Registration>,
 }
 
 impl ScratchpadEngine {
-    /// A builder for an engine with these limits and these grants.
+    /// A builder for an engine with these limits and these presentation.
     #[must_use]
-    pub fn builder(limits: ScratchpadLimits, grants: Grants) -> EngineBuilder {
+    pub fn builder(limits: ScratchpadLimits, presentation: Presentation) -> EngineBuilder {
         EngineBuilder {
             limits,
-            grants,
+            presentation,
             registrations: Vec::new(),
             unlisted: Vec::new(),
         }
@@ -66,10 +66,10 @@ impl ScratchpadEngine {
         &self.limits
     }
 
-    /// The grants the engine was built with.
+    /// The presentation the engine was built with.
     #[must_use]
-    pub const fn grants(&self) -> &Grants {
-        &self.grants
+    pub const fn presentation(&self) -> &Presentation {
+        &self.presentation
     }
 
     /// The catalog of the functions the scripts can call.
@@ -92,7 +92,7 @@ impl ScratchpadEngine {
 impl std::fmt::Debug for ScratchpadEngine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ScratchpadEngine")
-            .field("grants", &self.grants)
+            .field("presentation", &self.presentation)
             .field("limits", &self.limits)
             .field("functions", &self.catalog.functions().len())
             .finish_non_exhaustive()
@@ -121,7 +121,7 @@ impl EngineBuilder {
         self
     }
 
-    /// Builds the engine: the base engine, the core group, the format functions, the granted host group, the granted
+    /// Builds the engine: the base engine, the core group, the format functions, the presented host group, the presented
     /// modules, the registration closures, then the catalog and the introspection, and last the unlisted registration
     /// closures.
     ///
@@ -131,7 +131,7 @@ impl EngineBuilder {
     pub fn build(self) -> ScratchpadResult<ScratchpadEngine> {
         let Self {
             limits,
-            grants,
+            presentation,
             registrations,
             unlisted,
         } = self;
@@ -148,7 +148,7 @@ impl EngineBuilder {
             register_format_functions(engine);
             Ok(())
         })?);
-        for group in grants.groups() {
+        for group in presentation.groups() {
             let group = *group;
             steps.push(registration_step(
                 &mut engine,
@@ -159,21 +159,25 @@ impl EngineBuilder {
                 },
             )?);
         }
-        for module in grants.modules() {
+        for module in presentation.modules() {
             let _module = engine.register_static_module(module.name(), Shared::clone(module.module()));
         }
         for registration in registrations {
             steps.push(registration_step(&mut engine, Origin::Host, registration)?);
         }
-        let catalog = Catalog::build(&engine, &grants, &steps)?;
-        let source = Arc::new(IntrospectionSource::new(grants.clone(), catalog.clone(), limits));
+        let catalog = Catalog::build(&engine, &presentation, &steps)?;
+        let source = Arc::new(IntrospectionSource::new(
+            presentation.clone(),
+            catalog.clone(),
+            limits,
+        ));
         register_introspection(&mut engine, &source);
         for registration in unlisted {
             registration(&mut engine)?;
         }
         Ok(ScratchpadEngine {
             engine,
-            grants,
+            presentation,
             limits,
             catalog,
             introspection: source,
@@ -184,7 +188,7 @@ impl EngineBuilder {
 impl std::fmt::Debug for EngineBuilder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineBuilder")
-            .field("grants", &self.grants)
+            .field("presentation", &self.presentation)
             .field("limits", &self.limits)
             .field("registrations", &self.registrations.len())
             .field("unlisted", &self.unlisted.len())
@@ -194,7 +198,7 @@ impl std::fmt::Debug for EngineBuilder {
 
 /// The Rhai engine every session engine and every toolset module is built from: `const` disabled, the module resolver
 /// closed, `print` and `debug` captured, the progress hook reading the run's cancellation handle, and the memory limits.
-/// It has no granted function.
+/// It has no presented function.
 pub(in crate::scratchpad) fn base_engine(limits: &ScratchpadLimits) -> RhaiEngine {
     let mut engine = RhaiEngine::new_raw();
     register_standard_packages(&mut engine);
@@ -209,7 +213,7 @@ pub(in crate::scratchpad) fn base_engine(limits: &ScratchpadLimits) -> RhaiEngin
 
 /// The standard packages of Rhai, all but the language core package. `Engine::new()` loads that package too, and its
 /// `sleep` blocks the thread with no cancellation point; it also exposes the engine's own `exit`, `take`, `tag`,
-/// `parse_json` and `get_fn_metadata_list`, which no granted group provides. The other packages are the ones `Engine::new()`
+/// `parse_json` and `get_fn_metadata_list`, which no presented group provides. The other packages are the ones `Engine::new()`
 /// loads, in the same order.
 fn register_standard_packages(engine: &mut RhaiEngine) {
     let _arithmetic = engine.register_global_module(ArithmeticPackage::new().as_shared_module());
@@ -229,7 +233,7 @@ fn register_standard_packages(engine: &mut RhaiEngine) {
 /// Name of the core group in the catalog, as `modules()` shows it. The core group is always registered.
 const CORE_GROUP: &str = "core";
 
-/// Registers the granted host group of the common core: `get_env`, `log_*`, and the files and `shell_run` when this build
+/// Registers the presented host group of the common core: `get_env`, `log_*`, and the files and `shell_run` when this build
 /// compiles the `vynil-core` features `fs` and `shell`.
 fn register_group(engine: &mut RhaiEngine, group: CoreGroup) {
     match group {
@@ -237,7 +241,7 @@ fn register_group(engine: &mut RhaiEngine, group: CoreGroup) {
     }
 }
 
-/// Name of a granted group in the catalog, as `modules()` shows it.
+/// Name of a presented group in the catalog, as `modules()` shows it.
 const fn group_name(group: CoreGroup) -> &'static str {
     match group {
         CoreGroup::Host => "host",
@@ -370,13 +374,13 @@ mod tests {
 
     use super::{EngineBuilder, RunScope, ScratchpadEngine, base_engine, captured_output};
     use crate::scratchpad::{
-        CandidateSet, CoreGroup, GrantedModule, Grants, Origin, ScratchpadError, ScratchpadLimits,
+        CandidateSet, CoreGroup, Origin, Presentation, PresentedModule, ScratchpadError, ScratchpadLimits,
         ScriptErrorClass, suggest_for,
     };
     use crate::session::CancelHandle;
 
     /// A module `grafana` with `loki_query(query)`, documented.
-    fn grafana() -> GrantedModule {
+    fn grafana() -> PresentedModule {
         let mut module = Module::new();
         let _hash = FuncRegistration::new("loki_query")
             .with_comments(["/// Runs a Loki query"])
@@ -384,22 +388,22 @@ mod tests {
             .set_into_module(&mut module, |query: rhai::ImmutableString| {
                 format!("loki:{query}")
             });
-        GrantedModule::new("grafana", Shared::new(module)).expect("a valid name")
+        PresentedModule::new("grafana", Shared::new(module)).expect("a valid name")
     }
 
     /// A toolset module `ts` with `f()`, which holds a dependency `dep` exposing `secret()`.
-    fn toolset_module() -> GrantedModule {
+    fn toolset_module() -> PresentedModule {
         let mut dependency = Module::new();
         let _secret = FuncRegistration::new("secret").set_into_module(&mut dependency, || "token".to_owned());
         let mut module = Module::new();
         let _f = FuncRegistration::new("f").set_into_module(&mut module, || "ok".to_owned());
         let _dep = module.set_sub_module("dep", Shared::new(dependency));
-        GrantedModule::new("ts", Shared::new(module)).expect("a valid name")
+        PresentedModule::new("ts", Shared::new(module)).expect("a valid name")
     }
 
-    /// An engine built with these grants and the default limits.
-    fn built(grants: Grants) -> ScratchpadEngine {
-        match ScratchpadEngine::builder(ScratchpadLimits::new(), grants).build() {
+    /// An engine built with these presentation and the default limits.
+    fn built(presentation: Presentation) -> ScratchpadEngine {
+        match ScratchpadEngine::builder(ScratchpadLimits::new(), presentation).build() {
             Ok(engine) => engine,
             Err(error) => panic!("the engine must build: {error}"),
         }
@@ -437,7 +441,7 @@ mod tests {
             .collect()
     }
 
-    /// The candidates of the suggestions, built from the engine as the run builds them: visible functions, granted modules.
+    /// The candidates of the suggestions, built from the engine as the run builds them: visible functions, presented modules.
     fn candidates_of(engine: &ScratchpadEngine) -> CandidateSet {
         let functions = engine
             .catalog()
@@ -446,7 +450,7 @@ mod tests {
             .map(|entry| (entry.path().to_owned(), entry.signature().to_owned()))
             .collect();
         let modules = engine
-            .grants()
+            .presentation()
             .modules()
             .iter()
             .map(|module| module.name().to_owned())
@@ -454,10 +458,10 @@ mod tests {
         CandidateSet::new(functions, modules, Vec::new())
     }
 
-    // Scenario: seul le groupe core par défaut (le groupe `core` est enregistré d'office, sans grant)
+    // Scenario: seul le groupe core par défaut (le groupe `core` est enregistré d’office, sans présentation)
     #[test]
     fn only_the_core_group_by_default() {
-        let engine = built(Grants::new());
+        let engine = built(Presentation::new());
         assert_eq!(
             value(&engine, "json_encode(#{a: 1})")
                 .into_string()
@@ -469,7 +473,7 @@ mod tests {
         assert_eq!(
             value(&engine, "sleep(0)").as_unit().ok(),
             Some(()),
-            "sleep answers without a grant"
+            "sleep answers without a presentation"
         );
         for script in [
             "get_env(\"PATH\")",
@@ -485,8 +489,8 @@ mod tests {
     }
 
     #[test]
-    fn ungranted_groups_are_absent_from_introspection() {
-        let engine = built(Grants::new());
+    fn not_presented_groups_are_absent_from_introspection() {
+        let engine = built(Presentation::new());
         let global = column(&engine, "functions(\"global\")", "path");
         assert!(
             global.iter().any(|path| path == "json_encode"),
@@ -511,7 +515,7 @@ mod tests {
 
     #[test]
     fn functions_carry_signature_and_documentation() {
-        let engine = built(Grants::new());
+        let engine = built(Presentation::new());
         let found = rows(&engine, "functions()")
             .into_iter()
             .find(|row| row.get("path").map(ToString::to_string).as_deref() == Some("json_encode"));
@@ -528,15 +532,15 @@ mod tests {
     }
 
     #[test]
-    fn granted_host_group_is_registered() {
-        let engine = built(Grants::new().with_group(CoreGroup::Host));
+    fn presented_host_group_is_registered() {
+        let engine = built(Presentation::new().with_group(CoreGroup::Host));
         assert_eq!(
             value(&engine, "get_env(\"LYMAILLE_ABSENT\")")
                 .into_string()
                 .ok()
                 .as_deref(),
             Some(""),
-            "the granted host group answers"
+            "the presented host group answers"
         );
         assert_eq!(
             value(&engine, "sleep(0)").as_unit().ok(),
@@ -561,8 +565,8 @@ mod tests {
 
     #[cfg(feature = "fs")]
     #[test]
-    fn granted_host_group_catalogues_files_under_the_fs_feature() {
-        let engine = built(Grants::new().with_group(CoreGroup::Host));
+    fn presented_host_group_catalogues_files_under_the_fs_feature() {
+        let engine = built(Presentation::new().with_group(CoreGroup::Host));
         let global = column(&engine, "functions(\"global\")", "path");
         assert!(
             global.iter().any(|path| path == "file_read"),
@@ -572,8 +576,8 @@ mod tests {
 
     #[cfg(feature = "shell")]
     #[test]
-    fn granted_host_group_catalogues_shell_under_the_shell_feature() {
-        let engine = built(Grants::new().with_group(CoreGroup::Host));
+    fn presented_host_group_catalogues_shell_under_the_shell_feature() {
+        let engine = built(Presentation::new().with_group(CoreGroup::Host));
         let global = column(&engine, "functions(\"global\")", "path");
         assert!(
             global.iter().any(|path| path == "shell_run"),
@@ -584,7 +588,7 @@ mod tests {
     // Scenario: les fonctions du groupe core et du format coexistent (collision de `format`, tâche #17)
     #[test]
     fn core_format_and_format_functions_coexist() {
-        let engine = built(Grants::new());
+        let engine = built(Presentation::new());
         let origin_of = |path: &str| {
             engine
                 .catalog()
@@ -612,7 +616,7 @@ mod tests {
 
     #[test]
     fn const_is_a_syntax_error_on_both_engines_and_let_mutates() {
-        let session = built(Grants::new());
+        let session = built(Presentation::new());
         let toolset = base_engine(&ScratchpadLimits::new());
         for engine in [session.rhai(), &toolset] {
             match engine.eval::<Dynamic>("const C = #{a: 1}; C.a = 2") {
@@ -636,7 +640,7 @@ mod tests {
 
     #[test]
     fn import_is_closed() {
-        let engine = built(Grants::new());
+        let engine = built(Presentation::new());
         assert!(
             engine
                 .rhai()
@@ -648,7 +652,7 @@ mod tests {
 
     #[test]
     fn print_and_debug_are_captured_in_the_run() {
-        let engine = built(Grants::new());
+        let engine = built(Presentation::new());
         let _scope = RunScope::enter(&CancelHandle::new(), 100);
         let _value = value(&engine, "print(\"hello\"); debug(\"world\"); 1");
         let captured = captured_output();
@@ -658,7 +662,7 @@ mod tests {
 
     #[test]
     fn print_outside_a_run_is_dropped_without_panic() {
-        let engine = built(Grants::new());
+        let engine = built(Presentation::new());
         assert_eq!(
             value(&engine, "print(\"hello\"); 2").as_int().ok(),
             Some(2),
@@ -668,7 +672,7 @@ mod tests {
 
     #[test]
     fn captured_output_is_capped_at_the_render_cap() {
-        let engine = built(Grants::new());
+        let engine = built(Presentation::new());
         let _scope = RunScope::enter(&CancelHandle::new(), 5);
         let _value = value(&engine, "print(\"hello world, a long line\"); 1");
         let captured = captured_output();
@@ -676,27 +680,27 @@ mod tests {
     }
 
     #[test]
-    fn granted_module_is_callable_and_an_ungranted_one_is_not() {
-        let engine = built(Grants::new().with_module(grafana()).expect("first module"));
+    fn presented_module_is_callable_and_a_not_presented_one_is_not() {
+        let engine = built(Presentation::new().with_module(grafana()).expect("first module"));
         assert_eq!(
             value(&engine, "grafana::loki_query(\"x\")")
                 .into_string()
                 .ok()
                 .as_deref(),
             Some("loki:x"),
-            "the granted module answers"
+            "the presented module answers"
         );
         assert_eq!(
             failure(&engine, "other::f()").class(),
             ScriptErrorClass::NotFound,
-            "the ungranted module is absent"
+            "the module that was not presented is absent"
         );
     }
 
     #[test]
     fn toolset_dependency_stays_out_of_reach() {
         let engine = built(
-            Grants::new()
+            Presentation::new()
                 .with_module(toolset_module())
                 .expect("the toolset module"),
         );
@@ -735,7 +739,7 @@ mod tests {
 
     #[test]
     fn cancellation_stops_a_rhai_loop() {
-        let engine = Arc::new(built(Grants::new()));
+        let engine = Arc::new(built(Presentation::new()));
         let handle = CancelHandle::new();
         let (result_sender, result_receiver) = std::sync::mpsc::channel::<Option<ScriptErrorClass>>();
         let worker_engine = Arc::clone(&engine);
@@ -767,7 +771,7 @@ mod tests {
         let handle = CancelHandle::new();
         let marks = Arc::new(AtomicUsize::new(0));
         let (native_handle, native_marks) = (handle.clone(), Arc::clone(&marks));
-        let engine = match ScratchpadEngine::builder(ScratchpadLimits::new(), Grants::new())
+        let engine = match ScratchpadEngine::builder(ScratchpadLimits::new(), Presentation::new())
             .with_registration(move |engine| {
                 let cancelling = native_handle.clone();
                 let _hash = engine.register_fn(
@@ -821,7 +825,7 @@ mod tests {
 
     #[test]
     fn without_a_run_no_interruption() {
-        let engine = built(Grants::new());
+        let engine = built(Presentation::new());
         assert_eq!(
             value(&engine, "let i = 0; while i < 1000 { i += 1; } i")
                 .as_int()
@@ -833,7 +837,7 @@ mod tests {
 
     #[test]
     fn a_dropped_run_scope_restores_the_previous_state() {
-        let engine = built(Grants::new());
+        let engine = built(Presentation::new());
         let cancelled = CancelHandle::new();
         cancelled.cancel();
         let _outer = RunScope::enter(&CancelHandle::new(), 100);
@@ -864,7 +868,7 @@ mod tests {
 
     #[test]
     fn scopes_do_not_cross_threads() {
-        let engine = Arc::new(built(Grants::new()));
+        let engine = Arc::new(built(Presentation::new()));
         let cancelled = CancelHandle::new();
         cancelled.cancel();
         let _scope = RunScope::enter(&cancelled, 100);
@@ -888,7 +892,7 @@ mod tests {
     fn registration_closure_runs_once_and_is_catalogued() {
         let calls = Arc::new(AtomicUsize::new(0));
         let counter = Arc::clone(&calls);
-        let builder: EngineBuilder = ScratchpadEngine::builder(ScratchpadLimits::new(), Grants::new())
+        let builder: EngineBuilder = ScratchpadEngine::builder(ScratchpadLimits::new(), Presentation::new())
             .with_registration(move |engine| {
                 let _count = counter.fetch_add(1, Ordering::SeqCst);
                 let _hash = engine.register_fn("session_context", || 42i64);
@@ -914,8 +918,8 @@ mod tests {
 
     #[test]
     fn failing_registration_closure_refused() {
-        let builder =
-            ScratchpadEngine::builder(ScratchpadLimits::new(), Grants::new()).with_registration(|_engine| {
+        let builder = ScratchpadEngine::builder(ScratchpadLimits::new(), Presentation::new())
+            .with_registration(|_engine| {
                 Err(ScratchpadError::Engine {
                     message: "refused".to_owned(),
                 })
@@ -933,8 +937,8 @@ mod tests {
     }
 
     #[test]
-    fn suggest_end_to_end_names_the_closest_granted_function() {
-        let engine = built(Grants::new().with_module(grafana()).expect("first module"));
+    fn suggest_end_to_end_names_the_closest_presented_function() {
+        let engine = built(Presentation::new().with_module(grafana()).expect("first module"));
         let error = failure(&engine, "grafana::loki_queryy(\"x\")");
         let message = suggest_for(error, &candidates_of(&engine)).to_string();
         assert!(
@@ -944,21 +948,24 @@ mod tests {
     }
 
     #[test]
-    fn suggest_end_to_end_never_names_an_ungranted_function() {
-        let engine = built(Grants::new().with_module(grafana()).expect("first module"));
+    fn suggest_end_to_end_never_names_a_not_presented_function() {
+        let engine = built(Presentation::new().with_module(grafana()).expect("first module"));
         let error = failure(&engine, "grafana::loki_queryy(\"x\")");
         let message = suggest_for(error, &candidates_of(&engine)).to_string();
-        assert!(!message.contains("other::"), "no ungranted module: {message}");
+        assert!(
+            !message.contains("other::"),
+            "no module that was not presented: {message}"
+        );
         assert!(
             !message.contains("loki_queryx"),
-            "no ungranted function: {message}"
+            "no function that was not presented: {message}"
         );
     }
 
     #[test]
     fn suggest_end_to_end_never_suggests_a_toolset_dependency() {
         let engine = built(
-            Grants::new()
+            Presentation::new()
                 .with_module(toolset_module())
                 .expect("the toolset module"),
         );
@@ -975,13 +982,13 @@ mod tests {
     }
 
     #[test]
-    fn suggest_end_to_end_never_suggests_an_ungranted_group() {
-        let engine = built(Grants::new());
+    fn suggest_end_to_end_never_suggests_a_not_presented_group() {
+        let engine = built(Presentation::new());
         let error = failure(&engine, "get_envv(\"X\")");
         let message = suggest_for(error, &candidates_of(&engine)).to_string();
         assert_eq!(
             message, "function not found at line 1, column 1: get_envv",
-            "no suggestion names get_env, which is not granted"
+            "no suggestion names get_env, which is not presented"
         );
     }
 }

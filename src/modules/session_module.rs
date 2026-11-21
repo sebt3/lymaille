@@ -10,7 +10,7 @@ use crate::session::{SessionEdits, normalize_title};
 
 /// Builds the Rhai module `session`: `set_title(text)`, `title()` and `flag(reason)`.
 ///
-/// `edits` receives the requests; `current_title` reads the title the session has now, supplied by the host. Grant it to a
+/// `edits` receives the requests; `current_title` reads the title the session has now, supplied by the host. Present it to a
 /// work or configuration agent as the module `session`; a sub-agent never receives it.
 #[must_use]
 pub fn session_module<T>(edits: Arc<SessionEdits>, current_title: T) -> Module
@@ -65,18 +65,19 @@ mod tests {
     use super::session_module;
     use crate::clock::{ManualClock, Timestamp};
     use crate::scratchpad::{
-        GrantedModule, Grants, RunEnv, RunOutcome, RunStatus, Scratchpad, ScratchpadEngine, ScratchpadLimits,
+        Presentation, PresentedModule, RunEnv, RunOutcome, RunStatus, Scratchpad, ScratchpadEngine,
+        ScratchpadLimits,
     };
     use crate::session::{CancelHandle, Redactor, SessionEdits};
 
-    /// A pad granted the module `session` over `edits`, whose current title is `current`.
+    /// A pad presented the module `session` over `edits`, whose current title is `current`.
     fn pad(edits: &Arc<SessionEdits>, current: Option<&str>) -> Scratchpad {
         let current = current.map(str::to_owned);
         let module = session_module(Arc::clone(edits), move || current.clone());
-        let grants = Grants::new()
-            .with_module(GrantedModule::new("session", Shared::new(module)).expect("a valid module name"))
+        let presentation = Presentation::new()
+            .with_module(PresentedModule::new("session", Shared::new(module)).expect("a valid module name"))
             .expect("a distinct module name");
-        let engine = ScratchpadEngine::builder(ScratchpadLimits::new(), grants)
+        let engine = ScratchpadEngine::builder(ScratchpadLimits::new(), presentation)
             .build()
             .expect("the engine builds");
         Scratchpad::new(Arc::new(engine))

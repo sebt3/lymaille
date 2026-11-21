@@ -1,5 +1,5 @@
 //! Formatting functions that the LLM calls from its scripts: text, JSON, aligned table from a list of maps, extraction, and
-//! truncation that keeps the start and the end. They are pure, always granted, and documented for introspection.
+//! truncation that keeps the start and the end. They are pure, always presented, and documented for introspection.
 
 use rhai::{Array, Dynamic, Engine, EvalAltResult, FuncRegistration, ImmutableString, Map, Variant};
 

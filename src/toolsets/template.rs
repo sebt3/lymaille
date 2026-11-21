@@ -16,8 +16,8 @@ const SYSTEM_PROMPT_NAME: &str = "system prompt";
 
 /// Session metadata given to a template.
 ///
-/// It holds the identifier of the agent, the start date as text written by the host, the granted toolsets with their
-/// descriptions, the names of the granted skills (never their descriptions or bodies), and the number of parallelizable
+/// It holds the identifier of the agent, the start date as text written by the host, the presented toolsets with their
+/// descriptions, the names of the presented skills (never their descriptions or bodies), and the number of parallelizable
 /// sub-agents for a main agent (`agent-sessions/delegation#FR-11`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
@@ -29,7 +29,7 @@ pub struct SessionMeta {
     parallel_subagents: Option<u32>,
 }
 
-/// A name with a text, as the templates see a granted toolset: `{{name}}` and `{{description}}`.
+/// A name with a text, as the templates see a presented toolset: `{{name}}` and `{{description}}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct NamedText {
     name: String,
@@ -272,7 +272,7 @@ mod tests {
         let rendered = render_prompt(template, &context(&[], &[]), &session()).expect("the template renders");
         assert_eq!(
             rendered, "Skills: [deploy][triage]",
-            "each granted skill appears by its name"
+            "each presented skill appears by its name"
         );
         assert!(
             !rendered.contains("Use it when"),

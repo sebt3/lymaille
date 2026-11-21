@@ -299,8 +299,8 @@ impl AgentDefinition {
     /// Returns [`AgentsError::InvalidDefinition`] when the identifier or the prompt is empty, when a profile is set but
     /// its name is empty or blank (an absent profile is accepted), when a
     /// sub-agent or a configuration agent declares delegable sub-agents, when a work or configuration agent declares an
-    /// output schema, when a configuration module is granted to a work agent or a sub-agent, when a sub-agent is
-    /// granted the `session` module, when a delegable sub-agent
+    /// output schema, when a configuration module is presented to a work agent or a sub-agent, when a sub-agent is
+    /// presented the `session` module, when a delegable sub-agent
     /// is the agent itself or is listed twice, when the toolsets or the modules contain a duplicate, or when a memory
     /// limit of the sandbox is zero.
     pub fn validate(&self) -> AgentsResult<()> {
@@ -341,7 +341,7 @@ impl AgentDefinition {
                 .iter()
                 .any(|module| CONFIGURATION_MODULES.contains(&module.as_str()))
         {
-            return self.refuse("a configuration module is granted to a work agent or a sub-agent");
+            return self.refuse("a configuration module is presented to a work agent or a sub-agent");
         }
         if self.kind == AgentKind::Sub
             && self
@@ -945,10 +945,13 @@ mod tests {
     fn no_capability_by_default() {
         let text = r#"{"id":"main","kind":"main","prompt":"hello","profile":"strix-qwen"}"#;
         let definition: AgentDefinition = serde_json::from_str(text).expect("the required fields are enough");
-        assert!(definition.modules().is_empty(), "no module is granted by default");
+        assert!(
+            definition.modules().is_empty(),
+            "no module is presented by default"
+        );
         assert!(
             definition.toolsets().is_empty(),
-            "no toolset is granted by default"
+            "no toolset is presented by default"
         );
     }
 
@@ -1270,7 +1273,7 @@ mod tests {
         );
     }
 
-    /// Builds a definition of nature `kind` that grants the modules `modules`.
+    /// Builds a definition of nature `kind` that presents the modules `modules`.
     fn with_modules_of(kind: AgentKind, modules: &[&str]) -> AgentDefinition {
         AgentDefinition::new("agent".to_owned(), kind, "You are an agent.".to_owned())
             .with_modules(modules.iter().map(|module| (*module).to_owned()).collect())
@@ -1298,7 +1301,7 @@ mod tests {
         let valid = config.validate();
         assert!(
             matches!(valid, Ok(())),
-            "a configuration agent granted the configuration modules must be valid, got {valid:?}"
+            "a configuration agent presented the configuration modules must be valid, got {valid:?}"
         );
     }
 
@@ -1306,14 +1309,14 @@ mod tests {
     #[test]
     fn work_agent_cannot_receive_the_creation_module() {
         let work = with_modules_of(AgentKind::Work, &["toolset_creator"]);
-        assert_invalid(&work, "a work agent granted the toolset-creation module");
+        assert_invalid(&work, "a work agent presented the toolset-creation module");
     }
 
     // Scenario: un sous-agent ne peut pas recevoir un module d'inspection
     #[test]
     fn sub_agent_cannot_receive_an_inspection_module() {
         let sub = with_modules_of(AgentKind::Sub, &["inspect"]);
-        assert_invalid(&sub, "a sub-agent granted the inspection module");
+        assert_invalid(&sub, "a sub-agent presented the inspection module");
     }
 
     // Scenario: module session refusé pour un sous-agent, au chargement, par la raison qui nomme la règle
@@ -1322,7 +1325,7 @@ mod tests {
         let sub = with_modules_of(AgentKind::Sub, &["session"]);
         let error = sub
             .validate()
-            .expect_err("a sub-agent granted the session module must be refused");
+            .expect_err("a sub-agent presented the session module must be refused");
         match error {
             AgentsError::InvalidDefinition { id, reason } => {
                 assert_eq!(id, "agent", "the refusal names the definition");
@@ -1349,7 +1352,7 @@ mod tests {
             let definition = with_modules_of(kind, &["session"]);
             assert!(
                 matches!(definition.validate(), Ok(())),
-                "a {kind:?} agent granted the session module must be valid, got {definition:?}"
+                "a {kind:?} agent presented the session module must be valid, got {definition:?}"
             );
         }
     }
@@ -1360,11 +1363,11 @@ mod tests {
         for module in ["toolset_creator", "inspect", "contexts", "sessions"] {
             assert_invalid(
                 &with_modules_of(AgentKind::Work, &[module]),
-                &format!("a work agent granted `{module}`"),
+                &format!("a work agent presented `{module}`"),
             );
             assert_invalid(
                 &with_modules_of(AgentKind::Sub, &[module]),
-                &format!("a sub-agent granted `{module}`"),
+                &format!("a sub-agent presented `{module}`"),
             );
         }
     }

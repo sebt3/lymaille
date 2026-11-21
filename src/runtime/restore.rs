@@ -47,7 +47,7 @@ impl RestoredSession {
 }
 
 /// Restores the session `id` from `store`, on the scratchpad engine `engine` that the host built with the current
-/// grants.
+/// presentation.
 ///
 /// The provenance `current` is that of the running agent: the fingerprint of its definition and the version of each
 /// toolset it uses.
@@ -92,7 +92,7 @@ mod tests {
     use super::{RestoredSession, restore_session};
     use crate::clock::{ManualClock, Timestamp};
     use crate::scratchpad::{
-        Grants, RunEnv, RunOutcome, RunStatus, Scratchpad, ScratchpadEngine, ScratchpadLimits,
+        Presentation, RunEnv, RunOutcome, RunStatus, Scratchpad, ScratchpadEngine, ScratchpadLimits,
     };
     use crate::session::{
         CancelHandle, InMemoryStore, Provenance, Redactor, SessionError, SessionId, SessionResult,
@@ -104,8 +104,8 @@ mod tests {
     }
 
     fn engine() -> Arc<ScratchpadEngine> {
-        let built = ScratchpadEngine::builder(ScratchpadLimits::new(), Grants::new()).build();
-        Arc::new(built.expect("an engine without grants must build"))
+        let built = ScratchpadEngine::builder(ScratchpadLimits::new(), Presentation::new()).build();
+        Arc::new(built.expect("an engine without presentation must build"))
     }
 
     /// The JSON of a saved state: an integer `x` (5), a function `f/1` doubling its argument, the agent `main-agent`

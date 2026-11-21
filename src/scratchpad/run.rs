@@ -861,8 +861,8 @@ fn signature_of(name: &str, params: &[&str]) -> String {
     format!("{name}({})", params.join(", "))
 }
 
-/// The names the suggestions may propose: the visible functions, the granted modules and the variables of the scope.
-/// Nothing else enters the set, so an ungranted element is never suggested.
+/// The names the suggestions may propose: the visible functions, the presented modules and the variables of the scope.
+/// Nothing else enters the set, so an element that was not presented is never suggested.
 fn candidates_of(engine: &ScratchpadEngine, state: &PadState) -> CandidateSet {
     let catalog = engine.catalog().functions();
     let mut functions: Vec<(String, String)> = catalog
@@ -882,7 +882,7 @@ fn candidates_of(engine: &ScratchpadEngine, state: &PadState) -> CandidateSet {
             }),
     );
     let modules = engine
-        .grants()
+        .presentation()
         .modules()
         .iter()
         .map(|module| module.name().to_owned())
@@ -1041,17 +1041,17 @@ mod tests {
     use crate::clock::{ManualClock, Timestamp};
     use crate::scratchpad::UnpersistableReason;
     use crate::scratchpad::{
-        CoreGroup, GrantedModule, Grants, ScratchpadEngine, ScratchpadLimits, ScriptErrorClass,
+        CoreGroup, Presentation, PresentedModule, ScratchpadEngine, ScratchpadLimits, ScriptErrorClass,
     };
     use crate::session::{CancelHandle, Redactor, TaggedValue};
 
-    /// An engine with these grants, these limits and the test natives its registration adds.
+    /// An engine with these presentation, these limits and the test natives its registration adds.
     fn engine_with(
-        grants: Grants,
+        presentation: Presentation,
         limits: ScratchpadLimits,
         registration: impl FnOnce(&mut rhai::Engine) + 'static,
     ) -> Arc<ScratchpadEngine> {
-        let builder = ScratchpadEngine::builder(limits, grants).with_registration(move |engine| {
+        let builder = ScratchpadEngine::builder(limits, presentation).with_registration(move |engine| {
             registration(engine);
             Ok(())
         });
@@ -1063,32 +1063,32 @@ mod tests {
 
     /// An engine with the default limits and no test native.
     fn plain() -> Arc<ScratchpadEngine> {
-        engine_with(Grants::new(), ScratchpadLimits::new(), |_engine| {})
+        engine_with(Presentation::new(), ScratchpadLimits::new(), |_engine| {})
     }
 
     /// A module `grafana` with `loki_query(query)`.
-    fn grafana() -> GrantedModule {
+    fn grafana() -> PresentedModule {
         let mut module = Module::new();
         let _hash = rhai::FuncRegistration::new("loki_query")
             .set_into_module(&mut module, |query: ImmutableString| format!("loki:{query}"));
-        let Some(granted) = GrantedModule::new("grafana", Shared::new(module)) else {
+        let Some(presented) = PresentedModule::new("grafana", Shared::new(module)) else {
             panic!("a valid module name");
         };
-        granted
+        presented
     }
 
     /// A module `sandbox` with `read_file` taking a map, documented with a usage line (`agent-sessions/scratchpad#FR-14`).
-    fn sandbox() -> GrantedModule {
+    fn sandbox() -> PresentedModule {
         let mut module = Module::new();
         let _hash = rhai::FuncRegistration::new("read_file")
             .with_comments(["/// Usage: sandbox::read_file(#{ path: \"\u{2026}\" })"])
             .set_into_module(&mut module, |arguments: Map| -> i64 {
                 arguments.len().try_into().unwrap_or(0)
             });
-        let Some(granted) = GrantedModule::new("sandbox", Shared::new(module)) else {
+        let Some(presented) = PresentedModule::new("sandbox", Shared::new(module)) else {
             panic!("a valid module name");
         };
-        granted
+        presented
     }
 
     /// Runs a script with an empty redactor, a fresh clock and a handle that is not cancelled.
@@ -1188,7 +1188,7 @@ mod tests {
                 rhai::Position::NONE,
             )))
         }
-        let engine = engine_with(Grants::new(), ScratchpadLimits::new(), |engine| {
+        let engine = engine_with(Presentation::new(), ScratchpadLimits::new(), |engine| {
             let _native = engine.register_fn("boom_native", boom_native);
         });
         let pad = Scratchpad::new(engine);
@@ -1380,7 +1380,7 @@ mod tests {
     #[tokio::test]
     async fn oversized_result_is_truncated_with_a_notice() {
         let limits = ScratchpadLimits::new().with_render_cap_chars(1000);
-        let pad = Scratchpad::new(engine_with(Grants::new(), limits, |_engine| {}));
+        let pad = Scratchpad::new(engine_with(Presentation::new(), limits, |_engine| {}));
         let outcome = eval(&pad, "let s = \"\"; for i in 0..5000 { s += \"a\"; } s").await;
         assert!(outcome.text().chars().count() <= 1000, "at most the cap");
         assert!(
@@ -1516,7 +1516,7 @@ mod tests {
         let entered = Arc::new(AtomicBool::new(false));
         let dropped = Arc::new(AtomicBool::new(false));
         let (entered_flag, dropped_flag) = (Arc::clone(&entered), Arc::clone(&dropped));
-        let engine = engine_with(Grants::new(), ScratchpadLimits::new(), move |engine| {
+        let engine = engine_with(Presentation::new(), ScratchpadLimits::new(), move |engine| {
             let (entered_flag, dropped_flag) = (Arc::clone(&entered_flag), Arc::clone(&dropped_flag));
             let _native =
                 engine.register_fn("stuck", move || stuck(&entered_flag, Arc::clone(&dropped_flag)));
@@ -1602,7 +1602,7 @@ mod tests {
     async fn cancellation_wins_over_the_error_it_caused() {
         let entered = Arc::new(AtomicBool::new(false));
         let entered_flag = Arc::clone(&entered);
-        let engine = engine_with(Grants::new(), ScratchpadLimits::new(), move |engine| {
+        let engine = engine_with(Presentation::new(), ScratchpadLimits::new(), move |engine| {
             let _native = engine.register_fn("stuck", move || stuck_untracked(&entered_flag));
         });
         let pad = Scratchpad::new(engine);
@@ -1678,7 +1678,7 @@ mod tests {
         fn explode() -> i64 {
             panic!("native panic")
         }
-        let engine = engine_with(Grants::new(), ScratchpadLimits::new(), |engine| {
+        let engine = engine_with(Presentation::new(), ScratchpadLimits::new(), |engine| {
             let _native = engine.register_fn("explode", explode);
         });
         let pad = Scratchpad::new(engine);
@@ -1735,11 +1735,11 @@ mod tests {
 
     #[tokio::test]
     async fn errors_are_masked_and_suggested() {
-        let grants = Grants::new().with_module(grafana());
-        let Some(grants) = grants else {
+        let presentation = Presentation::new().with_module(grafana());
+        let Some(presentation) = presentation else {
             panic!("the module is accepted");
         };
-        let pad = Scratchpad::new(engine_with(grants, ScratchpadLimits::new(), |_engine| {}));
+        let pad = Scratchpad::new(engine_with(presentation, ScratchpadLimits::new(), |_engine| {}));
         let mut redactor = Redactor::new();
         let _added = redactor.add_secret("tok-123456");
         let clock = ManualClock::new(Timestamp::from_millis(0));
@@ -1754,16 +1754,16 @@ mod tests {
             outcome.text()
         );
         assert!(!outcome.text().contains("tok-123456"), "no secret in the error");
-        let ungranted = pad.run("writer::loki_query(\"tok-123456\")", &cancel, &env).await;
+        let not_presented = pad.run("writer::loki_query(\"tok-123456\")", &cancel, &env).await;
         assert!(
-            !ungranted.text().contains("writer::"),
-            "no suggestion names a function of the ungranted module: {}",
-            ungranted.text()
+            !not_presented.text().contains("writer::"),
+            "no suggestion names a function of the module that was not presented: {}",
+            not_presented.text()
         );
         assert!(
-            !ungranted.text().contains("tok-123456"),
-            "no secret in the ungranted error: {}",
-            ungranted.text()
+            !not_presented.text().contains("tok-123456"),
+            "no secret in the error of the module that was not presented: {}",
+            not_presented.text()
         );
     }
 
@@ -1771,11 +1771,11 @@ mod tests {
     // `sandbox` a une fonction à table et une ligne d'usage ; l'erreur rendue contient l'appel attendu.
     #[tokio::test]
     async fn a_wrong_argument_to_a_map_function_shows_the_usage_line_in_the_error() {
-        let grants = Grants::new().with_module(sandbox());
-        let Some(grants) = grants else {
+        let presentation = Presentation::new().with_module(sandbox());
+        let Some(presentation) = presentation else {
             panic!("the module is accepted");
         };
-        let pad = Scratchpad::new(engine_with(grants, ScratchpadLimits::new(), |_engine| {}));
+        let pad = Scratchpad::new(engine_with(presentation, ScratchpadLimits::new(), |_engine| {}));
         let outcome = eval(&pad, "sandbox::read_file(\"p\")").await;
         assert_eq!(
             failed(&outcome),
@@ -1802,7 +1802,7 @@ mod tests {
     #[tokio::test]
     async fn warnings_and_value_share_the_render_cap() {
         let limits = ScratchpadLimits::new().with_render_cap_chars(300);
-        let pad = Scratchpad::new(engine_with(Grants::new(), limits, |_engine| {}));
+        let pad = Scratchpad::new(engine_with(Presentation::new(), limits, |_engine| {}));
         let outcome = eval(
             &pad,
             "let f = |x| x; let s = \"\"; for i in 0..5000 { s += \"a\"; } s",
@@ -1827,7 +1827,7 @@ mod tests {
     async fn audit_record_carries_the_script_and_the_duration() {
         let clock = Arc::new(ManualClock::new(Timestamp::from_millis(0)));
         let ticking = Arc::clone(&clock);
-        let engine = engine_with(Grants::new(), ScratchpadLimits::new(), move |engine| {
+        let engine = engine_with(Presentation::new(), ScratchpadLimits::new(), move |engine| {
             let _native = engine.register_fn("tick", move || tick(&ticking));
         });
         let pad = Scratchpad::new(engine);
@@ -1871,16 +1871,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn only_granted_modules_are_reachable_even_through_a_function_the_llm_defined() {
+    async fn only_presented_modules_are_reachable_even_through_a_function_the_llm_defined() {
         let mut reader = Module::new();
         let _read = rhai::FuncRegistration::new("read").set_into_module(&mut reader, || "ok".to_owned());
-        let Some(reader) = GrantedModule::new("reader", Shared::new(reader)) else {
+        let Some(reader) = PresentedModule::new("reader", Shared::new(reader)) else {
             panic!("a valid module name");
         };
-        let Some(grants) = Grants::new().with_group(CoreGroup::Host).with_module(reader) else {
+        let Some(presentation) = Presentation::new()
+            .with_group(CoreGroup::Host)
+            .with_module(reader)
+        else {
             panic!("the module is accepted");
         };
-        let pad = Scratchpad::new(engine_with(grants, ScratchpadLimits::new(), |_engine| {}));
+        let pad = Scratchpad::new(engine_with(presentation, ScratchpadLimits::new(), |_engine| {}));
         let _defined = eval(&pad, "fn w() { writer::delete() }").await;
         let outcome = eval(&pad, "w()").await;
         assert_eq!(failed(&outcome), ScriptErrorClass::NotFound, "not found");
@@ -2202,13 +2205,13 @@ mod tests {
                 "done".to_owned()
             },
         );
-        let Some(api) = GrantedModule::new("api", Shared::new(module)) else {
+        let Some(api) = PresentedModule::new("api", Shared::new(module)) else {
             panic!("a valid module name");
         };
-        let Some(grants) = Grants::new().with_group(CoreGroup::Host).with_module(api) else {
+        let Some(presentation) = Presentation::new().with_group(CoreGroup::Host).with_module(api) else {
             panic!("the module is accepted");
         };
-        let pad = Scratchpad::new(engine_with(grants, ScratchpadLimits::new(), |_engine| {}));
+        let pad = Scratchpad::new(engine_with(presentation, ScratchpadLimits::new(), |_engine| {}));
         let redactor = secret_redactor();
         let clock = ManualClock::new(Timestamp::from_millis(0));
         let env = RunEnv::new("agent", &redactor, &clock);
@@ -2403,7 +2406,7 @@ mod tests {
     // Scenario: runtime current_thread
     #[tokio::test]
     async fn current_thread_runtime_renders_the_bridge_error() {
-        let engine = engine_with(Grants::new(), ScratchpadLimits::new(), |engine| {
+        let engine = engine_with(Presentation::new(), ScratchpadLimits::new(), |engine| {
             let _native = engine.register_fn("settle_now", settle_now);
         });
         let pad = Scratchpad::new(engine);

@@ -33,7 +33,7 @@ const FRONTMATTER_UNREADABLE: &str =
 const FIELD_NOT_TEXT: &str = "the name and the description must be text, not missing and not a YAML null";
 
 /// Skill: a body of instructions with its metadata and its annex documents. The body and the description are templates,
-/// rendered by the template module; a skill grants no capability.
+/// rendered by the template module; a skill presents no capability.
 #[derive(Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
 #[non_exhaustive]
@@ -343,7 +343,7 @@ impl<'de> Deserialize<'de> for Skill {
     }
 }
 
-/// The frontmatter of a `SKILL.md` text. Unknown fields are ignored: `allowed-tools` grants nothing.
+/// The frontmatter of a `SKILL.md` text. Unknown fields are ignored: `allowed-tools` presents nothing.
 #[derive(Deserialize)]
 struct Frontmatter {
     /// Optional so that a YAML null reads as absent, which is refused, and not as the text `null`.
@@ -616,12 +616,12 @@ mod tests {
     #[test]
     fn allowed_tools_is_ignored() {
         let plain = Skill::parse("---\nname: grafana\ndescription: d\n---\nbody\n").expect("parses");
-        let granted =
+        let presented =
             Skill::parse("---\nname: grafana\ndescription: d\nallowed-tools: [rhai_pad, shell]\n---\nbody\n")
                 .expect("the frontmatter with allowed-tools parses");
         assert_eq!(
-            granted, plain,
-            "allowed-tools grants no capability: the skill is the same"
+            presented, plain,
+            "allowed-tools presents no capability: the skill is the same"
         );
     }
 

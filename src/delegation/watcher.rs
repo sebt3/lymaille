@@ -22,7 +22,7 @@ const PREDICATE_MAX_OPERATIONS: u64 = 10_000;
 const EVENT_CONSTANT: &str = "event";
 
 /// Engine a predicate is evaluated on: the pure base of the scratchpad, plus the core group of `vynil-core` and the
-/// operation ceiling. No host group, module or import is granted. Built fresh for each use, so that no evaluation sees
+/// operation ceiling. No host group, module or import is presented. Built fresh for each use, so that no evaluation sees
 /// another one.
 ///
 /// The ceiling counts the progress callbacks of Rhai, not `set_max_operations`: a closure called by a native function
@@ -819,13 +819,13 @@ mod tests {
             "sleep is part of the core group and answers in a predicate"
         );
 
-        // A function of a group that is not granted is unknown to the predicate.
+        // A function of a group that is not presented is unknown to the predicate.
         let host = set_of(vec![inject("host", "mcp", r#"get_env("HOME") == "" "#)]);
-        let ungranted = host.evaluate(&event("mcp", "x", json!({})));
+        let not_presented = host.evaluate(&event("mcp", "x", json!({})));
         assert_eq!(
-            ungranted.failures(),
+            not_presented.failures(),
             ["host"],
-            "an ungranted group is unknown to predicates"
+            "a group that is not presented is unknown to predicates"
         );
     }
 
@@ -843,7 +843,7 @@ mod tests {
             "a predicate that imports a module must be refused with InvalidWatcher"
         );
 
-        // A call into a module the predicate has not been granted fails at run time.
+        // A call into a module the predicate has not been presented fails at run time.
         let set = set_of(vec![inject("module", "mcp", "m::f()")]);
         let triggered = set.evaluate(&event("mcp", "x", json!({})));
         assert!(
@@ -853,7 +853,7 @@ mod tests {
         assert_eq!(
             triggered.failures(),
             ["module"],
-            "a module call fails: no module is granted"
+            "a module call fails: no module is presented"
         );
     }
 

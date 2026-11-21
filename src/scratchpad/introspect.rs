@@ -1,6 +1,6 @@
-//! Introspection that the LLM calls from Rhai: variables of the scope, granted modules, functions with their signature and
-//! documentation, toolsets and skills, and a lexical search `find`. It shows only what is granted: an ungranted group or
-//! module never appears, and neither does a dependency of a toolset (`agent-sessions/scratchpad#FR-3`,
+//! Introspection that the LLM calls from Rhai: variables of the scope, presented modules, functions with their signature and
+//! documentation, toolsets and skills, and a lexical search `find`. It shows only what is presented: a group or
+//! module that is not presented never appears, and neither does a dependency of a toolset (`agent-sessions/scratchpad#FR-3`,
 //! `agent-sessions/toolsets#FR-2`).
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -11,8 +11,8 @@ use serde::Deserialize;
 
 use super::error::{ScratchpadError, ScratchpadResult};
 use super::format::register;
-use super::grant::{GrantedModule, Grants};
 use super::limits::ScratchpadLimits;
+use super::presentation::{Presentation, PresentedModule};
 use super::render::render_value;
 
 /// Longest preview of a variable, in characters.
@@ -32,7 +32,7 @@ pub enum Origin {
     Format,
     /// A function registered by the host or by a trusted domain.
     Host,
-    /// A function of a granted module, named after the module.
+    /// A function of a presented module, named after the module.
     Module(String),
     /// A function the LLM defined in its own scripts.
     Script,
@@ -136,7 +136,7 @@ impl FunctionEntry {
     }
 }
 
-/// Functions of the granted surface, as read from the metadata of the engine.
+/// Functions of the presented surface, as read from the metadata of the engine.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Catalog {
@@ -144,8 +144,8 @@ pub struct Catalog {
 }
 
 impl Catalog {
-    /// Catalog of the granted functions of an engine. Each global function is attributed to the step whose registration added
-    /// its signature; each function of a granted module is attributed to that module. Other modules are left out, and so are
+    /// Catalog of the presented functions of an engine. Each global function is attributed to the step whose registration added
+    /// its signature; each function of a presented module is attributed to that module. Other modules are left out, and so are
     /// the sub-modules, which are the dependencies of a toolset.
     ///
     /// # Errors
@@ -153,7 +153,7 @@ impl Catalog {
     /// Returns an engine error when the metadata of the engine cannot be read.
     pub fn build(
         engine: &Engine,
-        grants: &Grants,
+        presentation: &Presentation,
         steps: &[(Origin, BTreeSet<String>)],
     ) -> ScratchpadResult<Self> {
         let metadata = read_metadata(engine)?;
@@ -167,7 +167,11 @@ impl Catalog {
             }
         }
         for (name, module) in &metadata.modules {
-            if grants.modules().iter().any(|granted| granted.name() == name) {
+            if presentation
+                .modules()
+                .iter()
+                .any(|presented| presented.name() == name)
+            {
                 functions.extend(module_entries(name, module));
             }
         }
@@ -185,7 +189,7 @@ impl Catalog {
         &self.functions
     }
 
-    /// Whether a function of this call path and this number of parameters is granted.
+    /// Whether a function of this call path and this number of parameters is presented.
     #[must_use]
     pub fn contains(&self, path: &str, arity: usize) -> bool {
         self.functions
@@ -194,7 +198,7 @@ impl Catalog {
     }
 }
 
-/// Entries of the catalog for the functions of a granted module, under its name.
+/// Entries of the catalog for the functions of a presented module, under its name.
 fn module_entries(name: &str, module: &MetadataModule) -> Vec<FunctionEntry> {
     module
         .functions
@@ -349,12 +353,12 @@ impl ScriptFunction {
     }
 }
 
-/// State shared between the engine and its runs: the grants, the catalog and the limits it reads, and the variables and
+/// State shared between the engine and its runs: the presentation, the catalog and the limits it reads, and the variables and
 /// script functions set by `update` before each run.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct IntrospectionSource {
-    grants: Grants,
+    presentation: Presentation,
     catalog: Catalog,
     limits: ScratchpadLimits,
     state: RwLock<ScopeState>,
@@ -387,11 +391,11 @@ struct Found {
 }
 
 impl IntrospectionSource {
-    /// Shared state for an engine with these grants, this catalog and these limits.
+    /// Shared state for an engine with these presentation, this catalog and these limits.
     #[must_use]
-    pub const fn new(grants: Grants, catalog: Catalog, limits: ScratchpadLimits) -> Self {
+    pub const fn new(presentation: Presentation, catalog: Catalog, limits: ScratchpadLimits) -> Self {
         Self {
-            grants,
+            presentation,
             catalog,
             limits,
             state: RwLock::new(ScopeState {
@@ -415,7 +419,7 @@ impl IntrospectionSource {
 
     /// Every function visible to the script: the catalog, then the script functions.
     fn views(state: &ScopeState, catalog: &Catalog) -> Vec<View> {
-        let granted = catalog.functions().iter().map(|entry| View {
+        let presented = catalog.functions().iter().map(|entry| View {
             path: entry.path.clone(),
             signature: entry.signature.clone(),
             doc: entry.doc.clone(),
@@ -427,7 +431,7 @@ impl IntrospectionSource {
             doc: function.doc.clone(),
             origin: Origin::Script,
         });
-        granted.chain(scripted).collect()
+        presented.chain(scripted).collect()
     }
 
     /// `vars()`: the variables of the scope at the start of the run.
@@ -445,10 +449,10 @@ impl IntrospectionSource {
             .collect()
     }
 
-    /// `modules()`: the granted modules, with the functions of each, and the groups of functions of the catalog.
+    /// `modules()`: the presented modules, with the functions of each, and the groups of functions of the catalog.
     fn modules(&self) -> Array {
         let mut counts: BTreeMap<(&'static str, String), usize> = BTreeMap::new();
-        for module in self.grants.modules() {
+        for module in self.presentation.modules() {
             let _count = counts.entry(("module", module.name().to_owned())).or_default();
         }
         for view in Self::views(&self.snapshot(), &self.catalog) {
@@ -482,7 +486,7 @@ impl IntrospectionSource {
         function_rows(&Self::views(&self.snapshot(), &self.catalog))
     }
 
-    /// `functions(origin)`: the functions of `global`, `script` or of a granted module.
+    /// `functions(origin)`: the functions of `global`, `script` or of a presented module.
     fn functions_of(&self, origin: &str) -> Result<Array, Box<EvalAltResult>> {
         let views = Self::views(&self.snapshot(), &self.catalog);
         let selected: Vec<View> = match origin {
@@ -494,7 +498,7 @@ impl IntrospectionSource {
                 .into_iter()
                 .filter(|view| view.origin == Origin::Script)
                 .collect(),
-            name if self.is_granted_module(name) => views
+            name if self.is_presented_module(name) => views
                 .into_iter()
                 .filter(|view| view.origin == Origin::Module(name.to_owned()))
                 .collect(),
@@ -503,26 +507,34 @@ impl IntrospectionSource {
         Ok(function_rows(&selected))
     }
 
-    /// Whether a module of this name is granted.
-    fn is_granted_module(&self, name: &str) -> bool {
-        self.grants.modules().iter().any(|module| module.name() == name)
+    /// Whether a module of this name is presented.
+    fn is_presented_module(&self, name: &str) -> bool {
+        self.presentation
+            .modules()
+            .iter()
+            .any(|module| module.name() == name)
     }
 
     /// Error of `functions(origin)` for an origin that is not known: it lists what can be asked for.
     fn unknown_origin(&self, name: &str) -> EvalAltResult {
-        let modules: Vec<&str> = self.grants.modules().iter().map(GrantedModule::name).collect();
+        let modules: Vec<&str> = self
+            .presentation
+            .modules()
+            .iter()
+            .map(PresentedModule::name)
+            .collect();
         EvalAltResult::ErrorRuntime(
             Dynamic::from(format!(
-                "functions: unknown origin `{name}`; use \"global\", \"script\" or a granted module: {}",
+                "functions: unknown origin `{name}`; use \"global\", \"script\" or a presented module: {}",
                 modules.join(", ")
             )),
             rhai::Position::NONE,
         )
     }
 
-    /// `toolsets()`: the granted toolsets, with their description.
+    /// `toolsets()`: the presented toolsets, with their description.
     fn toolsets(&self) -> Array {
-        self.grants
+        self.presentation
             .toolsets()
             .iter()
             .map(|toolset| {
@@ -534,9 +546,9 @@ impl IntrospectionSource {
             .collect()
     }
 
-    /// `skills()`: the granted skills, with their description and the toolset they are attached to, or unit.
+    /// `skills()`: the presented skills, with their description and the toolset they are attached to, or unit.
     fn skills(&self) -> Array {
-        self.grants
+        self.presentation
             .skills()
             .iter()
             .map(|skill| {
@@ -549,7 +561,7 @@ impl IntrospectionSource {
             .collect()
     }
 
-    /// `find(query)`: the granted elements whose path, signature, documentation or description holds every word of the
+    /// `find(query)`: the presented elements whose path, signature, documentation or description holds every word of the
     /// query, ignoring case; the exact names first, then the names containing the first word, then the rest.
     fn find(&self, query: &str) -> Result<Array, Box<EvalAltResult>> {
         let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
@@ -593,7 +605,7 @@ impl IntrospectionSource {
             .collect())
     }
 
-    /// The elements `find` searches: functions, granted modules, toolsets and skills, never a variable.
+    /// The elements `find` searches: functions, presented modules, toolsets and skills, never a variable.
     fn candidates(&self) -> Vec<Found> {
         let functions = Self::views(&self.snapshot(), &self.catalog)
             .into_iter()
@@ -612,21 +624,21 @@ impl IntrospectionSource {
                     text,
                 }
             });
-        let modules = self.grants.modules().iter().map(|module| Found {
+        let modules = self.presentation.modules().iter().map(|module| Found {
             kind: "module",
             name: module.name().to_owned(),
             path: module.name().to_owned(),
-            text: format!("granted module {}", module.name()),
+            text: format!("presented module {}", module.name()),
             haystack: module.name().to_lowercase(),
         });
-        let toolsets = self.grants.toolsets().iter().map(|toolset| Found {
+        let toolsets = self.presentation.toolsets().iter().map(|toolset| Found {
             kind: "toolset",
             name: toolset.name().to_owned(),
             path: toolset.name().to_owned(),
             text: toolset.description().to_owned(),
             haystack: format!("{} {}", toolset.name(), toolset.description()).to_lowercase(),
         });
-        let skills = self.grants.skills().iter().map(|skill| Found {
+        let skills = self.presentation.skills().iter().map(|skill| Found {
             kind: "skill",
             name: skill.name().to_owned(),
             path: skill.name().to_owned(),
@@ -730,7 +742,7 @@ pub(in crate::scratchpad) fn register_introspection(engine: &mut Engine, source:
         engine,
         "modules",
         &[],
-        "/// Granted modules and groups of functions: name, kind (core, format, host or module) and number of functions.",
+        "/// Presented modules and groups of functions: name, kind (core, format, host or module) and number of functions.",
         move || modules.modules(),
     );
     let all = Arc::clone(source);
@@ -746,7 +758,7 @@ pub(in crate::scratchpad) fn register_introspection(engine: &mut Engine, source:
         engine,
         "functions",
         &["origin: string", "array"],
-        "/// Functions of an origin: \"global\" for the built-in groups, \"script\" for the functions the LLM defined, or the name of a granted module. Fails on any other name.",
+        "/// Functions of an origin: \"global\" for the built-in groups, \"script\" for the functions the LLM defined, or the name of a presented module. Fails on any other name.",
         move |origin: ImmutableString| one.functions_of(origin.as_str()),
     );
     let toolsets = Arc::clone(source);
@@ -754,7 +766,7 @@ pub(in crate::scratchpad) fn register_introspection(engine: &mut Engine, source:
         engine,
         "toolsets",
         &[],
-        "/// Granted toolsets: name and description.",
+        "/// Presented toolsets: name and description.",
         move || toolsets.toolsets(),
     );
     let skills = Arc::clone(source);
@@ -762,7 +774,7 @@ pub(in crate::scratchpad) fn register_introspection(engine: &mut Engine, source:
         engine,
         "skills",
         &[],
-        "/// Granted skills: name, description and the toolset they are attached to, or unit.",
+        "/// Presented skills: name, description and the toolset they are attached to, or unit.",
         move || skills.skills(),
     );
     let search = Arc::clone(source);
@@ -770,7 +782,7 @@ pub(in crate::scratchpad) fn register_introspection(engine: &mut Engine, source:
         engine,
         "find",
         &["query: string", "array"],
-        "/// Search of the granted functions, modules, toolsets and skills: every word of the query must appear in the path, the signature, the documentation or the description. Fails on an empty query.",
+        "/// Search of the presented functions, modules, toolsets and skills: every word of the query must appear in the path, the signature, the documentation or the description. Fails on an empty query.",
         move |query: ImmutableString| search.find(query.as_str()),
     );
     let rules = Arc::clone(source);
@@ -790,12 +802,13 @@ mod tests {
         register_introspection, registration_step, usage_of,
     };
     use crate::scratchpad::{
-        GrantedModule, GrantedSkill, GrantedToolset, Grants, ScratchpadLimits, register_format_functions,
+        Presentation, PresentedModule, PresentedSkill, PresentedToolset, ScratchpadLimits,
+        register_format_functions,
     };
     use rhai::{Array, Dynamic, Engine, FuncRegistration, Map, Module, Shared};
     use std::sync::Arc;
 
-    /// Module `grafana` with `loki_query(query, range)` documented, and a dependency `dep` that is not granted.
+    /// Module `grafana` with `loki_query(query, range)` documented, and a dependency `dep` that is not presented.
     fn grafana_module() -> Module {
         let mut module = Module::new();
         let _hash = FuncRegistration::new("loki_query")
@@ -812,7 +825,7 @@ mod tests {
         module
     }
 
-    /// An engine with the format functions, the `grafana` and `k8s` modules granted, a toolset, two skills, and the
+    /// An engine with the format functions, the `grafana` and `k8s` modules presented, a toolset, two skills, and the
     /// introspection registered.
     fn fixture() -> (Engine, Arc<IntrospectionSource>) {
         let mut engine = Engine::new();
@@ -824,29 +837,34 @@ mod tests {
         let grafana = Shared::new(grafana_module());
         let _grafana = engine.register_static_module("grafana", Shared::clone(&grafana));
         let _k8s = engine.register_static_module("k8s", Shared::new(Module::new()));
-        let mut ungranted = Module::new();
-        let _ungranted_hash =
-            FuncRegistration::new("loki_secret").set_into_module(&mut ungranted, || "value".to_owned());
-        let _other = engine.register_static_module("other", Shared::new(ungranted));
-        let grants = Grants::new()
-            .with_module(GrantedModule::new("grafana", grafana).expect("valid name"))
-            .and_then(|grants| {
-                grants.with_module(GrantedModule::new("k8s", Shared::new(Module::new())).expect("valid name"))
+        let mut not_presented = Module::new();
+        let _not_presented_hash =
+            FuncRegistration::new("loki_secret").set_into_module(&mut not_presented, || "value".to_owned());
+        let _other = engine.register_static_module("other", Shared::new(not_presented));
+        let presentation = Presentation::new()
+            .with_module(PresentedModule::new("grafana", grafana).expect("valid name"))
+            .and_then(|presentation| {
+                presentation
+                    .with_module(PresentedModule::new("k8s", Shared::new(Module::new())).expect("valid name"))
             })
-            .and_then(|grants| {
-                grants.with_toolset(GrantedToolset::new("grafana", "Grafana queries").expect("valid"))
+            .and_then(|presentation| {
+                presentation.with_toolset(PresentedToolset::new("grafana", "Grafana queries").expect("valid"))
             })
-            .and_then(|grants| {
-                grants.with_skill(
-                    GrantedSkill::new("loki-debug", "Debugs Loki queries", Some("grafana")).expect("valid"),
+            .and_then(|presentation| {
+                presentation.with_skill(
+                    PresentedSkill::new("loki-debug", "Debugs Loki queries", Some("grafana")).expect("valid"),
                 )
             })
-            .and_then(|grants| {
-                grants.with_skill(GrantedSkill::new("plain", "A plain skill", None).expect("valid"))
+            .and_then(|presentation| {
+                presentation.with_skill(PresentedSkill::new("plain", "A plain skill", None).expect("valid"))
             })
             .expect("distinct names");
-        let catalog = Catalog::build(&engine, &grants, &steps).expect("the catalog builds");
-        let source = Arc::new(IntrospectionSource::new(grants, catalog, ScratchpadLimits::new()));
+        let catalog = Catalog::build(&engine, &presentation, &steps).expect("the catalog builds");
+        let source = Arc::new(IntrospectionSource::new(
+            presentation,
+            catalog,
+            ScratchpadLimits::new(),
+        ));
         register_introspection(&mut engine, &source);
         (engine, source)
     }
@@ -880,7 +898,7 @@ mod tests {
         );
         assert!(
             paths.contains(&"grafana::loki_query"),
-            "the granted module is listed: {paths:?}"
+            "the presented module is listed: {paths:?}"
         );
         assert!(
             !paths.iter().any(|path| path.contains("secret")),
@@ -888,7 +906,7 @@ mod tests {
         );
         assert!(
             !paths.iter().any(|path| path.starts_with("other")),
-            "nothing ungranted: {paths:?}"
+            "nothing not_presented: {paths:?}"
         );
         let loki = catalog
             .functions()
@@ -922,7 +940,7 @@ mod tests {
         );
         assert!(
             !source.catalog.contains("grafana::loki_query", 1),
-            "another arity is not granted"
+            "another arity is not presented"
         );
     }
 
@@ -1041,7 +1059,7 @@ mod tests {
     }
 
     #[test]
-    fn search_returns_granted_functions_and_skills_only() {
+    fn search_returns_presented_functions_and_skills_only() {
         let (engine, _source) = fixture();
         let names = column(&engine, "find(\"loki\")", "path");
         assert!(
@@ -1205,10 +1223,10 @@ mod tests {
             .with_comments(["/// First line.", "/// Second line."])
             .set_into_module(&mut module, || 0i64);
         let _registered = engine.register_static_module("docs", Shared::new(module));
-        let grants = Grants::new()
-            .with_module(GrantedModule::new("docs", Shared::new(Module::new())).expect("valid name"))
-            .expect("the module is granted");
-        let catalog = Catalog::build(&engine, &grants, &[]).expect("the catalog builds");
+        let presentation = Presentation::new()
+            .with_module(PresentedModule::new("docs", Shared::new(Module::new())).expect("valid name"))
+            .expect("the module is presented");
+        let catalog = Catalog::build(&engine, &presentation, &[]).expect("the catalog builds");
         let entry = catalog
             .functions()
             .iter()
@@ -1233,10 +1251,10 @@ mod tests {
             ])
             .set_into_module(&mut module, || 0i64);
         let _registered = engine.register_static_module("grafana", Shared::new(module));
-        let grants = Grants::new()
-            .with_module(GrantedModule::new("grafana", Shared::new(Module::new())).expect("valid name"))
-            .expect("the module is granted");
-        let catalog = Catalog::build(&engine, &grants, &[]).expect("the catalog builds");
+        let presentation = Presentation::new()
+            .with_module(PresentedModule::new("grafana", Shared::new(Module::new())).expect("valid name"))
+            .expect("the module is presented");
+        let catalog = Catalog::build(&engine, &presentation, &[]).expect("the catalog builds");
         let entry = catalog
             .functions()
             .iter()
@@ -1247,7 +1265,11 @@ mod tests {
             Some("grafana::loki_query(#{ query: \"\u{2026}\" })"),
             "the text after the prefix of the second line"
         );
-        let source = Arc::new(IntrospectionSource::new(grants, catalog, ScratchpadLimits::new()));
+        let source = Arc::new(IntrospectionSource::new(
+            presentation,
+            catalog,
+            ScratchpadLimits::new(),
+        ));
         register_introspection(&mut engine, &source);
         let found = rows(&engine, "functions(\"grafana\")");
         let row = found.first().expect("the function is listed");
@@ -1270,10 +1292,10 @@ mod tests {
             .with_comments(["/// Usage: "])
             .set_into_module(&mut module, || 1i64);
         let _registered = engine.register_static_module("usage_test", Shared::new(module));
-        let grants = Grants::new()
-            .with_module(GrantedModule::new("usage_test", Shared::new(Module::new())).expect("valid name"))
-            .expect("the module is granted");
-        let catalog = Catalog::build(&engine, &grants, &[]).expect("the catalog builds");
+        let presentation = Presentation::new()
+            .with_module(PresentedModule::new("usage_test", Shared::new(Module::new())).expect("valid name"))
+            .expect("the module is presented");
+        let catalog = Catalog::build(&engine, &presentation, &[]).expect("the catalog builds");
         for path in ["usage_test::plain", "usage_test::bare"] {
             let entry = catalog.functions().iter().find(|entry| entry.path() == path);
             assert_eq!(
@@ -1293,10 +1315,10 @@ mod tests {
             .with_comments(["/// Usage: first(a)", "/// Middle.", "/// Usage: second(b)"])
             .set_into_module(&mut module, || 0i64);
         let _registered = engine.register_static_module("usage_test", Shared::new(module));
-        let grants = Grants::new()
-            .with_module(GrantedModule::new("usage_test", Shared::new(Module::new())).expect("valid name"))
-            .expect("the module is granted");
-        let catalog = Catalog::build(&engine, &grants, &[]).expect("the catalog builds");
+        let presentation = Presentation::new()
+            .with_module(PresentedModule::new("usage_test", Shared::new(Module::new())).expect("valid name"))
+            .expect("the module is presented");
+        let catalog = Catalog::build(&engine, &presentation, &[]).expect("the catalog builds");
         let entry = catalog
             .functions()
             .iter()

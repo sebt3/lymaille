@@ -29,16 +29,16 @@ How a call works:
 - The result is the value of the last statement; a final `;` does not hide it (`1 + 1;` gives 2). A `let`, a loop, an `if` without `else` that is not taken, a `fn` definition and `print(...)` give `()`: end the script with the variable you want to read.
 - `let` variables and `fn` definitions persist to the next call of this session.
 - Text printed with `print` comes back before the result.
-- Call the functions of a granted module as `module::function(arguments)`.
+- Call the functions of a presented module as `module::function(arguments)`.
 - An error comes back as text: fix the script and call again.
 
 Discover what is available before you write a script:
 - `vars()`: the variables of the scope at the start of this run, as maps `#{name, type, preview}`.
-- `modules()`: the granted modules and the groups of built-in functions (for example `core`, `format` and `host`), as maps `#{name, kind, functions}`; `kind` is `module`, `core`, `format` or `host` and `functions` is the number of functions.
-- `functions()`: every function you can call, as maps `#{path, signature, doc, origin}`. `functions(\"global\")` lists the built-in groups, `functions(\"script\")` the functions you defined in this session, and `functions(\"name\")` the functions of one granted module; any other name is an error.
-- `toolsets()`: the granted toolsets, as maps `#{name, description}`.
-- `skills()`: the granted skills, with their descriptions. Read the text of a skill with the `skill` tool, not with a script.
-- `find(\"words\")`: the functions, granted modules, toolsets and skills that hold every word of the query, in any case, in their name, path, signature, documentation or description, as maps `#{kind, name, path, text}`. The exact names come first; at most 50 results are returned.
+- `modules()`: the presented modules and the groups of built-in functions (for example `core`, `format` and `host`), as maps `#{name, kind, functions}`; `kind` is `module`, `core`, `format` or `host` and `functions` is the number of functions.
+- `functions()`: every function you can call, as maps `#{path, signature, doc, origin}`. `functions(\"global\")` lists the built-in groups, `functions(\"script\")` the functions you defined in this session, and `functions(\"name\")` the functions of one presented module; any other name is an error.
+- `toolsets()`: the presented toolsets, as maps `#{name, description}`.
+- `skills()`: the presented skills, with their descriptions. Read the text of a skill with the `skill` tool, not with a script.
+- `find(\"words\")`: the functions, presented modules, toolsets and skills that hold every word of the query, in any case, in their name, path, signature, documentation or description, as maps `#{kind, name, path, text}`. The exact names come first; at most 50 results are returned.
 - `rules()`: the sandbox rules and the limits.
 
 `session_context()` returns a copy of the toolset context of this session: `params` holds the shared parameters, `toolsets` holds the resolved parameters of each toolset, and `roles` holds the names of the bound roles. Changing the copy does not change the context. A `fn` can call it too.
@@ -82,16 +82,16 @@ const SECOND_RESULT: &str = "[\"pod-web\",\"pod-api\",\"pod-db\"]";
 const SKILL_TOOL: &str = "skill";
 
 /// Description of the `skill` tool, read by the model. It is in English because it speaks to the model.
-const SKILL_TOOL_DESCRIPTION: &str = "Read the skills granted to this session. With no argument, lists them (name and description). With `name`, returns the text of that skill; with `name` and `document`, one of its annex documents. Read `rhai-pad` first.";
+const SKILL_TOOL_DESCRIPTION: &str = "Read the skills presented to this session. With no argument, lists them (name and description). With `name`, returns the text of that skill; with `name` and `document`, one of its annex documents. Read `rhai-pad` first.";
 
-/// A granted skill as the `skill` tool holds it: the toolset it belongs to, when it has one, and the skill.
+/// A presented skill as the `skill` tool holds it: the toolset it belongs to, when it has one, and the skill.
 #[derive(Debug)]
 struct Entry {
     toolset: Option<String>,
     skill: Skill,
 }
 
-/// The `skill` tool, which reads the granted skills without Rhai.
+/// The `skill` tool, which reads the presented skills without Rhai.
 ///
 /// It lists the skills, gives the rendered text of one, or one of its annex documents. Every text it gives is masked by the
 /// redactor of the session, then capped by `truncate_middle` (`agent-sessions/toolsets#FR-18`, `AC-11`, decision of
@@ -107,7 +107,7 @@ pub struct SkillTool {
 }
 
 impl SkillTool {
-    /// Builds the tool over the granted skills, each with its toolset, and over the built-in skill. `redactor` is the redactor
+    /// Builds the tool over the presented skills, each with its toolset, and over the built-in skill. `redactor` is the redactor
     /// of the session: the secrets it declares are masked in every text the tool gives.
     ///
     /// # Errors
@@ -118,7 +118,7 @@ impl SkillTool {
         reason = "the tool takes its six inputs at once; grouping them in a struct would add a public type for one constructor"
     )]
     pub fn new(
-        granted: Vec<(String, Skill)>,
+        presented: Vec<(String, Skill)>,
         builtin: Skill,
         context: ResolvedContext,
         session: SessionMeta,
@@ -126,7 +126,7 @@ impl SkillTool {
         redactor: Arc<Redactor>,
     ) -> ToolsetsResult<Self> {
         let mut entries = BTreeMap::new();
-        for (toolset, skill) in granted {
+        for (toolset, skill) in presented {
             insert_entry(&mut entries, Some(toolset), skill)?;
         }
         insert_entry(&mut entries, None, builtin)?;
@@ -193,7 +193,7 @@ impl SkillTool {
         Ok(self.capped(text))
     }
 
-    /// The granted skill of this name. The error lists the names of the granted skills.
+    /// The presented skill of this name. The error lists the names of the presented skills.
     fn entry(&self, name: &str) -> ToolsetsResult<&Entry> {
         self.entries.get(name).ok_or_else(|| ToolsetsError::InvalidSkill {
             name: name.to_owned(),
@@ -231,7 +231,7 @@ fn insert_entry(
     if entries.contains_key(&name) {
         return Err(ToolsetsError::InvalidSkill {
             name,
-            reason: "a skill of this name is granted twice",
+            reason: "a skill of this name is presented twice",
             known: Vec::new(),
         });
     }
@@ -382,7 +382,7 @@ mod tests {
     };
     use crate::clock::{ManualClock, Timestamp};
     use crate::scratchpad::{
-        GrantedSkill, RunEnv, RunOutcome, RunStatus, Scratchpad, ScratchpadEngine, ScratchpadLimits,
+        PresentedSkill, RunEnv, RunOutcome, RunStatus, Scratchpad, ScratchpadEngine, ScratchpadLimits,
     };
     use crate::session::{CancelHandle, NativeTool, Redactor};
     use crate::toolsets::{
@@ -456,16 +456,16 @@ mod tests {
         .expect("a valid toolset builds")
     }
 
-    /// Scratchpad over the grants of `toolsets`, with `session_context()` registered from `context`, and no secret declared.
+    /// Scratchpad over the presentation of `toolsets`, with `session_context()` registered from `context`, and no secret declared.
     fn pad(toolsets: &[Toolset], context: &ResolvedContext) -> Scratchpad {
         pad_with(toolsets, context, Arc::new(Redactor::new()))
     }
 
-    /// Scratchpad over the grants of `toolsets`, with `session_context()` registered from `context` and `redactor`.
+    /// Scratchpad over the presentation of `toolsets`, with `session_context()` registered from `context` and `redactor`.
     fn pad_with(toolsets: &[Toolset], context: &ResolvedContext, redactor: Arc<Redactor>) -> Scratchpad {
-        let grants =
-            assemble(toolsets, &[], &BTreeMap::new(), context, &ScratchpadLimits::new()).into_grants();
-        let engine = ScratchpadEngine::builder(ScratchpadLimits::new(), grants)
+        let presentation =
+            assemble(toolsets, &[], &BTreeMap::new(), context, &ScratchpadLimits::new()).into_presentation();
+        let engine = ScratchpadEngine::builder(ScratchpadLimits::new(), presentation)
             .with_registration(session_context_registration(context.clone(), redactor))
             .build()
             .expect("the engine builds");
@@ -593,7 +593,7 @@ mod tests {
         );
         assert!(
             matches!(refused, Err(ToolsetsError::InvalidSkill { .. })),
-            "a granted skill named like the built-in one is refused"
+            "a presented skill named like the built-in one is refused"
         );
     }
 
@@ -1057,7 +1057,7 @@ mod tests {
         assert_eq!(
             definition["description"],
             json!(
-                "Read the skills granted to this session. With no argument, lists them (name and description). With `name`, returns the text of that skill; with `name` and `document`, one of its annex documents. Read `rhai-pad` first."
+                "Read the skills presented to this session. With no argument, lists them (name and description). With `name`, returns the text of that skill; with `name` and `document`, one of its annex documents. Read `rhai-pad` first."
             ),
             "the description is the one of the spec"
         );
@@ -1207,13 +1207,13 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn built_in_claims_on_vars_skills_module_calls_and_truncation_hold() {
         let limits = ScratchpadLimits::new().with_render_cap_chars(300);
-        let grants = assemble(&[ops_toolset()], &[], &BTreeMap::new(), &context(), &limits)
-            .into_grants()
+        let presentation = assemble(&[ops_toolset()], &[], &BTreeMap::new(), &context(), &limits)
+            .into_presentation()
             .with_skill(
-                GrantedSkill::new("deploy", "Deploy to production", None).expect("a valid granted skill"),
+                PresentedSkill::new("deploy", "Deploy to production", None).expect("a valid presented skill"),
             )
-            .expect("the skill is granted");
-        let engine = ScratchpadEngine::builder(limits, grants)
+            .expect("the skill is presented");
+        let engine = ScratchpadEngine::builder(limits, presentation)
             .with_registration(session_context_registration(context(), Arc::new(Redactor::new())))
             .build()
             .expect("the engine builds");

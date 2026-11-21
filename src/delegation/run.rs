@@ -59,7 +59,7 @@ const UNREADABLE_REASON: &str = "the outcome of the run could not be read";
 
 /// Host side of a sub-agent.
 ///
-/// The host assembles the sub-agent of a request (definition, profile, provider, grants without a delegation module,
+/// The host assembles the sub-agent of a request (definition, profile, provider, presentation without a delegation module,
 /// turn runner) and runs it to its end: the library cannot build a sub-agent alone.
 pub trait SubagentLauncher: Send + Sync + 'static {
     /// Runs the sub-agent of `request` until its end and returns its outcome. Once the run is concluded, the registry
@@ -857,7 +857,7 @@ mod tests {
         Submission,
     };
     use crate::runtime::{TurnConfig, TurnRunner};
-    use crate::scratchpad::{Grants, Scratchpad, ScratchpadEngine, ScratchpadLimits};
+    use crate::scratchpad::{Presentation, Scratchpad, ScratchpadEngine, ScratchpadLimits};
     use crate::session::{
         AgentRef, CancelHandle, Event, EventKind, EventSink, InMemoryStore, Message, ModelSnapshot, Outcome,
         RecordingSink, Redactor, RunId, SegmentContext, SessionId, SessionState,
@@ -2700,7 +2700,7 @@ mod tests {
             Vec::new(),
             ModelSnapshot::new("model", ReplayMode::None),
         );
-        let engine = ScratchpadEngine::builder(ScratchpadLimits::new(), Grants::new())
+        let engine = ScratchpadEngine::builder(ScratchpadLimits::new(), Presentation::new())
             .build()
             .expect("the engine builds");
         let config = TurnConfig::new(

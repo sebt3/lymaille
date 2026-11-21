@@ -12,7 +12,7 @@ use serde_json::Value;
 use crate::agents::AgentStore;
 use crate::clock::Clock;
 use crate::scratchpad::{
-    Grants, InspectionPad, InspectionTarget, ModuleDescriptor, RunEnv, RunStatus, Scratchpad,
+    InspectionPad, InspectionTarget, ModuleDescriptor, Presentation, RunEnv, RunStatus, Scratchpad,
     ScratchpadEngine, descriptors_from_catalog, rhai_prod_inspect_definition,
 };
 use crate::session::{CancelHandle, InspectionTargetRef, NativeTool, Redactor, SessionId, SessionStore};
@@ -126,21 +126,21 @@ where
             .await
             .map_err(|_error| unresolved("the session store failed"))?
             .ok_or_else(|| unresolved(&format!("unknown session `{id}`")))?;
-        let engine = ScratchpadEngine::builder(*self.env.base.limits(), Grants::new())
+        let engine = ScratchpadEngine::builder(*self.env.base.limits(), Presentation::new())
             .build()
             .map_err(|_error| unresolved("the engine of the session does not build"))?;
         let restored = Scratchpad::restore(Arc::new(engine), state.variables(), state.functions());
         let snapshot = restored.into_pad().snapshot();
         InspectionPad::new(
             &self.env.base,
-            &Grants::new(),
+            &Presentation::new(),
             &[],
             InspectionTarget::Session(snapshot),
         )
         .map_err(|_error| unresolved("the inspection pad does not build"))
     }
 
-    /// The pad of an agent definition read with a context: the grants of its active toolsets, the shells of their modules
+    /// The pad of an agent definition read with a context: the presentation of its active toolsets, the shells of their modules
     /// (read in the catalog of a real engine) and the shells of the MCP roles of the context (described by the host).
     async fn definition_pad(&self, agent: &str, context: &str) -> Result<InspectionPad, String> {
         let definition = self
@@ -171,16 +171,21 @@ where
             .resolve(defaults_of(&toolsets))
             .map_err(|error| unresolved(&error.to_string()))?;
         let limits = *self.env.base.limits();
-        let grants = assemble(&toolsets, &[], &BTreeMap::new(), &resolved, &limits).into_grants();
-        let real = ScratchpadEngine::builder(limits, grants.clone())
+        let presentation = assemble(&toolsets, &[], &BTreeMap::new(), &resolved, &limits).into_presentation();
+        let real = ScratchpadEngine::builder(limits, presentation.clone())
             .build()
             .map_err(|_error| unresolved("the engine of the target does not build"))?;
         let names: Vec<&str> = toolsets.iter().map(Toolset::name).collect();
         let mut modules = descriptors_from_catalog(real.catalog(), &names);
         let roles = self.host.role_descriptors(resolved.roles()).await?;
         modules.extend(roles);
-        InspectionPad::new(&self.env.base, &grants, &modules, InspectionTarget::Definition)
-            .map_err(|_error| unresolved("the inspection pad does not build"))
+        InspectionPad::new(
+            &self.env.base,
+            &presentation,
+            &modules,
+            InspectionTarget::Definition,
+        )
+        .map_err(|_error| unresolved("the inspection pad does not build"))
     }
 
     /// Runs the script in the pad of the current target.
@@ -262,7 +267,7 @@ mod tests {
     use crate::agents::{AgentDefinition, AgentKind, AgentStore as _, InMemoryCatalog};
     use crate::clock::{ManualClock, Timestamp};
     use crate::scratchpad::{
-        FunctionDescriptor, Grants, ModuleDescriptor, ScratchpadEngine, ScratchpadLimits,
+        FunctionDescriptor, ModuleDescriptor, Presentation, ScratchpadEngine, ScratchpadLimits,
     };
     use crate::session::{
         AgentRef, CancelHandle, InMemoryStore, InspectionTargetRef, NativeTool, Redactor, SessionId,
@@ -341,7 +346,7 @@ mod tests {
         let slot = Arc::new(InspectionSlot::new());
         let host = Arc::new(Host::new());
         let sessions = Arc::new(InMemoryStore::new());
-        let base = ScratchpadEngine::builder(ScratchpadLimits::new(), Grants::new())
+        let base = ScratchpadEngine::builder(ScratchpadLimits::new(), Presentation::new())
             .build()
             .expect("the base engine builds");
         let env = InspectEnv::new(

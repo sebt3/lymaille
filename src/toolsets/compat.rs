@@ -372,21 +372,22 @@ where
 ///
 /// # Errors
 ///
-/// Returns [`ToolsetsError::Forbidden`] when the agent, or one of `subagents`, is granted `creation_module` against the
+/// Returns [`ToolsetsError::Forbidden`] when the agent, or one of `subagents`, is presented `creation_module` against the
 /// rule. The message names the rule.
 pub fn check_creation_rule(
     agent: &AgentDefinition,
     subagents: &[AgentDefinition],
     creation_module: &str,
 ) -> ToolsetsResult<()> {
-    let grants = |definition: &AgentDefinition| {
+    let presents = |definition: &AgentDefinition| {
         definition
             .modules()
             .iter()
             .any(|module| module.as_str() == creation_module)
     };
     // Only a configuration agent may hold the module: the nature decides, not the delegation.
-    let refused = |definition: &AgentDefinition| grants(definition) && definition.kind() != AgentKind::Config;
+    let refused =
+        |definition: &AgentDefinition| presents(definition) && definition.kind() != AgentKind::Config;
     if refused(agent) || subagents.iter().any(refused) {
         return Err(ToolsetsError::Forbidden {
             rule: CREATION_NATURE_RULE,
@@ -395,12 +396,12 @@ pub fn check_creation_rule(
     Ok(())
 }
 
-/// Checks the rule of the `session` module: it is granted to a work agent or a configuration agent, never to a sub-agent,
+/// Checks the rule of the `session` module: it is presented to a work agent or a configuration agent, never to a sub-agent,
 /// among `agent` and `subagents`.
 ///
 /// # Errors
 ///
-/// Returns [`ToolsetsError::Forbidden`] when `agent`, or one of `subagents`, is a sub-agent granted `session_module`. The
+/// Returns [`ToolsetsError::Forbidden`] when `agent`, or one of `subagents`, is a sub-agent presented `session_module`. The
 /// message names the rule.
 pub fn check_session_module_rule(
     agent: &AgentDefinition,
@@ -767,7 +768,7 @@ mod tests {
     }
 
     #[test]
-    fn creation_module_granted_to_a_configuration_agent_is_accepted() {
+    fn creation_module_presented_to_a_configuration_agent_is_accepted() {
         let config = AgentDefinition::new(
             "setup".to_owned(),
             AgentKind::Config,
@@ -802,7 +803,7 @@ mod tests {
     }
 
     #[test]
-    fn session_module_granted_to_work_and_configuration_agents_is_accepted() {
+    fn session_module_presented_to_work_and_configuration_agents_is_accepted() {
         let work = main_agent(Vec::new()).with_modules(vec!["session".to_owned()]);
         assert!(
             check_session_module_rule(&work, &[], "session").is_ok(),

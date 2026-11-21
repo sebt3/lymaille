@@ -1006,7 +1006,7 @@ mod tests {
     use crate::agents::{AgentKind, InMemoryCatalog};
     use crate::clock::{ManualClock, Timestamp};
     use crate::scratchpad::{
-        Grants, RunEnv, RunOutcome, RunStatus, Scratchpad, ScratchpadEngine, ScratchpadLimits,
+        Presentation, RunEnv, RunOutcome, RunStatus, Scratchpad, ScratchpadEngine, ScratchpadLimits,
     };
     use crate::session::{
         AgentRef, CancelHandle, History, InMemoryStore, Message, RecordingSink, RunSignals, SessionError,
@@ -2182,7 +2182,7 @@ mod tests {
         X: SessionStore + 'static,
     {
         let registration = config_registration(stores, index, sessions, slot, env);
-        match ScratchpadEngine::builder(ScratchpadLimits::new(), Grants::new())
+        match ScratchpadEngine::builder(ScratchpadLimits::new(), Presentation::new())
             .with_registration(registration)
             .build()
         {

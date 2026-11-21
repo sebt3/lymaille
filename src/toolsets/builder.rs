@@ -591,8 +591,8 @@ mod tests {
     use super::*;
     use crate::clock::{ManualClock, Timestamp};
     use crate::scratchpad::{
-        GrantedModule, Grants, RunEnv, RunOutcome, RunStatus, Scratchpad, ScratchpadEngine, ScratchpadLimits,
-        ScriptErrorClass,
+        Presentation, PresentedModule, RunEnv, RunOutcome, RunStatus, Scratchpad, ScratchpadEngine,
+        ScratchpadLimits, ScriptErrorClass,
     };
     use crate::secret::DefaultSecretDetector;
     use crate::session::CancelHandle;
@@ -760,7 +760,7 @@ mod tests {
 
     fn pad_with(host: &Host, detector: Arc<dyn SecretDetector>) -> Scratchpad {
         let registration = builder_registration(host.clone(), host.clone(), Redactor::new(), detector);
-        match ScratchpadEngine::builder(ScratchpadLimits::new(), Grants::new())
+        match ScratchpadEngine::builder(ScratchpadLimits::new(), Presentation::new())
             .with_registration(registration)
             .build()
         {
@@ -1119,17 +1119,17 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn no_function_activates() {
         let host = Host::default();
-        // The module is granted as well, because introspection lists granted modules only.
+        // The module is presented as well, because introspection lists presented modules only.
         let state = Arc::new(Builder {
             toolsets: host.clone(),
             drafts: host.clone(),
             redactor: Redactor::new(),
             detector: Arc::new(DefaultSecretDetector),
         });
-        let granted = GrantedModule::new("toolset_builder", Shared::new(builder_module(&state)))
+        let presented = PresentedModule::new("toolset_builder", Shared::new(builder_module(&state)))
             .expect("a valid module name");
-        let grants = Grants::new().with_module(granted).expect("one module");
-        let engine = ScratchpadEngine::builder(ScratchpadLimits::new(), grants)
+        let presentation = Presentation::new().with_module(presented).expect("one module");
+        let engine = ScratchpadEngine::builder(ScratchpadLimits::new(), presentation)
             .build()
             .expect("the engine builds");
         let outcome = run(
@@ -1220,7 +1220,7 @@ mod tests {
             redactor,
             Arc::new(DefaultSecretDetector),
         );
-        let engine = ScratchpadEngine::builder(ScratchpadLimits::new(), Grants::new())
+        let engine = ScratchpadEngine::builder(ScratchpadLimits::new(), Presentation::new())
             .with_registration(registration)
             .build()
             .expect("the engine builds");

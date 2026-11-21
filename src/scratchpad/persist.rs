@@ -415,8 +415,8 @@ pub fn recompile_functions(engine: &ScratchpadEngine, sources: &BTreeMap<String,
             _ => broken.push(key.clone()),
         }
     }
-    // The names of the restored engine: every native of the granted groups and of the standard packages, then the
-    // granted module paths of the catalogue.
+    // The names of the restored engine: every native of the presented groups and of the standard packages, then the
+    // presented module paths of the catalogue.
     let mut known: BTreeSet<String> = engine
         .rhai()
         .gen_fn_signatures(true)
@@ -918,21 +918,21 @@ mod tests {
         to_dynamic, to_tagged,
     };
     use crate::scratchpad::{
-        GrantedModule, Grants, LimitKind, ScratchpadEngine, ScratchpadError, ScratchpadLimits,
+        LimitKind, Presentation, PresentedModule, ScratchpadEngine, ScratchpadError, ScratchpadLimits,
         ScratchpadResult,
     };
     use crate::session::TaggedValue;
 
     fn engine() -> ScratchpadEngine {
-        ScratchpadEngine::builder(ScratchpadLimits::new(), Grants::new())
+        ScratchpadEngine::builder(ScratchpadLimits::new(), Presentation::new())
             .build()
-            .expect("an engine without grants builds")
+            .expect("an engine without presentation builds")
     }
 
     /// An engine with a `tick` function that increments the returned counter.
     fn counting_engine(counter: &Arc<AtomicUsize>) -> ScratchpadEngine {
         let counter = Arc::clone(counter);
-        ScratchpadEngine::builder(ScratchpadLimits::new(), Grants::new())
+        ScratchpadEngine::builder(ScratchpadLimits::new(), Presentation::new())
             .with_registration(move |engine| {
                 let _tick = engine.register_fn("tick", move || {
                     let _previous = counter.fetch_add(1, Ordering::SeqCst);
@@ -1640,9 +1640,12 @@ mod tests {
                     Ok(1)
                 });
         }
-        let granted = GrantedModule::new("grafana", Shared::new(module)).expect("the module name is valid");
-        let grants = Grants::new().with_module(granted).expect("the module is granted");
-        ScratchpadEngine::builder(ScratchpadLimits::new(), grants)
+        let presented =
+            PresentedModule::new("grafana", Shared::new(module)).expect("the module name is valid");
+        let presentation = Presentation::new()
+            .with_module(presented)
+            .expect("the module is presented");
+        ScratchpadEngine::builder(ScratchpadLimits::new(), presentation)
             .build()
             .expect("the engine builds")
     }

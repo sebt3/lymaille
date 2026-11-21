@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use super::RHAI_PAD_TOOL;
 
 /// Description of the tool, read by the model. It is in English because it speaks to the model.
-const DESCRIPTION: &str = r#"Run one Rhai script in this session's persistent scratchpad. Returns what the script printed, then the value of its last statement. `let` variables and `fn` definitions persist between calls; closures and function pointers work within a session but are lost when it is restored (define a `fn` for anything you must keep), `const` does not exist, and a `fn` cannot see scope variables (pass arguments; read the toolset context with `session_context()`). Granted modules are called as `module::function(args)`. Discovery built-ins: `vars()`, `modules()`, `functions("name")`, `toolsets()`, `skills()`, `find("words")`, `rules()`. Output over the cap is cut in the middle: keep results in variables and extract with the `fmt_*` functions. Errors come back as text: fix the script and call again. Read the `rhai-pad` skill with the `skill` tool before your first script."#;
+const DESCRIPTION: &str = r#"Run one Rhai script in this session's persistent scratchpad. Returns what the script printed, then the value of its last statement. `let` variables and `fn` definitions persist between calls; closures and function pointers work within a session but are lost when it is restored (define a `fn` for anything you must keep), `const` does not exist, and a `fn` cannot see scope variables (pass arguments; read the toolset context with `session_context()`). Presented modules are called as `module::function(args)`. Discovery built-ins: `vars()`, `modules()`, `functions("name")`, `toolsets()`, `skills()`, `find("words")`, `rules()`. Output over the cap is cut in the middle: keep results in variables and extract with the `fmt_*` functions. Errors come back as text: fix the script and call again. Read the `rhai-pad` skill with the `skill` tool before your first script."#;
 
 /// Description of the `script` parameter, read by the model.
 const SCRIPT_DESCRIPTION: &str = "The Rhai script to run.";
@@ -42,8 +42,8 @@ mod tests {
     use crate::clock::{ManualClock, Timestamp};
     use crate::context::estimate_tokens;
     use crate::scratchpad::{
-        GrantedModule, Grants, RunEnv, RunOutcome, RunStatus, Scratchpad, ScratchpadEngine, ScratchpadLimits,
-        UnpersistableReason,
+        Presentation, PresentedModule, RunEnv, RunOutcome, RunStatus, Scratchpad, ScratchpadEngine,
+        ScratchpadLimits, UnpersistableReason,
     };
     use crate::session::{CancelHandle, Redactor};
 
@@ -55,18 +55,18 @@ mod tests {
             .to_owned()
     }
 
-    /// An engine over `grants` and `limits`, with no other registration.
-    fn engine(grants: Grants, limits: ScratchpadLimits) -> Arc<ScratchpadEngine> {
+    /// An engine over `presentation` and `limits`, with no other registration.
+    fn engine(presentation: Presentation, limits: ScratchpadLimits) -> Arc<ScratchpadEngine> {
         Arc::new(
-            ScratchpadEngine::builder(limits, grants)
+            ScratchpadEngine::builder(limits, presentation)
                 .build()
                 .expect("the engine builds"),
         )
     }
 
-    /// A scratchpad over `grants` and `limits`, with no other registration.
-    fn pad(grants: Grants, limits: ScratchpadLimits) -> Scratchpad {
-        Scratchpad::new(engine(grants, limits))
+    /// A scratchpad over `presentation` and `limits`, with no other registration.
+    fn pad(presentation: Presentation, limits: ScratchpadLimits) -> Scratchpad {
+        Scratchpad::new(engine(presentation, limits))
     }
 
     /// Runs `script` in `pad` as the agent of a session would.
@@ -105,7 +105,7 @@ mod tests {
             &description(),
             "Returns what the script printed, then the value of its last statement.",
         );
-        let pad = pad(Grants::new(), ScratchpadLimits::new());
+        let pad = pad(Presentation::new(), ScratchpadLimits::new());
         let printed = run(&pad, r#"print("first-line"); 42"#).await;
         assert_eq!(
             printed.status(),
@@ -130,7 +130,7 @@ mod tests {
             &description(),
             "`let` variables and `fn` definitions persist between calls",
         );
-        let pad = pad(Grants::new(), ScratchpadLimits::new());
+        let pad = pad(Presentation::new(), ScratchpadLimits::new());
         let defined = run(&pad, "let kept = 7; fn twice(n) { n * 2 }").await;
         assert_eq!(
             defined.status(),
@@ -159,7 +159,7 @@ mod tests {
             &description(),
             "closures and function pointers work within a session but are lost when it is restored (define a `fn` for anything you must keep)",
         );
-        let pad = pad(Grants::new(), ScratchpadLimits::new());
+        let pad = pad(Presentation::new(), ScratchpadLimits::new());
         let twice = run(&pad, "fn twice(n) { n * 2 }").await;
         assert_eq!(
             twice.status(),
@@ -226,7 +226,7 @@ mod tests {
     // Scenario: chaque affirmation de la description est vraie (closures perdues à la restauration)
     #[tokio::test]
     async fn closures_and_function_pointers_are_lost_when_restored() {
-        let engine = engine(Grants::new(), ScratchpadLimits::new());
+        let engine = engine(Presentation::new(), ScratchpadLimits::new());
         let pad = Scratchpad::new(Arc::clone(&engine));
         let twice = run(&pad, "fn twice(n) { n * 2 }").await;
         assert_eq!(
@@ -301,7 +301,7 @@ mod tests {
         let text = description();
         states(&text, "`const` does not exist");
         states(&text, "a `fn` cannot see scope variables");
-        let pad = pad(Grants::new(), ScratchpadLimits::new());
+        let pad = pad(Presentation::new(), ScratchpadLimits::new());
         let constant = run(&pad, "const LIMIT = 3; LIMIT").await;
         assert_ne!(
             constant.status(),
@@ -336,7 +336,7 @@ mod tests {
         ] {
             states(&text, name);
         }
-        let pad = pad(Grants::new(), ScratchpadLimits::new());
+        let pad = pad(Presentation::new(), ScratchpadLimits::new());
         for script in [
             "vars()",
             "modules()",
@@ -371,7 +371,7 @@ mod tests {
     #[tokio::test]
     async fn the_fmt_functions_are_built_in() {
         states(&description(), "the `fmt_*` functions");
-        let pad = pad(Grants::new(), ScratchpadLimits::new());
+        let pad = pad(Presentation::new(), ScratchpadLimits::new());
         let formatted = run(
             &pad,
             r#""fmt_table" in functions("global").map(|found| found.path)"#,
@@ -392,7 +392,7 @@ mod tests {
             &description(),
             "Errors come back as text: fix the script and call again.",
         );
-        let pad = pad(Grants::new(), ScratchpadLimits::new());
+        let pad = pad(Presentation::new(), ScratchpadLimits::new());
         let broken = run(&pad, "let broken = ;").await;
         assert_ne!(broken.status(), RunStatus::Ok, "a syntax error fails");
         assert!(!broken.text().is_empty(), "the error comes back as text");
@@ -412,22 +412,22 @@ mod tests {
 
     // Scenario: chaque affirmation de la description est vraie (module accordé)
     #[tokio::test]
-    async fn granted_modules_are_called_as_module_function() {
+    async fn presented_modules_are_called_as_module_function() {
         states(
             &description(),
-            "Granted modules are called as `module::function(args)`.",
+            "Presented modules are called as `module::function(args)`.",
         );
         let mut module = Module::new();
         let _hello = module.set_native_fn("hello", |number: i64| Ok(number + 1));
-        let grants = Grants::new()
-            .with_module(GrantedModule::new("demo", Shared::new(module)).expect("a valid module name"))
+        let presentation = Presentation::new()
+            .with_module(PresentedModule::new("demo", Shared::new(module)).expect("a valid module name"))
             .expect("the module is accepted");
-        let pad = pad(grants, ScratchpadLimits::new());
+        let pad = pad(presentation, ScratchpadLimits::new());
         let outcome = run(&pad, "demo::hello(1)").await;
         assert_eq!(
             outcome.status(),
             RunStatus::Ok,
-            "the granted function runs: {}",
+            "the presented function runs: {}",
             outcome.text()
         );
         assert!(
@@ -441,7 +441,10 @@ mod tests {
     #[tokio::test]
     async fn output_over_the_cap_is_cut_in_the_middle() {
         states(&description(), "Output over the cap is cut in the middle");
-        let pad = pad(Grants::new(), ScratchpadLimits::new().with_render_cap_chars(200));
+        let pad = pad(
+            Presentation::new(),
+            ScratchpadLimits::new().with_render_cap_chars(200),
+        );
         let outcome = run(
             &pad,
             r#"let text = ""; for i in 0..500 { text += "abcdef"; } text"#,

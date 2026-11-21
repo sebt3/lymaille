@@ -15,8 +15,8 @@ use rhai::{
 use super::engine::{EngineBuilder, ScratchpadEngine};
 use super::error::{ScratchpadError, ScratchpadResult};
 use super::format::register;
-use super::grant::{GrantedModule, Grants};
 use super::introspect::{Catalog, FunctionEntry, Origin};
+use super::presentation::{Presentation, PresentedModule};
 use super::run::{PadSnapshot, RunEnv, RunOutcome, Scratchpad};
 use crate::session::CancelHandle;
 
@@ -52,11 +52,11 @@ pub struct ModuleDescriptor {
 
 impl ModuleDescriptor {
     /// Describes a module with no function yet. Returns nothing when the name is not a Rhai identifier that a module can
-    /// take: the rule of granted modules applies.
+    /// take: the rule of presented modules applies.
     #[must_use]
     pub fn new(name: &str) -> Option<Self> {
-        GrantedModule::new(name, Shared::new(Module::new())).map(|granted| Self {
-            name: granted.name().to_owned(),
+        PresentedModule::new(name, Shared::new(Module::new())).map(|presented| Self {
+            name: presented.name().to_owned(),
             functions: Vec::new(),
         })
     }
@@ -71,7 +71,7 @@ impl ModuleDescriptor {
 
 /// What the inspection pad reads.
 ///
-/// A definition has nothing but its descriptions, which come with the grants, and no variable. A session has the
+/// A definition has nothing but its descriptions, which come with the presentation, and no variable. A session has the
 /// restored state of a past pad: its variables are read-only, its functions are listed.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
@@ -120,7 +120,7 @@ pub fn descriptors_from_catalog(catalog: &Catalog, modules: &[&str]) -> Vec<Modu
         .collect()
 }
 
-/// The descriptor of a granted module of the catalog, or nothing when the catalog lists no function of it.
+/// The descriptor of a presented module of the catalog, or nothing when the catalog lists no function of it.
 fn describe_module(catalog: &Catalog, module: &str) -> Option<ModuleDescriptor> {
     let prefix = format!("{module}::");
     let functions: Vec<FunctionDescriptor> = catalog
@@ -237,29 +237,27 @@ fn duplicate(kind: &str, name: &str) -> ScratchpadError {
 }
 
 /// The engine builder of an inspection pad: the limits of the base engine, the toolsets and the skills of the target
-/// grants, and one shell module per described module. No group is granted.
+/// presentation, and one shell module per described module. No group is presented.
 fn shell_builder(
     base: &ScratchpadEngine,
-    grants: &Grants,
+    presentation: &Presentation,
     modules: &[ModuleDescriptor],
 ) -> ScratchpadResult<EngineBuilder> {
-    let mut shells = Grants::new();
-    for toolset in grants.toolsets() {
+    let mut shells = Presentation::new();
+    for toolset in presentation.toolsets() {
         shells = shells
             .with_toolset(toolset.clone())
             .ok_or_else(|| duplicate("toolset", toolset.name()))?;
     }
-    for skill in grants.skills() {
+    for skill in presentation.skills() {
         shells = shells
             .with_skill(skill.clone())
             .ok_or_else(|| duplicate("skill", skill.name()))?;
     }
     for descriptor in modules {
-        let shell =
-            GrantedModule::new(&descriptor.name, Shared::new(shell_module(descriptor))).ok_or_else(|| {
-                ScratchpadError::Engine {
-                    message: format!("the module `{}` cannot be an inspection shell", descriptor.name),
-                }
+        let shell = PresentedModule::new(&descriptor.name, Shared::new(shell_module(descriptor)))
+            .ok_or_else(|| ScratchpadError::Engine {
+                message: format!("the module `{}` cannot be an inspection shell", descriptor.name),
             })?;
         shells = shells
             .with_module(shell)
@@ -331,8 +329,8 @@ fn source_error(message: &str) -> EvalAltResult {
 }
 
 impl InspectionPad {
-    /// Builds the inspection pad of a target. The base engine gives the limits; the target grants give the toolsets and
-    /// the skills; the modules are projected as shells from their descriptors. No group is granted. The engine also
+    /// Builds the inspection pad of a target. The base engine gives the limits; the target presentation give the toolsets and
+    /// the skills; the modules are projected as shells from their descriptors. No group is presented. The engine also
     /// holds `source`, which the catalog does not list.
     ///
     /// # Errors
@@ -340,13 +338,13 @@ impl InspectionPad {
     /// Returns an engine error when a module name is declared twice, or when the engine cannot be built.
     pub fn new(
         base: &ScratchpadEngine,
-        grants: &Grants,
+        presentation: &Presentation,
         modules: &[ModuleDescriptor],
         target: InspectionTarget,
     ) -> ScratchpadResult<Self> {
         let sources = Arc::new(sources_of(&target));
         let engine = Arc::new(
-            shell_builder(base, grants, modules)?
+            shell_builder(base, presentation, modules)?
                 .with_unlisted_registration(move |engine| {
                     register_source(engine, sources);
                     Ok(())
@@ -378,15 +376,15 @@ mod tests {
     };
     use crate::clock::{ManualClock, Timestamp};
     use crate::scratchpad::{
-        Catalog, GrantedModule, Grants, PadSnapshot, RunEnv, RunOutcome, RunStatus, Scratchpad,
+        Catalog, PadSnapshot, Presentation, PresentedModule, RunEnv, RunOutcome, RunStatus, Scratchpad,
         ScratchpadEngine, ScratchpadLimits, ScriptErrorClass,
     };
     use crate::session::{CancelHandle, Redactor};
     use rhai::{FuncRegistration, ImmutableString, Module, Shared};
 
-    /// A base engine with the default limits and no granted group.
+    /// A base engine with the default limits and no presented group.
     fn base() -> ScratchpadEngine {
-        match ScratchpadEngine::builder(ScratchpadLimits::new(), Grants::new()).build() {
+        match ScratchpadEngine::builder(ScratchpadLimits::new(), Presentation::new()).build() {
             Ok(engine) => engine,
             Err(error) => panic!("the base engine must build: {error}"),
         }
@@ -444,7 +442,7 @@ mod tests {
     async fn shell_function_lists_with_its_documentation() {
         let pad = InspectionPad::new(
             &base(),
-            &Grants::new(),
+            &Presentation::new(),
             &[grafana()],
             InspectionTarget::Definition,
         );
@@ -474,7 +472,7 @@ mod tests {
     async fn shell_call_fails_without_side_effect() {
         let Ok(pad) = InspectionPad::new(
             &base(),
-            &Grants::new(),
+            &Presentation::new(),
             &[grafana()],
             InspectionTarget::Definition,
         ) else {
@@ -497,8 +495,12 @@ mod tests {
     #[tokio::test]
     async fn session_variables_are_read_only() {
         let snapshot = snapshot_of("let n = 3;").await;
-        let Ok(pad) = InspectionPad::new(&base(), &Grants::new(), &[], InspectionTarget::Session(snapshot))
-        else {
+        let Ok(pad) = InspectionPad::new(
+            &base(),
+            &Presentation::new(),
+            &[],
+            InspectionTarget::Session(snapshot),
+        ) else {
             panic!("the inspection pad must build");
         };
         let read = eval(&pad, "n").await;
@@ -523,8 +525,12 @@ mod tests {
     #[tokio::test]
     async fn session_functions_are_listed_but_not_callable() {
         let snapshot = snapshot_of("fn f(x) { x + 1 }").await;
-        let Ok(pad) = InspectionPad::new(&base(), &Grants::new(), &[], InspectionTarget::Session(snapshot))
-        else {
+        let Ok(pad) = InspectionPad::new(
+            &base(),
+            &Presentation::new(),
+            &[],
+            InspectionTarget::Session(snapshot),
+        ) else {
             panic!("the inspection pad must build");
         };
         let listed = eval(&pad, r#"functions("script")[0].path"#).await;
@@ -559,7 +565,8 @@ mod tests {
     // sur le bac d'inspection seulement)
     #[tokio::test]
     async fn source_is_refused_on_a_definition_target() {
-        let Ok(pad) = InspectionPad::new(&base(), &Grants::new(), &[], InspectionTarget::Definition) else {
+        let Ok(pad) = InspectionPad::new(&base(), &Presentation::new(), &[], InspectionTarget::Definition)
+        else {
             panic!("the inspection pad must build");
         };
         let outcome = eval(&pad, r#"source("f")"#).await;
@@ -578,8 +585,12 @@ mod tests {
     #[tokio::test]
     async fn source_of_an_unknown_name_names_the_known_functions() {
         let snapshot = snapshot_of("fn f(x) { x + 1 }").await;
-        let Ok(pad) = InspectionPad::new(&base(), &Grants::new(), &[], InspectionTarget::Session(snapshot))
-        else {
+        let Ok(pad) = InspectionPad::new(
+            &base(),
+            &Presentation::new(),
+            &[],
+            InspectionTarget::Session(snapshot),
+        ) else {
             panic!("the inspection pad must build");
         };
         let outcome = eval(&pad, r#"source("g")"#).await;
@@ -598,8 +609,12 @@ mod tests {
     #[tokio::test]
     async fn source_of_an_ambiguous_name_takes_the_arity() {
         let snapshot = snapshot_of("fn f(x) { x } fn f(x, y) { x + y }").await;
-        let Ok(pad) = InspectionPad::new(&base(), &Grants::new(), &[], InspectionTarget::Session(snapshot))
-        else {
+        let Ok(pad) = InspectionPad::new(
+            &base(),
+            &Presentation::new(),
+            &[],
+            InspectionTarget::Session(snapshot),
+        ) else {
             panic!("the inspection pad must build");
         };
         let ambiguous = eval(&pad, r#"source("f")"#).await;
@@ -638,8 +653,8 @@ mod tests {
 
     // Scenario: aucun groupe fs ni shell (le groupe Host est absent aussi)
     #[tokio::test]
-    async fn host_group_is_absent_even_when_the_target_grants_it() {
-        let target = Grants::new().with_group(crate::scratchpad::CoreGroup::Host);
+    async fn host_group_is_absent_even_when_the_target_presents_it() {
+        let target = Presentation::new().with_group(crate::scratchpad::CoreGroup::Host);
         let Ok(pad) = InspectionPad::new(&base(), &target, &[grafana()], InspectionTarget::Definition) else {
             panic!("the inspection pad must build");
         };
@@ -669,7 +684,7 @@ mod tests {
     fn a_module_declared_twice_is_refused() {
         match InspectionPad::new(
             &base(),
-            &Grants::new(),
+            &Presentation::new(),
             &[grafana(), grafana()],
             InspectionTarget::Definition,
         ) {
@@ -681,8 +696,8 @@ mod tests {
         }
     }
 
-    /// A granted module `grafana` with `loki_query(query, range)` documented, and `ping()` without documentation.
-    fn grafana_granted() -> GrantedModule {
+    /// A presented module `grafana` with `loki_query(query, range)` documented, and `ping()` without documentation.
+    fn grafana_presented() -> PresentedModule {
         let mut module = Module::new();
         let _loki = FuncRegistration::new("loki_query")
             .with_comments(["/// Runs a Loki query"])
@@ -691,18 +706,18 @@ mod tests {
                 format!("{query}/{range}")
             });
         let _ping = FuncRegistration::new("ping").set_into_module(&mut module, || "pong".to_owned());
-        let Some(granted) = GrantedModule::new("grafana", Shared::new(module)) else {
+        let Some(presented) = PresentedModule::new("grafana", Shared::new(module)) else {
             panic!("a valid module name");
         };
-        granted
+        presented
     }
 
-    /// The catalog of an engine that grants `grafana_granted`.
+    /// The catalog of an engine that presents `grafana_presented`.
     fn catalog_with_grafana() -> Catalog {
-        let Some(grants) = Grants::new().with_module(grafana_granted()) else {
+        let Some(presentation) = Presentation::new().with_module(grafana_presented()) else {
             panic!("the module is added once");
         };
-        match ScratchpadEngine::builder(ScratchpadLimits::new(), grants).build() {
+        match ScratchpadEngine::builder(ScratchpadLimits::new(), presentation).build() {
             Ok(engine) => engine.catalog().clone(),
             Err(error) => panic!("the engine must build: {error}"),
         }
@@ -743,7 +758,7 @@ mod tests {
         let descriptors = descriptors_from_catalog(&catalog, &["grafana"]);
         let Ok(pad) = InspectionPad::new(
             &base(),
-            &Grants::new(),
+            &Presentation::new(),
             &descriptors,
             InspectionTarget::Definition,
         ) else {
@@ -777,7 +792,7 @@ mod tests {
     async fn definition_target_has_no_variables() {
         let Ok(pad) = InspectionPad::new(
             &base(),
-            &Grants::new(),
+            &Presentation::new(),
             &[grafana()],
             InspectionTarget::Definition,
         ) else {
@@ -796,7 +811,7 @@ mod tests {
     // Scenario: aucun groupe fs ni shell (ils relèvent de Host, jamais accordé à l'inspection)
     #[tokio::test]
     async fn no_filesystem_or_shell_group() {
-        let target = Grants::new();
+        let target = Presentation::new();
         let Ok(pad) = InspectionPad::new(&base(), &target, &[grafana()], InspectionTarget::Definition) else {
             panic!("the inspection pad must build");
         };
@@ -879,7 +894,7 @@ mod tests {
     async fn shell_function_keeps_its_arity() {
         let Ok(pad) = InspectionPad::new(
             &base(),
-            &Grants::new(),
+            &Presentation::new(),
             &[grafana()],
             InspectionTarget::Definition,
         ) else {
@@ -897,7 +912,7 @@ mod tests {
     async fn module_outside_the_target_is_not_reachable() {
         let Ok(pad) = InspectionPad::new(
             &base(),
-            &Grants::new(),
+            &Presentation::new(),
             &[grafana()],
             InspectionTarget::Definition,
         ) else {
@@ -913,10 +928,10 @@ mod tests {
 
     #[tokio::test]
     async fn toolsets_of_the_target_are_listed() {
-        let Some(toolset) = crate::scratchpad::GrantedToolset::new("grafana", "Dashboards and logs") else {
+        let Some(toolset) = crate::scratchpad::PresentedToolset::new("grafana", "Dashboards and logs") else {
             panic!("a valid toolset");
         };
-        let Some(target) = Grants::new().with_toolset(toolset) else {
+        let Some(target) = Presentation::new().with_toolset(toolset) else {
             panic!("the toolset is added once");
         };
         let Ok(pad) = InspectionPad::new(&base(), &target, &[], InspectionTarget::Definition) else {
@@ -936,8 +951,12 @@ mod tests {
     #[tokio::test]
     async fn inspection_outcome_carries_an_empty_snapshot() {
         let snapshot = snapshot_of("let n = 3;").await;
-        let Ok(pad) = InspectionPad::new(&base(), &Grants::new(), &[], InspectionTarget::Session(snapshot))
-        else {
+        let Ok(pad) = InspectionPad::new(
+            &base(),
+            &Presentation::new(),
+            &[],
+            InspectionTarget::Session(snapshot),
+        ) else {
             panic!("the inspection pad must build");
         };
         let outcome = eval(&pad, "let m = 4; fn g(x) { x + 1 } n + m").await;
@@ -980,7 +999,7 @@ mod tests {
         let snapshot = snapshot_of("fn f(x) { x + 1 }").await;
         let Ok(pad) = InspectionPad::new(
             &base(),
-            &Grants::new(),
+            &Presentation::new(),
             &[grafana()],
             InspectionTarget::Session(snapshot),
         ) else {

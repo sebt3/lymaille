@@ -1,16 +1,16 @@
-//! Rhai scratchpad: the sandboxed evaluation of the LLM's scripts, their limits, the description of what the definition grants,
+//! Rhai scratchpad: the sandboxed evaluation of the LLM's scripts, their limits, the description of what the definition presents,
 //! and the bounded rendering and formatting of the results. This lot holds the pure parts; the engine, persistence,
 //! introspection and the `rhai_pad` tool come with the next ones.
 
 mod engine;
 mod error;
 mod format;
-mod grant;
 mod inspect;
 mod inspect_tool;
 mod introspect;
 mod limits;
 mod persist;
+mod presentation;
 mod render;
 mod run;
 mod suggest;
@@ -20,7 +20,6 @@ pub use error::{
     LimitKind, NotFoundKind, ScratchpadError, ScratchpadResult, ScriptErrorClass, ScriptPosition,
 };
 pub use format::register_format_functions;
-pub use grant::{CoreGroup, GrantedModule, GrantedSkill, GrantedToolset, Grants};
 pub use inspect::{
     FunctionDescriptor, InspectionPad, InspectionTarget, ModuleDescriptor, descriptors_from_catalog,
     shell_module,
@@ -34,6 +33,7 @@ pub use persist::{
     FunctionSource, PersistWarning, Recompiled, RestoreWarning, ScopeSnapshot, UnpersistableReason,
     extract_function_sources, recompile_functions, restore_scope, snapshot_scope, to_dynamic, to_tagged,
 };
+pub use presentation::{CoreGroup, Presentation, PresentedModule, PresentedSkill, PresentedToolset};
 pub use render::{Rendered, full_text, render_value, truncate_middle};
 pub use run::{PadSnapshot, Restored, RunEnv, RunOutcome, RunStatus, Scratchpad};
 pub use suggest::{CandidateSet, nearest, suggest_for};

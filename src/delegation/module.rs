@@ -322,7 +322,7 @@ mod tests {
         RunRegistry, SubagentLauncher, SubagentOutcome, SubagentStatus, run_batch,
     };
     use crate::runtime::{RHAI_PAD_TOOL, TurnConfig, TurnRunner};
-    use crate::scratchpad::{GrantedModule, Grants, Scratchpad, ScratchpadEngine, ScratchpadLimits};
+    use crate::scratchpad::{Presentation, PresentedModule, Scratchpad, ScratchpadEngine, ScratchpadLimits};
     use crate::session::{
         AgentRef, CancelHandle, EventSink, InMemoryStore, Message, ModelSnapshot, RecordingSink, Redactor,
         RunId, SegmentContext, SessionId, SessionState, ToolCall,
@@ -483,11 +483,11 @@ mod tests {
         }
     }
 
-    /// A turn runner of the sub-agent session `session`, driven by `provider` and granted `grants`.
+    /// A turn runner of the sub-agent session `session`, driven by `provider` and presented `presentation`.
     fn batch_runner<P: InferenceProvider>(
         session: &str,
         provider: P,
-        grants: Grants,
+        presentation: Presentation,
     ) -> TurnRunner<P, DefaultStrategy<NoSummary>, InMemoryStore> {
         let profile = ModelProfile::new("profile-batch".to_owned(), "prov".to_owned(), "model".to_owned())
             .with_context_size(100_000)
@@ -499,7 +499,7 @@ mod tests {
             Vec::new(),
             ModelSnapshot::new("model", ReplayMode::None),
         );
-        let engine = ScratchpadEngine::builder(ScratchpadLimits::new(), grants)
+        let engine = ScratchpadEngine::builder(ScratchpadLimits::new(), presentation)
             .build()
             .expect("the engine builds");
         let config = TurnConfig::new(
@@ -528,7 +528,7 @@ mod tests {
         )
     }
 
-    /// Launcher double of a real sub-agent: a turn runner granted the `result` module over the collector of the request,
+    /// Launcher double of a real sub-agent: a turn runner presented the `result` module over the collector of the request,
     /// driven by `run_batch` (`agent-sessions/delegation#FR-4`).
     struct Batch {
         seen: Arc<Mutex<Vec<Vec<String>>>>,
@@ -542,16 +542,16 @@ mod tests {
             let seen = Arc::clone(&self.seen);
             async move {
                 let module = result_module(Arc::clone(request.collector()));
-                let granted =
-                    GrantedModule::new("result", Arc::new(module)).expect("result is a Rhai identifier");
-                let grants = Grants::new()
-                    .with_module(granted)
-                    .expect("the module is granted once");
+                let presented =
+                    PresentedModule::new("result", Arc::new(module)).expect("result is a Rhai identifier");
+                let presentation = Presentation::new()
+                    .with_module(presented)
+                    .expect("the module is presented once");
                 let model = ScriptedModel {
                     calls: AtomicUsize::new(0),
                     seen,
                 };
-                let mut runner = batch_runner(request.session().as_str(), model, grants);
+                let mut runner = batch_runner(request.session().as_str(), model, presentation);
                 run_batch(
                     &mut runner,
                     request.task(),
@@ -1289,7 +1289,7 @@ mod tests {
         }
     }
 
-    // Not a Scenario, end to end: a real sub-agent (a turn runner granted `result`, driven by `run_batch`) submits an invalid
+    // Not a Scenario, end to end: a real sub-agent (a turn runner presented `result`, driven by `run_batch`) submits an invalid
     // result through `rhai_pad`, sees the refusal at its second model call without the submitted key or value, corrects it in
     // the same run, and `delegate::wait` gives the corrected result (`FR-4`, `AC-2`).
     #[tokio::test(flavor = "multi_thread")]

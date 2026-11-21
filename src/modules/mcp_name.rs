@@ -1,11 +1,11 @@
 //! Name of the Rhai function derived from the name of an MCP tool, and the collision check of one server
 //! (`agent-sessions/modules#FR-10`, `agent-sessions/modules#AC-6`). The identifier rules are those of
-//! [`GrantedModule::new`](crate::scratchpad::GrantedModule::new): one definition, not a copy.
+//! [`PresentedModule::new`](crate::scratchpad::PresentedModule::new): one definition, not a copy.
 
 use rhai::{Module, Shared};
 
 use super::{ModulesError, ModulesResult};
-use crate::scratchpad::GrantedModule;
+use crate::scratchpad::PresentedModule;
 
 /// Name of the Rhai function of an MCP tool: each character that is not an ASCII letter, a digit or `_` becomes `_`.
 /// `loki.query` gives `loki_query`; a name that is already valid is unchanged.
@@ -54,9 +54,9 @@ pub fn name_tools(role: &str, tools: &[&str]) -> ModulesResult<Vec<(String, Stri
 }
 
 /// Whether `name` is accepted as the name of a Rhai module, which is the rule of Rhai function names used by
-/// [`GrantedModule::new`]: the same definition, not a copy.
+/// [`PresentedModule::new`]: the same definition, not a copy.
 fn is_usable_function_name(name: &str) -> bool {
-    GrantedModule::new(name, Shared::new(Module::new())).is_some()
+    PresentedModule::new(name, Shared::new(Module::new())).is_some()
 }
 
 /// The refusal of an MCP module for `role`.

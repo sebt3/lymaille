@@ -1188,7 +1188,7 @@ mod tests {
     use crate::context::{
         Budget, ContextError, ContextResult, DefaultStrategy, Digest, ReplayMode, Summarizer,
     };
-    use crate::scratchpad::{Grants, Scratchpad, ScratchpadEngine, ScratchpadLimits};
+    use crate::scratchpad::{Presentation, Scratchpad, ScratchpadEngine, ScratchpadLimits};
     use crate::session::{
         AgentRef, BoundaryKind, CancelHandle, DiscardCause, EventKind, InMemoryStore, LabelAuthor, Message,
         ModelSnapshot, NativeTool, Outcome, Reasoning, RecordingSink, Redactor, ReviewState, Segment,
@@ -1416,12 +1416,11 @@ mod tests {
     }
 
     fn engine_with(registration: impl FnOnce(&mut rhai::Engine) + 'static) -> Arc<ScratchpadEngine> {
-        let builder = ScratchpadEngine::builder(ScratchpadLimits::new(), Grants::new()).with_registration(
-            move |engine| {
+        let builder = ScratchpadEngine::builder(ScratchpadLimits::new(), Presentation::new())
+            .with_registration(move |engine| {
                 registration(engine);
                 Ok(())
-            },
-        );
+            });
         Arc::new(builder.build().expect("the engine must build"))
     }
 

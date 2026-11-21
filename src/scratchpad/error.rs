@@ -190,7 +190,7 @@ pub enum ScratchpadError {
         /// Name of the function, `module::function`.
         name: String,
     },
-    /// The engine cannot be built: a group that cannot be granted, a registration that fails.
+    /// The engine cannot be built: a group that cannot be presented, a registration that fails.
     #[error("scratchpad engine failed: {message}")]
     Engine {
         /// Text of the failure.

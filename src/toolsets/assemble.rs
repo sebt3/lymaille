@@ -1,9 +1,9 @@
-//! Assembly of what the scratchpad receives from the toolsets of an agent: a granted module, a granted toolset and the
-//! granted skills for each toolset that builds, and the reason for each one that does not (`agent-sessions/toolsets#FR-2`,
+//! Assembly of what the scratchpad receives from the toolsets of an agent: a presented module, a presented toolset and the
+//! presented skills for each toolset that builds, and the reason for each one that does not (`agent-sessions/toolsets#FR-2`,
 //! `AC-1`, `agent-sessions/scratchpad#FR-3`).
 //!
 //! The module of a toolset is evaluated on a construction engine that knows the dependencies of that toolset, and only
-//! those. No dependency is granted by that: the import sub-modules are emptied before the module is granted. Nothing here
+//! those. No dependency is presented by that: the import sub-modules are emptied before the module is presented. Nothing here
 //! performs I/O.
 
 use std::collections::BTreeMap;
@@ -12,27 +12,29 @@ use rhai::module_resolvers::StaticModuleResolver;
 use rhai::{Module, Scope, Shared};
 
 use super::{ResolvedContext, Toolset, ToolsetsError};
-use crate::scratchpad::{GrantedModule, GrantedSkill, GrantedToolset, Grants, ScratchpadLimits, base_engine};
+use crate::scratchpad::{
+    Presentation, PresentedModule, PresentedSkill, PresentedToolset, ScratchpadLimits, base_engine,
+};
 
-/// What the scratchpad receives from the toolsets of an agent: the grants, and the toolsets that could not be built.
+/// What the scratchpad receives from the toolsets of an agent: the presentation, and the toolsets that could not be built.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Assembled {
-    grants: Grants,
+    presentation: Presentation,
     failures: Vec<ToolsetsError>,
 }
 
 impl Assembled {
-    /// The granted modules, toolsets and skills.
+    /// The presented modules, toolsets and skills.
     #[must_use]
-    pub const fn grants(&self) -> &Grants {
-        &self.grants
+    pub const fn presentation(&self) -> &Presentation {
+        &self.presentation
     }
 
-    /// Consumes the result and gives the grants, to which the definition adds its groups.
+    /// Consumes the result and gives the presentation, to which the definition adds its groups.
     #[must_use]
-    pub fn into_grants(self) -> Grants {
-        self.grants
+    pub fn into_presentation(self) -> Presentation {
+        self.presentation
     }
 
     /// The toolsets that were left out, each as an [`ToolsetsError::InvalidToolset`] that names it and gives the reason.
@@ -44,36 +46,40 @@ impl Assembled {
 
 /// Assembles the toolsets of an agent.
 ///
-/// `granted_modules` are the modules the definition grants; they are kept as they are. `dependencies` are the modules that
+/// `presented_modules` are the modules the definition presents; they are kept as they are. `dependencies` are the modules that
 /// toolsets may depend on, by name: a toolset reaches only the ones it declares, while its module is evaluated, and the
-/// LLM reaches them only when the definition grants them too. Each toolset is evaluated on an engine built from
-/// `base_engine` with `limits`; one that cannot be built is left out and reported, the others are granted.
+/// LLM reaches them only when the definition presents them too. Each toolset is evaluated on an engine built from
+/// `base_engine` with `limits`; one that cannot be built is left out and reported, the others are presented.
 ///
 /// The resolved `context` is not read here: `session_context()` is registered on the engine of the session and read when
 /// a function of a module is called, not when the module is evaluated.
 #[must_use]
 pub fn assemble(
     toolsets: &[Toolset],
-    granted_modules: &[GrantedModule],
+    presented_modules: &[PresentedModule],
     dependencies: &BTreeMap<String, Shared<Module>>,
     _context: &ResolvedContext,
     limits: &ScratchpadLimits,
 ) -> Assembled {
-    let mut grants = Grants::new();
-    for module in granted_modules {
-        if let Some(extended) = grants.clone().with_module(module.clone()) {
-            grants = extended;
+    let mut presentation = Presentation::new();
+    for module in presented_modules {
+        if let Some(extended) = presentation.clone().with_module(module.clone()) {
+            presentation = extended;
         }
     }
     let mut failures = Vec::new();
     for toolset in toolsets {
-        let outcome = build(toolset, dependencies, limits).and_then(|module| grant(&grants, toolset, module));
+        let outcome =
+            build(toolset, dependencies, limits).and_then(|module| present(&presentation, toolset, module));
         match outcome {
-            Ok(extended) => grants = extended,
+            Ok(extended) => presentation = extended,
             Err(failure) => failures.push(failure),
         }
     }
-    Assembled { grants, failures }
+    Assembled {
+        presentation,
+        failures,
+    }
 }
 
 /// The refusal of a toolset, with a fixed reason and a detail.
@@ -124,22 +130,26 @@ fn place(position: rhai::Position) -> String {
     }
 }
 
-/// The grants extended with a toolset: its module, its description and its skills. All or nothing.
-fn grant(grants: &Grants, toolset: &Toolset, module: Module) -> Result<Grants, ToolsetsError> {
-    let taken = || failure(toolset, "a name is already granted", String::new());
-    let granted_module = GrantedModule::new(toolset.name(), Shared::new(module))
+/// The presentation extended with a toolset: its module, its description and its skills. All or nothing.
+fn present(
+    presentation: &Presentation,
+    toolset: &Toolset,
+    module: Module,
+) -> Result<Presentation, ToolsetsError> {
+    let taken = || failure(toolset, "a name is already presented", String::new());
+    let presented_module = PresentedModule::new(toolset.name(), Shared::new(module))
         .ok_or_else(|| failure(toolset, "the name is not a module name", String::new()))?;
-    let granted_toolset = GrantedToolset::new(toolset.name(), toolset.description())
+    let presented_toolset = PresentedToolset::new(toolset.name(), toolset.description())
         .ok_or_else(|| failure(toolset, "the description must not be blank", String::new()))?;
-    let mut extended = grants
+    let mut extended = presentation
         .clone()
-        .with_module(granted_module)
-        .and_then(|next| next.with_toolset(granted_toolset))
+        .with_module(presented_module)
+        .and_then(|next| next.with_toolset(presented_toolset))
         .ok_or_else(taken)?;
     for skill in toolset.skills().values() {
-        let granted_skill = GrantedSkill::new(skill.name(), skill.description(), Some(toolset.name()))
+        let presented_skill = PresentedSkill::new(skill.name(), skill.description(), Some(toolset.name()))
             .ok_or_else(|| failure(toolset, "a skill is not valid", String::new()))?;
-        extended = extended.with_skill(granted_skill).ok_or_else(taken)?;
+        extended = extended.with_skill(presented_skill).ok_or_else(taken)?;
     }
     Ok(extended)
 }
@@ -156,7 +166,7 @@ mod tests {
     use crate::clock::{Clock, ManualClock, Timestamp};
     use crate::modules::{InMemoryMemoryStore, MemoryLevel, MemoryScopes, memory_module, memory_module_name};
     use crate::scratchpad::{
-        GrantedModule, GrantedSkill, GrantedToolset, RunEnv, RunOutcome, RunStatus, Scratchpad,
+        PresentedModule, PresentedSkill, PresentedToolset, RunEnv, RunOutcome, RunStatus, Scratchpad,
         ScratchpadEngine, ScratchpadLimits, ScriptErrorClass,
     };
     use crate::session::{CancelHandle, EventSink, RecordingSink, Redactor, SessionId};
@@ -214,21 +224,21 @@ mod tests {
 
     fn run_assemble(
         toolsets: &[Toolset],
-        granted: &[GrantedModule],
+        presented: &[PresentedModule],
         dependencies: &BTreeMap<String, Shared<Module>>,
     ) -> Assembled {
         assemble(
             toolsets,
-            granted,
+            presented,
             dependencies,
             &context(),
             &ScratchpadLimits::new(),
         )
     }
 
-    /// A pad over the grants of an assembly.
+    /// A pad over the presentation of an assembly.
     fn pad(assembled: Assembled) -> Scratchpad {
-        let engine = ScratchpadEngine::builder(ScratchpadLimits::new(), assembled.into_grants())
+        let engine = ScratchpadEngine::builder(ScratchpadLimits::new(), assembled.into_presentation())
             .build()
             .expect("the engine builds");
         Scratchpad::new(Arc::new(engine))
@@ -244,10 +254,10 @@ mod tests {
 
     fn module_names(assembled: &Assembled) -> Vec<&str> {
         assembled
-            .grants()
+            .presentation()
             .modules()
             .iter()
-            .map(GrantedModule::name)
+            .map(PresentedModule::name)
             .collect()
     }
 
@@ -279,7 +289,7 @@ mod tests {
         let toolsets = [depending_on(toolset("ops", OPS), "helpers")];
         let assembled = run_assemble(&toolsets, &[], &with_helpers());
         assert!(assembled.failures().is_empty(), "got {:?}", assembled.failures());
-        assert_eq!(module_names(&assembled), ["ops"], "helpers is not granted");
+        assert_eq!(module_names(&assembled), ["ops"], "helpers is not presented");
         let pad = pad(assembled);
 
         let called = run(&pad, "ops::twice(4)").await;
@@ -331,26 +341,26 @@ mod tests {
     fn import_sub_modules_are_emptied() {
         let toolsets = [depending_on(toolset("ops", OPS), "helpers")];
         let assembled = run_assemble(&toolsets, &[], &with_helpers());
-        let granted = assembled
-            .grants()
+        let presented = assembled
+            .presentation()
             .modules()
             .first()
-            .expect("the module is granted");
+            .expect("the module is presented");
         assert!(
-            granted
+            presented
                 .module()
                 .iter_sub_modules()
                 .all(|(_, module)| module.is_empty()),
             "no content of a dependency remains"
         );
-        assert!(!granted.module().is_empty(), "the public functions remain");
+        assert!(!presented.module().is_empty(), "the public functions remain");
     }
 
     #[test]
-    fn dependency_granted_by_the_definition_is_granted() {
+    fn dependency_presented_by_the_definition_is_presented() {
         let toolsets = [depending_on(toolset("ops", OPS), "helpers")];
-        let granted = [GrantedModule::new("helpers", helpers()).expect("a valid name")];
-        let assembled = run_assemble(&toolsets, &granted, &with_helpers());
+        let presented = [PresentedModule::new("helpers", helpers()).expect("a valid name")];
+        let assembled = run_assemble(&toolsets, &presented, &with_helpers());
         assert!(assembled.failures().is_empty());
         assert_eq!(module_names(&assembled), ["helpers", "ops"]);
     }
@@ -373,13 +383,13 @@ mod tests {
         let assembled = run_assemble(&toolsets, &[], &BTreeMap::new());
         assert_eq!(failed_names(&assembled), ["ops"]);
         assert_eq!(module_names(&assembled), ["plain"]);
-        let granted: Vec<&str> = assembled
-            .grants()
+        let presented: Vec<&str> = assembled
+            .presentation()
             .toolsets()
             .iter()
-            .map(GrantedToolset::name)
+            .map(PresentedToolset::name)
             .collect();
-        assert_eq!(granted, ["plain"], "the failed toolset is not granted at all");
+        assert_eq!(presented, ["plain"], "the failed toolset is not presented at all");
         let reason = assembled.failures().first().expect("a failure").to_string();
         assert!(
             reason.contains("helpers"),
@@ -405,10 +415,10 @@ mod tests {
     }
 
     #[test]
-    fn toolset_name_taken_by_a_granted_module_fails() {
-        let granted = [GrantedModule::new("ops", Shared::new(Module::new())).expect("a valid name")];
+    fn toolset_name_taken_by_a_presented_module_fails() {
+        let presented = [PresentedModule::new("ops", Shared::new(Module::new())).expect("a valid name")];
         let toolsets = [toolset("ops", "fn f() { 1 }"), toolset("other", "fn g() { 1 }")];
-        let assembled = run_assemble(&toolsets, &granted, &BTreeMap::new());
+        let assembled = run_assemble(&toolsets, &presented, &BTreeMap::new());
         assert_eq!(failed_names(&assembled), ["ops"]);
         assert_eq!(
             module_names(&assembled),
@@ -420,35 +430,35 @@ mod tests {
     // Scenario: les skills suivent leur toolset
     #[test]
     fn skills_follow_their_toolset() {
-        let granted_toolset = with_skill(toolset("ops", "fn f() { 1 }"), "ops-skill");
-        let _not_granted = with_skill(toolset("other", "fn g() { 1 }"), "other-skill");
-        let assembled = run_assemble(&[granted_toolset], &[], &BTreeMap::new());
-        let skills = assembled.grants().skills();
+        let presented_toolset = with_skill(toolset("ops", "fn f() { 1 }"), "ops-skill");
+        let _not_presented = with_skill(toolset("other", "fn g() { 1 }"), "other-skill");
+        let assembled = run_assemble(&[presented_toolset], &[], &BTreeMap::new());
+        let skills = assembled.presentation().skills();
         assert_eq!(skills.len(), 1);
         let skill = skills.first().expect("one skill");
         assert_eq!(skill.name(), "ops-skill");
         assert_eq!(skill.description(), "the skill ops-skill");
         assert_eq!(skill.toolset(), Some("ops"));
-        let toolsets = assembled.grants().toolsets();
+        let toolsets = assembled.presentation().toolsets();
         assert_eq!(toolsets.len(), 1);
         assert_eq!(
-            toolsets.first().map(GrantedToolset::description),
+            toolsets.first().map(PresentedToolset::description),
             Some("the toolset ops")
         );
     }
 
     #[test]
-    fn skills_of_a_failed_toolset_are_not_granted() {
+    fn skills_of_a_failed_toolset_are_not_presented() {
         let toolsets = [
             with_skill(depending_on(toolset("ops", OPS), "helpers"), "ops-skill"),
             with_skill(toolset("fine", "fn f() { 1 }"), "fine-skill"),
         ];
         let assembled = run_assemble(&toolsets, &[], &BTreeMap::new());
         let names: Vec<&str> = assembled
-            .grants()
+            .presentation()
             .skills()
             .iter()
-            .map(GrantedSkill::name)
+            .map(PresentedSkill::name)
             .collect();
         assert_eq!(names, ["fine-skill"]);
     }
@@ -461,7 +471,7 @@ mod tests {
         ];
         let assembled = run_assemble(&toolsets, &[], &BTreeMap::new());
         assert_eq!(failed_names(&assembled), ["b"]);
-        assert_eq!(module_names(&assembled), ["a"], "not granted by halves");
+        assert_eq!(module_names(&assembled), ["a"], "not presented by halves");
     }
 
     // modules#AC-2: a read-only toolset over `memory_user`.

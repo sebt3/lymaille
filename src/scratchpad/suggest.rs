@@ -1,6 +1,6 @@
-//! Closest candidates of a name that is not found, taken among the granted elements only: a function, a module or a variable
+//! Closest candidates of a name that is not found, taken among the presented elements only: a function, a module or a variable
 //! the script cannot reach is never suggested, even when it is the closest name. The suggestions turn a bare Rhai error into
-//! something the LLM can act on, without revealing anything it was not granted.
+//! something the LLM can act on, without revealing anything it was not presented.
 
 use super::error::{NotFoundKind, ScratchpadError};
 
@@ -11,7 +11,7 @@ const MAX_DISTANCE: usize = 3;
 /// Longest name compared, in characters: longer names are cut, which keeps the distance computation bounded.
 const MAX_NAME_CHARS: usize = 128;
 
-/// Elements a not-found name can be compared with: the visible functions with their signatures, the granted module names
+/// Elements a not-found name can be compared with: the visible functions with their signatures, the presented module names
 /// and the variables of the scope.
 ///
 /// Usage lines can be attached on top of the function candidates with [`CandidateSet::with_usage`].
@@ -25,7 +25,7 @@ pub struct CandidateSet {
 }
 
 impl CandidateSet {
-    /// Builds the set from the call paths with their signatures of the visible functions, the granted module names and the
+    /// Builds the set from the call paths with their signatures of the visible functions, the presented module names and the
     /// scope variable names.
     #[must_use]
     pub const fn new(functions: Vec<(String, String)>, modules: Vec<String>, variables: Vec<String>) -> Self {
@@ -39,7 +39,7 @@ impl CandidateSet {
 
     /// Attaches the usage lines of the visible functions: call paths paired with the usage text read from
     /// `super::introspect::FunctionEntry::usage`. A path that is not a function candidate of the set is dropped, so that no
-    /// usage text can smuggle an ungranted path into a suggestion. Chainable; without this call the set carries no usage.
+    /// usage text can smuggle a path that was not presented into a suggestion. Chainable; without this call the set carries no usage.
     #[must_use]
     pub fn with_usage(mut self, usages: Vec<(String, String)>) -> Self {
         self.usage = usages
@@ -127,11 +127,11 @@ fn call_form(path: &str, candidates: &CandidateSet) -> String {
     }
 }
 
-/// Modules near `name`, among the granted names; when none is near, among the modules of the visible function paths.
+/// Modules near `name`, among the presented names; when none is near, among the modules of the visible function paths.
 fn module_suggestions(name: &str, candidates: &CandidateSet) -> Vec<String> {
-    let granted = ranked(name, candidates.modules.iter().map(String::as_str));
-    if !granted.is_empty() {
-        return first_names(granted);
+    let presented = ranked(name, candidates.modules.iter().map(String::as_str));
+    if !presented.is_empty() {
+        return first_names(presented);
     }
     let visible = candidates
         .functions
@@ -278,7 +278,7 @@ mod tests {
     }
 
     #[test]
-    fn no_suggestion_names_an_ungranted_function() {
+    fn no_suggestion_names_a_not_presented_function() {
         let candidates = CandidateSet::new(
             vec![(
                 "grafana::loki_query".to_owned(),
@@ -295,11 +295,11 @@ mod tests {
         assert_eq!(
             texts,
             vec!["grafana::loki_query".to_owned()],
-            "the granted one only"
+            "the presented one only"
         );
         assert!(
             !format!("{texts:?}").contains("other"),
-            "the ungranted module is nowhere"
+            "the module that was not presented is nowhere"
         );
     }
 
@@ -318,7 +318,7 @@ mod tests {
     }
 
     #[test]
-    fn ungranted_group_function_is_never_suggested() {
+    fn not_presented_group_function_is_never_suggested() {
         let candidates = CandidateSet::new(
             vec![(
                 "json_encode".to_owned(),
@@ -330,12 +330,12 @@ mod tests {
         let error = suggest_for(not_found(NotFoundKind::Function, "get_envv", None), &candidates);
         assert!(
             suggestions(error).is_empty(),
-            "get_env is not granted, so not suggested"
+            "get_env is not presented, so not suggested"
         );
     }
 
     #[test]
-    fn unknown_module_suggests_the_granted_module() {
+    fn unknown_module_suggests_the_presented_module() {
         let error = suggest_for(not_found(NotFoundKind::Module, "grafan", None), &grafana());
         assert_eq!(suggestions(error), vec!["grafana".to_owned()], "the module");
     }
@@ -531,15 +531,15 @@ mod tests {
         );
     }
 
-    // suggest.sdd, Must: the granted module names come first; the modules of the visible paths are only a fallback.
+    // suggest.sdd, Must: the presented module names come first; the modules of the visible paths are only a fallback.
     #[test]
-    fn granted_module_without_visible_function_is_suggested() {
+    fn presented_module_without_visible_function_is_suggested() {
         let candidates = CandidateSet::new(Vec::new(), vec!["mcp".to_owned()], Vec::new());
         let error = suggest_for(not_found(NotFoundKind::Module, "mcpp", None), &candidates);
         assert_eq!(
             suggestions(error),
             vec!["mcp".to_owned()],
-            "a granted module is suggested even when it exposes no visible function"
+            "a presented module is suggested even when it exposes no visible function"
         );
     }
 

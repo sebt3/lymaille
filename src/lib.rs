@@ -61,9 +61,9 @@ pub use runtime::{
 };
 pub use scratchpad::{
     CandidateSet, Catalog, CoreGroup, EngineBuilder, FunctionDescriptor, FunctionEntry, FunctionSource,
-    GrantedModule, GrantedSkill, GrantedToolset, Grants, InspectionPad, InspectionTarget,
-    IntrospectionSource, LimitKind, ModuleDescriptor, NotFoundKind, Origin, PadSnapshot, PersistWarning,
-    Recompiled, Rendered, RestoreWarning, Restored, RunEnv, RunOutcome, RunStatus, ScopeSnapshot, Scratchpad,
+    InspectionPad, InspectionTarget, IntrospectionSource, LimitKind, ModuleDescriptor, NotFoundKind, Origin,
+    PadSnapshot, PersistWarning, Presentation, PresentedModule, PresentedSkill, PresentedToolset, Recompiled,
+    Rendered, RestoreWarning, Restored, RunEnv, RunOutcome, RunStatus, ScopeSnapshot, Scratchpad,
     ScratchpadEngine, ScratchpadError, ScratchpadLimits, ScratchpadResult, ScriptErrorClass, ScriptFunction,
     ScriptPosition, UnpersistableReason, VariableInfo, descriptors_from_catalog, extract_function_sources,
     full_text, limits_notice, nearest, recompile_functions, register_format_functions, render_value,

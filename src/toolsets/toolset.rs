@@ -304,7 +304,7 @@ impl Toolset {
         Ok(self)
     }
 
-    /// Adds a private dependency: the name of a module that the toolset may call. The dependency is never granted to the
+    /// Adds a private dependency: the name of a module that the toolset may call. The dependency is never presented to the
     /// model by this fact alone.
     ///
     /// # Errors
@@ -398,7 +398,7 @@ impl Toolset {
 }
 
 /// Tells whether `name` is a valid Rhai identifier: ASCII letters, digits and `_`, not starting with a digit, and not a
-/// reserved word. The same rule is in `scratchpad/grant.rs`; the scratchpad keeps its copy private, so it is repeated here.
+/// reserved word. The same rule is in `scratchpad/presentation.rs`; the scratchpad keeps its copy private, so it is repeated here.
 fn is_module_name(name: &str) -> bool {
     let starts_well = name
         .chars()
