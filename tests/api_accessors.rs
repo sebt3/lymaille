@@ -15,6 +15,8 @@ use tokio as _;
 use tokio_util as _;
 use yaml_serde as _;
 
+#[cfg(feature = "embedder")]
+use futures_core as _;
 #[cfg(feature = "mcp-http")]
 use http as _;
 #[cfg(feature = "rig")]

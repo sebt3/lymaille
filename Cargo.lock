@@ -1459,6 +1459,7 @@ name = "lymaille"
 version = "0.4.0"
 dependencies = [
  "base64 0.23.1",
+ "futures-core",
  "handlebars",
  "http",
  "jsonschema",

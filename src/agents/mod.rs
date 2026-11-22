@@ -6,6 +6,8 @@
 
 mod catalog;
 mod definition;
+#[cfg(feature = "embedder")]
+mod embedder;
 mod error;
 mod inference;
 mod manifest;
@@ -17,6 +19,11 @@ mod summarizer;
 
 pub use catalog::{AgentStore, InMemoryCatalog, Layered, ProfileStore, ProviderStore};
 pub use definition::{AgentDefinition, AgentKind, SandboxLimits};
+#[cfg(feature = "embedder")]
+pub use embedder::{
+    Embedded, Embedder, EmbedderError, EmbedderErrorKind, EmbedderModel, EmbeddingProfile, RigEmbedder,
+    RigEmbedderConfig, TestEmbedder,
+};
 pub use error::{AgentsError, AgentsResult};
 pub use inference::{
     ErrorClass, FinishReason, InferenceError, InferenceProvider, InferenceRequest, InferenceResponse,

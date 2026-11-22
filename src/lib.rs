@@ -31,6 +31,11 @@ pub use agents::{
     ProviderStore, ProviderSummarizer, ReportedUsage, ResolvedProfile, SamplingParams, SandboxLimits,
     ScriptedProvider, classify_status,
 };
+#[cfg(feature = "embedder")]
+pub use agents::{
+    Embedded, Embedder, EmbedderError, EmbedderErrorKind, EmbedderModel, EmbeddingProfile, RigEmbedder,
+    RigEmbedderConfig, TestEmbedder,
+};
 #[cfg(feature = "rig")]
 pub use agents::{RigConfig, RigProvider, detect_models};
 pub use clock::{Clock, ManualClock, SystemClock, Timestamp};
