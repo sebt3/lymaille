@@ -510,7 +510,8 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
       les natures : ce n'est pas un module.
       Agent principal productif : `todo`, `memory_session` (chaque agent a les siens), `memory_shared` (quand l'hôte fournit ce niveau à la session),
       `memory_user` en lecture, `delegate` (le module de délégation : lancer et suivre des sous-agents), `session`. Sous-agent : `todo`,
-      `memory_session`, `memory_user` en lecture, `result` (rendre son résultat), `memory_shared` si l'hôte fournit ce niveau, et, seulement s'il a une session parente, `session` ; jamais `delegate`. Un sous-agent a deux
+      `memory_session`, `memory_shared` si l'hôte fournit ce niveau, `memory_user` en lecture, `result` (rendre son résultat) et, seulement
+      s'il a une session parente, `session` ; jamais `delegate`. Un sous-agent a deux
       usages : sous-agent d'un agent principal, il porte le titre de sa session et doit pouvoir le poser ; sous-agent d'un processus automatisé,
       il n'a pas de session humaine de rattachement, donc pas de titre à donner et pas de module `session`. Le critère est la présence d'une session
       parente (`session` FR-2) ; `session` est donné d'office aux agents de travail et de configuration. Agent de configuration : `todo`,

@@ -28,8 +28,10 @@ pub enum NativeModule {
     MemoryShared,
     /// The user level of Memory, in the access the nature of the session gives.
     MemoryUser(MemoryAccess),
-    /// The delegation modules of a work agent; never given to a sub-agent or a configuration agent.
-    Delegation,
+    /// The `delegate` module: launches and tracks sub-agents. Given to a work agent only.
+    Delegate,
+    /// The `result` module: reports the result of a sub-agent. Given to every sub-agent, with or without a parent session.
+    Result,
     /// The `session` module: never given to a sub-agent with no parent session, which has no title to set.
     Session,
     /// The toolset creation module of the configuration agent.
@@ -51,7 +53,8 @@ impl NativeModule {
             Self::MemorySession => "memory_session",
             Self::MemoryShared => "memory_shared",
             Self::MemoryUser(_) => "memory_user",
-            Self::Delegation => "delegation",
+            Self::Delegate => "delegate",
+            Self::Result => "result",
             Self::Session => "session",
             Self::ToolsetBuilder => "toolset_builder",
             Self::Contexts => "contexts",
@@ -78,9 +81,13 @@ pub fn native_modules(kind: AgentKind, has_parent: bool, has_shared_memory: bool
         AgentKind::Config => modules.push(NativeModule::MemoryUser(MemoryAccess::ReadWrite)),
     }
     match kind {
-        AgentKind::Work => modules.extend([NativeModule::Delegation, NativeModule::Session]),
-        AgentKind::Sub if has_parent => modules.push(NativeModule::Session),
-        AgentKind::Sub => {}
+        AgentKind::Work => modules.extend([NativeModule::Delegate, NativeModule::Session]),
+        AgentKind::Sub => {
+            modules.push(NativeModule::Result);
+            if has_parent {
+                modules.push(NativeModule::Session);
+            }
+        }
         AgentKind::Config => modules.extend([
             NativeModule::Session,
             NativeModule::ToolsetBuilder,
@@ -100,17 +107,22 @@ mod tests {
     /// Scenario: un agent de travail
     #[test]
     fn work_agent_lists_exactly_the_work_modules() {
+        let modules = native_modules(AgentKind::Work, false, true);
         assert_eq!(
-            native_modules(AgentKind::Work, false, true),
+            modules,
             vec![
                 NativeModule::Todo,
                 NativeModule::MemorySession,
                 NativeModule::MemoryShared,
                 NativeModule::MemoryUser(MemoryAccess::Read),
-                NativeModule::Delegation,
+                NativeModule::Delegate,
                 NativeModule::Session,
             ],
             "a work agent gets the work modules and no configuration module"
+        );
+        assert!(
+            !modules.contains(&NativeModule::Result),
+            "the work agent launches sub-agents through Delegate and never reports through Result: {modules:?}"
         );
     }
 
@@ -123,9 +135,10 @@ mod tests {
                 NativeModule::Todo,
                 NativeModule::MemorySession,
                 NativeModule::MemoryUser(MemoryAccess::Read),
+                NativeModule::Result,
                 NativeModule::Session,
             ],
-            "a sub-agent with a parent session gets Session and MemoryUser(Read), never Delegation nor a configuration module"
+            "a sub-agent with a parent session gets Session, Result and MemoryUser(Read), never Delegate nor a configuration module"
         );
     }
 
@@ -143,8 +156,9 @@ mod tests {
                 NativeModule::Todo,
                 NativeModule::MemorySession,
                 NativeModule::MemoryUser(MemoryAccess::Read),
+                NativeModule::Result,
             ],
-            "and nothing else"
+            "Result is given with or without a parent session, and nothing else"
         );
     }
 
@@ -163,7 +177,12 @@ mod tests {
                 NativeModule::Sessions,
                 NativeModule::Inspect,
             ],
-            "a configuration agent gets no MemoryShared and no Delegation"
+            "a configuration agent gets no MemoryShared"
+        );
+        let config = native_modules(AgentKind::Config, false, false);
+        assert!(
+            !config.contains(&NativeModule::Delegate) && !config.contains(&NativeModule::Result),
+            "a configuration agent neither delegates nor reports: {config:?}"
         );
         let with_shared_level = native_modules(AgentKind::Config, false, true);
         assert!(
@@ -182,7 +201,7 @@ mod tests {
                 NativeModule::Todo,
                 NativeModule::MemorySession,
                 NativeModule::MemoryUser(MemoryAccess::Read),
-                NativeModule::Delegation,
+                NativeModule::Delegate,
                 NativeModule::Session,
             ],
             "MemoryShared is absent when the host provides no shared level"
@@ -195,6 +214,7 @@ mod tests {
         let named = native_modules(AgentKind::Config, false, false)
             .into_iter()
             .chain(native_modules(AgentKind::Work, false, true))
+            .chain(native_modules(AgentKind::Sub, true, true))
             .map(|module| (module.name(), module))
             .collect::<Vec<_>>();
         for (name, module) in named {
@@ -203,7 +223,8 @@ mod tests {
                 NativeModule::MemorySession => "memory_session",
                 NativeModule::MemoryShared => "memory_shared",
                 NativeModule::MemoryUser(_) => "memory_user",
-                NativeModule::Delegation => "delegation",
+                NativeModule::Delegate => "delegate",
+                NativeModule::Result => "result",
                 NativeModule::Session => "session",
                 NativeModule::ToolsetBuilder => "toolset_builder",
                 NativeModule::Contexts => "contexts",
