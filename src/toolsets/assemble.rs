@@ -447,6 +447,47 @@ mod tests {
         assert_eq!(called.text(), "", "an absent variable renders the empty string");
     }
 
+    // Scenario: la fonction d'une capacité non compilée n'atteint pas le toolset (négatif : sans la feature `fs`).
+    // Rhai resolves function calls when they run: the toolset assembles because `host` is in the register whatever
+    // the features (../scratchpad/capabilities.sdd), and only the call of the function fails.
+    #[cfg(not(feature = "fs"))]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn uncompiled_capability_function_fails_at_the_call() {
+        let source = "import \"host\" as h;\nfn read_it() { h::file_read(\"absent.txt\") }";
+        let toolsets = [depending_on(toolset("reader", source), "host")];
+        let assembled = run_assemble(&toolsets, &capabilities());
+        assert!(
+            assembled.failures().is_empty(),
+            "`host` is in the register whatever the features: {:?}",
+            assembled.failures()
+        );
+        assert_eq!(module_names(&assembled), ["reader"], "host is not presented");
+        let pad = pad(assembled);
+
+        let called = run(&pad, "reader::read_it()").await;
+        assert_eq!(
+            called.status(),
+            RunStatus::Failed(ScriptErrorClass::NotFound),
+            "without `fs`, file_read is a function-not-found error: {}",
+            called.text()
+        );
+    }
+
+    // Scenario: la fonction d'une capacité non compilée n'atteint pas le toolset (positif : sous la feature `fs`).
+    // The function is checked in the generated signatures of the `host` module, never called: no test reads a
+    // real file (`agent-sessions#CON-1`).
+    #[cfg(feature = "fs")]
+    #[test]
+    fn compiled_capability_lists_file_read_in_the_host_module() {
+        let registry = capabilities();
+        let host = registry.get("host").expect("host is always in the register");
+        let prefix = "file_read(";
+        let listed = host
+            .gen_fn_signatures_with_mapper(Into::into)
+            .any(|signature| signature.starts_with(prefix));
+        assert!(listed, "with `fs`, the host module lists file_read");
+    }
+
     #[test]
     fn module_that_does_not_evaluate_is_reported() {
         let toolsets = [
