@@ -14,6 +14,8 @@ Raises:
   @ModulesError::InvalidTodo: texte de tâche vide ou blanc, état inconnu, identifiant de tâche inconnu.
   @ModulesError::InvalidMemory: identifiant ou titre vide ou blanc, identifiant qui contient un blanc, identifiant déjà pris (création), identifiant inconnu (lecture, modification, suppression) ; le message nomme l'identifiant et, quand il est connu, le niveau, jamais le corps.
   @ModulesError::Store: échec du stockage des Memory de l'hôte.
+  @ModulesError::NoIndex (feature `embedder`) : recherche d'un niveau de Memory sans index fourni ; le message nomme le niveau, jamais un identifiant ni un corps.
+  @ModulesError::Index (feature `embedder`) : échec de l'index sémantique de l'hôte ; le message est celui de l'index, sans la requête.
   @ModulesError::Poisoned: verrou interne empoisonné.
   @ModulesError::InvalidMcp: nom de rôle invalide, deux tools d'un même serveur au même nom de fonction (le message nomme le rôle et les deux noms MCP), schéma d'entrée d'un tool qui n'est pas un schéma JSON utilisable.
 

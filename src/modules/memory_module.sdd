@@ -18,18 +18,22 @@ Exposes:
   @memory_module_name
 
 Accepts:
-  @MemoryScopes::new: la référence de l'utilisateur, celle du niveau partagé et l'@SessionId ; les trois portées d'une session.
+  @MemoryScopes::new: la référence de l'utilisateur, celle du niveau partagé et l'@SessionId ; les trois portées d'une session, sans index sémantique.
+  @MemoryScopes::with_index (feature `embedder`, ./semantic.sdd) : un @MemoryLevel et un @SemanticIndex ; l'index de la portée de ce niveau, qui remplace celui donné avant. Un niveau sans index répond à sa `search` par une erreur explicite (`agent-sessions/modules#AC-12`).
   @memory_module: un @MemoryLevel, un @MemoryStore partagé, les @MemoryScopes (qui portent l'@SessionId des événements), un @EventSink partagé et une @Clock partagée ; rend le @rhai::Module du niveau. L'identifiant de session n'est pas un sixième paramètre : le seuil de cinq arguments du harnais le refuserait (décision du 2026-10-30).
   @memory_module_read_only: les mêmes cinq arguments que @memory_module ; rend le module du niveau limité à `list` et `read` — aucune fonction d'écriture n'y est enregistrée (./native.sdd #2, @MemoryAccess::Read ; le seuil d'arguments interdit d'en faire un sixième paramètre de @memory_module).
   @memory_module_name: un @MemoryLevel ; rend le nom du module (`memory_user`, `memory_shared`, `memory_session`).
 
 Returns:
   Module Rhai d'un niveau : `list()` rend un tableau de maps `#{id, title}` ; `read(id)` rend la map `#{id, title, body}` ; `create(id, title, body)` ; `update(id, title, body)` ; `delete(id)`.
+  Feature `embedder` (./semantic.sdd) : `search(query, limit)`, présente dans le module complet comme dans le module en lecture seule, rend un tableau de maps `#{id, title, score}` par ordre de pertinence, jamais le corps ; le titre vient du @MemoryStore, l'identifiant et le score de l'index de la portée. Un identifiant que l'index rend et que le stockage ne connaît plus est ignoré et ne compte pas dans `limit`. Sans la feature, la fonction n'existe pas et le module est celui d'avant.
 
 Raises:
   Les erreurs de @MemoryStore deviennent des erreurs Rhai d'exécution explicites (leur texte `Display`). `create` d'un identifiant pris, `read`, `update` et `delete` d'un identifiant inconnu rendent une erreur qui nomme le niveau et l'identifiant, jamais un corps.
+  `search` (feature `embedder`) : erreur Rhai qui nomme le niveau et dit qu'aucun index n'est fourni pour lui, quand la portée n'a pas d'index (jamais un tableau vide) ; erreur qui nomme `query` quand la requête est vide ou blanche ; erreur qui nomme `limit` quand il n'est pas un entier au moins égal à 1 ; @ModulesError::NoIndex (niveau nommé) et @ModulesError::Index (message de l'index, sans la requête) sont rendus en erreur Rhai d'exécution ; `limit` d'un autre type que l'entier est refusé par Rhai avant la fonction.
 
 Must:
+  `search` interroge l'index de la portée du niveau et ne lit que le stockage de cette portée : une Memory du même identifiant dans un autre niveau n'apparaît pas (`agent-sessions/modules#FR-14`). La librairie ne réindexe jamais : après une modification non réindexée par l'hôte, la recherche ne trouve pas le nouveau texte, mais rend le titre à jour (@MemoryStore). Les fonctions de recherche sont synchrones et appellent l'index par `vynil_core::rt::block_on`, comme les autres.
   La Memory n'est pas dans l'état de session : chaque appel passe par le @MemoryStore, dans la portée du niveau du module.
   `create`, `update` et `delete` émettent un @EventKind::MemoryChanged avec le niveau (`user`, `shared`, `session`) et l'identifiant, jamais le corps ; `list` et `read` n'en émettent pas ; un appel refusé n'en émet pas.
   Par défaut un module expose toutes les fonctions du niveau. La lecture seule se décide par la table des modules natifs (./native.sdd : `MemoryUser(Read)` pour les sessions de travail et les sous-agents) : le module est alors construit par @memory_module_read_only, qui n'enregistre que `list` et `read`. Un toolset de présentation peut restreindre davantage en n'appelant que `list` et `read` de sa dépendance privée (`agent-sessions/modules#FR-4`, ../toolsets/assemble.sdd). La définition d'agent ne porte aucun droit de Memory.
@@ -89,6 +93,41 @@ Scenario: la session qualifie le niveau session
   Given deux sessions distinctes qui partagent le même stockage
   When chacune crée la Memory `note` par `memory_session`
   Then chacune ne lit que la sienne
+
+Scenario: la Memory proche de la requête vient en premier (feature `embedder`, ./semantic.sdd, `agent-sessions/modules#AC-10`)
+  Given trois Memory au niveau utilisateur, dont une proche de la requête, un index de `rig` construit sur le texte de chacune
+  When `memory_user::search` est appelée avec la requête
+  Then la première map porte l'identifiant, le titre et un score, sans corps
+
+Scenario: la portée de la recherche est respectée (feature `embedder`)
+  Given une Memory `note` au niveau utilisateur et une Memory `note` au niveau partagé
+  When `memory_user::search` est appelée avec la requête de la première
+  Then seule la Memory du niveau utilisateur est rendue
+
+Scenario: un niveau sans index (feature `embedder`, `agent-sessions/modules#AC-12`)
+  Given le module `memory_shared` sans index pour sa portée
+  When `memory_shared::search("x", 3)` est appelée
+  Then l'erreur Rhai nomme le niveau `shared` et dit qu'aucun index n'est fourni
+
+Scenario: l'hôte réindexe, la librairie non (feature `embedder`)
+  Given une Memory `note` indexée, puis modifiée sans réindexation
+  When la recherche porte sur le nouveau texte
+  Then la Memory n'est pas trouvée par ce texte ; réindexée par l'hôte, elle l'est avec le titre à jour
+
+Scenario: un identifiant disparu du stockage est ignoré (feature `embedder`)
+  Given une Memory indexée puis supprimée sans réindexation
+  When une recherche rend son identifiant côté index
+  Then il n'apparaît pas et aucune erreur n'est levée
+
+Scenario: paramètres invalides (feature `embedder`)
+  Given `memory_user::search` avec une requête blanche, puis avec une limite de 0
+  When chaque appel est fait
+  Then chacun rend une erreur Rhai qui nomme le paramètre fautif
+
+Scenario: la lecture seule cherche aussi (feature `embedder`)
+  Given `memory_user` construit par `memory_module_read_only` et un index fourni
+  When `memory_user::search` est appelée
+  Then la recherche répond, et `create` reste absente
 
 Scenario: runtime current_thread
   Given un module de Memory appelé depuis un runtime `current_thread`

@@ -3,6 +3,8 @@
 //! See `src/toolsets/native.sdd`.
 
 use std::collections::BTreeMap;
+#[cfg(feature = "embedder")]
+use std::num::NonZeroUsize;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -12,6 +14,8 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use super::{ResolvedContext, SessionMeta, Skill, ToolsetsError, ToolsetsResult, render_skill};
+#[cfg(feature = "embedder")]
+use crate::modules::{ModulesError, SemanticIndex};
 use crate::scratchpad::{ScratchpadLimits, ScratchpadResult, limits_notice, truncate_middle};
 use crate::session::{CancelHandle, NativeTool, Redactor};
 
@@ -84,6 +88,10 @@ const SKILL_TOOL: &str = "skill";
 /// Description of the `skill` tool, read by the model. It is in English because it speaks to the model.
 const SKILL_TOOL_DESCRIPTION: &str = "Read the skills presented to this session. With no argument, lists them (name and description). With `name`, returns the text of that skill; with `name` and `document`, one of its annex documents. Read `rhai-pad` first.";
 
+/// Sentence appended to the description of the `skill` tool when a semantic index is provided (feature `embedder`).
+#[cfg(feature = "embedder")]
+const SEARCH_SENTENCE: &str = "With `query` (and optional `limit`), searches the skills by meaning: name, description and score, never the body.";
+
 /// A presented skill as the `skill` tool holds it: the toolset it belongs to, when it has one, and the skill.
 #[derive(Debug)]
 struct Entry {
@@ -104,6 +112,8 @@ pub struct SkillTool {
     session: SessionMeta,
     cap_chars: usize,
     redactor: Arc<Redactor>,
+    #[cfg(feature = "embedder")]
+    semantic: Option<SemanticIndex>,
 }
 
 impl SkillTool {
@@ -136,7 +146,58 @@ impl SkillTool {
             session,
             cap_chars,
             redactor,
+            #[cfg(feature = "embedder")]
+            semantic: None,
         })
+    }
+
+    /// Gives the tool the semantic index of the skills that the host provides (`agent-sessions/modules#FR-15`). With an index,
+    /// the tool accepts the `query` and `limit` arguments; without one, a `query` is refused with an explicit error.
+    #[cfg(feature = "embedder")]
+    #[must_use]
+    pub fn with_semantic_index(mut self, index: SemanticIndex) -> Self {
+        self.semantic = Some(index);
+        self
+    }
+
+    /// Searches the skills by meaning: the names, descriptions and scores of the closest ones, at most `limit`, never the
+    /// bodies.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ToolsetsError::InvalidArgument`] (naming `query`) when the query is blank, [`ToolsetsError::NoIndex`] when no
+    /// index is provided, and [`ToolsetsError::Index`] when the index of the host fails, with the message of the index and
+    /// never the query.
+    #[cfg(feature = "embedder")]
+    pub async fn search(&self, query: &str, limit: NonZeroUsize) -> ToolsetsResult<String> {
+        if query.trim().is_empty() {
+            return Err(invalid_argument("query", "the query is blank"));
+        }
+        let Some(index) = self.semantic.as_ref() else {
+            return Err(ToolsetsError::NoIndex);
+        };
+        let hits = match index.search(query, limit).await {
+            Ok(hits) => hits,
+            Err(error) => {
+                if let ModulesError::Index(message) = &error {
+                    return Err(ToolsetsError::Index(message.clone()));
+                }
+                return Err(ToolsetsError::Store(error.to_string()));
+            }
+        };
+        let mut lines = Vec::with_capacity(hits.len());
+        for hit in &hits {
+            let Some(entry) = self.entries.get(hit.id()) else {
+                continue;
+            };
+            let (description, _body) = self.render(entry)?;
+            lines.push(format!(
+                "- {} (score {:.4}): {description}",
+                entry.skill.name(),
+                hit.score()
+            ));
+        }
+        Ok(self.capped(&lines.join("\n")))
     }
 
     /// Answers the `skill` tool. With no name, the list of the skills, name and description. With a name, the rendered body
@@ -218,6 +279,47 @@ impl SkillTool {
         truncate_middle(&self.redactor.redact(text), self.cap_chars)
             .text()
             .to_owned()
+    }
+
+    /// Answers the JSON arguments of the tool. With a `query` (feature `embedder`), it searches; otherwise it lists, or reads a
+    /// skill or one of its documents as the typed call does.
+    #[cfg(feature = "embedder")]
+    async fn answer(&self, arguments: &Value) -> ToolsetsResult<String> {
+        if let Some(query) = arguments.get("query") {
+            return self.answer_query(query, arguments).await;
+        }
+        if self.semantic.is_some() && arguments.get("limit").is_some() {
+            return Err(invalid_argument("limit", "a limit needs a query"));
+        }
+        let text = |key: &str| arguments.get(key).and_then(Value::as_str);
+        self.call(text("name"), text("document"))
+    }
+
+    /// Answers the JSON arguments of the tool without a search: a list, or a skill or one of its documents.
+    #[cfg(not(feature = "embedder"))]
+    fn answer(&self, arguments: &Value) -> ToolsetsResult<String> {
+        let text = |key: &str| arguments.get(key).and_then(Value::as_str);
+        self.call(text("name"), text("document"))
+    }
+
+    /// Searches with the arguments of a call that gives a `query`: `query` is exclusive with `name` and `document`, and
+    /// `limit` is read as an integer of at least 1.
+    #[cfg(feature = "embedder")]
+    async fn answer_query(&self, query: &Value, arguments: &Value) -> ToolsetsResult<String> {
+        let Some(query) = query.as_str() else {
+            return Err(invalid_argument("query", "the query must be text"));
+        };
+        let combined = ["name", "document"]
+            .iter()
+            .any(|key| arguments.get(*key).and_then(Value::as_str).is_some());
+        if combined {
+            return Err(invalid_argument(
+                "query",
+                "`query` cannot be combined with `name` or `document`",
+            ));
+        }
+        let limit = search_limit(arguments.get("limit"))?;
+        self.search(query, limit).await
     }
 }
 
@@ -326,12 +428,44 @@ pub fn skill_definition() -> Value {
     })
 }
 
+/// The refusal of one argument of the `skill` tool, naming it.
+#[cfg(feature = "embedder")]
+fn invalid_argument(name: &str, reason: &'static str) -> ToolsetsError {
+    ToolsetsError::InvalidArgument {
+        name: name.to_owned(),
+        reason,
+    }
+}
+
+/// Number of results of a query when the call gives no `limit`.
+#[cfg(feature = "embedder")]
+const DEFAULT_SEARCH_LIMIT: usize = 5;
+
+/// Reads the `limit` argument of a query: an integer of at least 1, or the default of [`DEFAULT_SEARCH_LIMIT`].
+#[cfg(feature = "embedder")]
+fn search_limit(limit: Option<&Value>) -> ToolsetsResult<NonZeroUsize> {
+    let Some(value) = limit else {
+        return Ok(NonZeroUsize::new(DEFAULT_SEARCH_LIMIT).unwrap_or(NonZeroUsize::MIN));
+    };
+    value
+        .as_u64()
+        .and_then(|count| usize::try_from(count).ok())
+        .and_then(NonZeroUsize::new)
+        .ok_or_else(|| invalid_argument("limit", "the limit must be an integer of at least 1"))
+}
+
 impl NativeTool for SkillTool {
     fn name(&self) -> &str {
         SKILL_TOOL
     }
 
     fn definition(&self) -> Value {
+        #[cfg(feature = "embedder")]
+        {
+            if self.semantic.is_some() {
+                return search_definition();
+            }
+        }
         skill_definition()
     }
 
@@ -340,12 +474,41 @@ impl NativeTool for SkillTool {
         arguments: &'call Value,
         _cancel: &'call CancelHandle,
     ) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'call>> {
-        let text = |key: &str| arguments.get(key).and_then(Value::as_str);
-        let outcome = self
-            .call(text("name"), text("document"))
-            .map_err(|error| error.to_string());
-        Box::pin(std::future::ready(outcome))
+        #[cfg(feature = "embedder")]
+        {
+            Box::pin(async move { self.answer(arguments).await.map_err(|error| error.to_string()) })
+        }
+        #[cfg(not(feature = "embedder"))]
+        {
+            let outcome = self.answer(arguments).map_err(|error| error.to_string());
+            Box::pin(std::future::ready(outcome))
+        }
     }
+}
+
+/// Definition of the `skill` tool when a semantic index is provided: the same description, with the `query` and `limit`
+/// arguments (`agent-sessions/modules#FR-15`).
+#[cfg(feature = "embedder")]
+fn search_definition() -> Value {
+    let mut definition = skill_definition();
+    let description = format!("{SKILL_TOOL_DESCRIPTION} {SEARCH_SENTENCE}");
+    if let Some(object) = definition.as_object_mut() {
+        let _previous = object.insert("description".to_owned(), json!(description));
+    }
+    if let Some(properties) = definition
+        .pointer_mut("/parameters/properties")
+        .and_then(Value::as_object_mut)
+    {
+        let _query = properties.insert(
+            "query".to_owned(),
+            json!({"type": "string", "description": "Text to search among the skills by meaning: names, descriptions and scores, never bodies. Exclusive with `name` and `document`."}),
+        );
+        let _limit = properties.insert(
+            "limit".to_owned(),
+            json!({"type": "integer", "minimum": 1, "description": "Maximum number of results of a `query`. Defaults to 5."}),
+        );
+    }
+    definition
 }
 
 /// Builds the built-in skill that teaches the `rhai_pad` tool.
@@ -1259,5 +1422,392 @@ mod tests {
                 .body()
                 .contains("the middle of a longer result is replaced by a notice")
         );
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "embedder")]
+mod search_tests {
+    use std::num::NonZeroUsize;
+    use std::sync::Arc;
+
+    use serde_json::{Value, json};
+
+    use super::{SEARCH_SENTENCE, SKILL_TOOL_DESCRIPTION, SkillTool, skill_definition};
+    use rig_core::embeddings::Embedding;
+    use rig_core::vector_store::in_memory_store::InMemoryVectorStore;
+    use rig_core::vector_store::request::Filter;
+    use rig_core::vector_store::{VectorSearchRequest, VectorStoreError, VectorStoreIndex};
+    use serde::de::DeserializeOwned;
+
+    use crate::agents::{Embedder as _, EmbedderModel, TestEmbedder};
+    use crate::modules::{SemanticIndex, skill_embedding_text};
+    use crate::scratchpad::ScratchpadLimits;
+    use crate::session::{CancelHandle, NativeTool, Redactor};
+    use crate::toolsets::{
+        ContextLevel, ResolvedContext, SessionMeta, Skill, ToolsetContext, ToolsetsError,
+        builtin_rhai_pad_skill,
+    };
+
+    fn context() -> ResolvedContext {
+        ToolsetContext::new("site".to_owned(), ContextLevel::Shared)
+            .expect("a context name")
+            .resolve(Vec::<(String, String, Value)>::new())
+            .expect("the context resolves")
+    }
+
+    fn session() -> SessionMeta {
+        SessionMeta::new(
+            "main".to_owned(),
+            "2026-10-30T09:00:00Z".to_owned(),
+            Vec::new(),
+            Vec::new(),
+            None,
+        )
+    }
+
+    fn skill(name: &str, description: &str, body: &str) -> Skill {
+        Skill::new(name.to_owned(), description.to_owned(), body.to_owned()).expect("a valid skill")
+    }
+
+    /// The index a host builds over the skills `(name, description, body)`: their embedding texts, embedded by the test
+    /// embedder and held under the skill names.
+    async fn index_of_skills(skills: &[(&str, &str, &str)]) -> SemanticIndex {
+        let test_embedder = Arc::new(TestEmbedder::new(
+            NonZeroUsize::new(64).unwrap_or(NonZeroUsize::MIN),
+            NonZeroUsize::new(100).unwrap_or(NonZeroUsize::MIN),
+        ));
+        let texts: Vec<String> = skills
+            .iter()
+            .map(|(name, description, body)| skill_embedding_text(name, description, body))
+            .collect();
+        let embedded = test_embedder
+            .embed(&texts)
+            .await
+            .expect("the test embedder does not fail");
+        let store =
+            InMemoryVectorStore::from_documents_with_ids(skills.iter().zip(&texts).zip(embedded).map(
+                |(((name, _description, _body), text), one)| {
+                    let embedding = Embedding {
+                        document: text.clone(),
+                        vec: one.into_vector(),
+                    };
+                    ((*name).to_owned(), text.clone(), vec![embedding])
+                },
+            ));
+        SemanticIndex::new(store.index(EmbedderModel::new(test_embedder)))
+    }
+
+    /// The index of the two skills of the tests: `deploy` (close to its description) and `backup`.
+    async fn skill_index() -> SemanticIndex {
+        index_of_skills(&[
+            ("deploy", "Deploy to prod", "Run the rollout"),
+            ("backup", "Save the database", "dump the tables"),
+        ])
+        .await
+    }
+
+    /// A tool over the two skills of the tests, with the given index and redactor.
+    fn tool_with(index: Option<SemanticIndex>, redactor: Redactor) -> SkillTool {
+        let presented = vec![
+            (
+                "ops".to_owned(),
+                skill("deploy", "Deploy to prod", "Run the rollout"),
+            ),
+            (
+                "ops".to_owned(),
+                skill("backup", "Save the database", "dump the tables"),
+            ),
+        ];
+        let builtin = builtin_rhai_pad_skill(&ScratchpadLimits::new()).expect("the built-in skill builds");
+        let tool = SkillTool::new(
+            presented,
+            builtin,
+            context(),
+            session(),
+            8_000,
+            Arc::new(redactor),
+        )
+        .expect("the tool builds");
+        match index {
+            Some(index) => tool.with_semantic_index(index),
+            None => tool,
+        }
+    }
+
+    /// The answer of the `skill` tool to a JSON call.
+    async fn answer(tool: &SkillTool, arguments: Value) -> Result<String, String> {
+        let native: &dyn NativeTool = tool;
+        native.call(&arguments, &CancelHandle::new()).await
+    }
+
+    #[tokio::test]
+    async fn search_gives_the_close_skill_by_name_description_and_score_never_its_body() {
+        let tool = tool_with(Some(skill_index().await), Redactor::new());
+        let text = answer(&tool, json!({"query": "Deploy to prod"}))
+            .await
+            .expect("the search answers");
+        let first = text.lines().next().unwrap_or_default();
+        assert!(
+            first.starts_with("- deploy"),
+            "the close skill comes first: {text}"
+        );
+        assert!(
+            first.contains("Deploy to prod"),
+            "the description is given: {text}"
+        );
+        assert!(first.contains("score"), "the score is given: {text}");
+        assert!(
+            !text.contains("Run the rollout"),
+            "no body in a search result: {text}"
+        );
+        let body = answer(&tool, json!({"name": "deploy"})).await;
+        assert_eq!(body.as_deref(), Ok("Run the rollout"), "the body is read by name");
+    }
+
+    #[tokio::test]
+    async fn limit_caps_the_number_of_results() {
+        let tool = tool_with(Some(skill_index().await), Redactor::new());
+        let one = answer(&tool, json!({"query": "Deploy to prod", "limit": 1}))
+            .await
+            .expect("the search answers");
+        assert_eq!(one.lines().count(), 1, "one result for a limit of one: {one}");
+        let default = answer(&tool, json!({"query": "Deploy to prod"}))
+            .await
+            .expect("the search answers");
+        assert_eq!(
+            default.lines().count(),
+            2,
+            "the default limit keeps both skills: {default}"
+        );
+    }
+
+    #[tokio::test]
+    async fn query_without_index_is_the_no_index_error() {
+        let tool = tool_with(None, Redactor::new());
+        let error = tool
+            .answer(&json!({"query": "x"}))
+            .await
+            .expect_err("no index is provided");
+        assert!(matches!(error, ToolsetsError::NoIndex), "{error:?}");
+    }
+
+    /// An index whose every query fails with a message of its own, as a host index that is down.
+    struct DownIndex;
+
+    impl VectorStoreIndex for DownIndex {
+        type Filter = Filter<Value>;
+
+        fn top_n<T: DeserializeOwned + Send>(
+            &self,
+            _request: VectorSearchRequest<Self::Filter>,
+        ) -> impl Future<Output = Result<Vec<(f64, String, T)>, VectorStoreError>> + Send {
+            std::future::ready(Err(VectorStoreError::DatastoreError(
+                "the backend is down".into(),
+            )))
+        }
+
+        fn top_n_ids(
+            &self,
+            _request: VectorSearchRequest<Self::Filter>,
+        ) -> impl Future<Output = Result<Vec<(f64, String)>, VectorStoreError>> + Send {
+            std::future::ready(Err(VectorStoreError::DatastoreError(
+                "the backend is down".into(),
+            )))
+        }
+    }
+
+    #[tokio::test]
+    async fn an_index_failure_is_the_index_error_without_the_query() {
+        let tool = tool_with(Some(SemanticIndex::new(DownIndex)), Redactor::new());
+        let error = tool
+            .search("secret query", NonZeroUsize::MIN)
+            .await
+            .expect_err("the index is down");
+        assert!(
+            matches!(&error, ToolsetsError::Index(message) if message.contains("the backend is down")),
+            "{error:?}"
+        );
+        assert!(!error.to_string().contains("secret query"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn query_refusals_name_the_faulty_parameter() {
+        let tool = tool_with(Some(skill_index().await), Redactor::new());
+        let both = tool
+            .answer(&json!({"query": "deploy", "name": "deploy"}))
+            .await
+            .expect_err("query and name are exclusive");
+        assert!(
+            matches!(&both, ToolsetsError::InvalidArgument { name, .. } if name == "query"),
+            "{both:?}"
+        );
+        let zero = tool
+            .answer(&json!({"query": "x", "limit": 0}))
+            .await
+            .expect_err("a limit of zero is refused");
+        assert!(
+            matches!(&zero, ToolsetsError::InvalidArgument { name, .. } if name == "limit"),
+            "{zero:?}"
+        );
+        let blank = tool
+            .answer(&json!({"query": "   "}))
+            .await
+            .expect_err("a blank query is refused");
+        assert!(
+            matches!(&blank, ToolsetsError::InvalidArgument { name, .. } if name == "query"),
+            "{blank:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn limit_without_query_is_refused_naming_limit() {
+        let tool = tool_with(Some(skill_index().await), Redactor::new());
+        let refused = tool
+            .answer(&json!({"limit": 3}))
+            .await
+            .expect_err("a limit alone is refused when an index is provided");
+        assert!(
+            matches!(&refused, ToolsetsError::InvalidArgument { name, .. } if name == "limit"),
+            "{refused:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn definition_declares_query_and_limit_only_with_an_index() {
+        let with_index = tool_with(Some(skill_index().await), Redactor::new()).definition();
+        assert!(
+            with_index["parameters"]["properties"]["query"].is_object(),
+            "{with_index}"
+        );
+        assert!(
+            with_index["parameters"]["properties"]["limit"].is_object(),
+            "{with_index}"
+        );
+        let without = tool_with(None, Redactor::new()).definition();
+        assert_eq!(
+            without,
+            skill_definition(),
+            "without an index the definition is unchanged"
+        );
+    }
+
+    #[tokio::test]
+    async fn definition_description_gains_the_search_sentence_only_with_an_index() {
+        let with_index = tool_with(Some(skill_index().await), Redactor::new()).definition();
+        let expected = format!("{SKILL_TOOL_DESCRIPTION} {SEARCH_SENTENCE}");
+        assert_eq!(
+            with_index["description"].as_str(),
+            Some(expected.as_str()),
+            "the sentence is appended to the description with an index"
+        );
+        let without = tool_with(None, Redactor::new()).definition();
+        assert_eq!(
+            without["description"].as_str(),
+            Some(SKILL_TOOL_DESCRIPTION),
+            "without an index the description is the one of today"
+        );
+    }
+
+    #[tokio::test]
+    async fn search_results_are_masked_by_the_redactor_of_the_session() {
+        let mut redactor = Redactor::new();
+        redactor
+            .add_secret("canary-secret-7731")
+            .expect("the canary is long enough");
+        let index = index_of_skills(&[("deploy", "Deploy canary-secret-7731", "Run the rollout")]).await;
+        let presented = vec![(
+            "ops".to_owned(),
+            skill("deploy", "Deploy canary-secret-7731", "Run the rollout"),
+        )];
+        let builtin = builtin_rhai_pad_skill(&ScratchpadLimits::new()).expect("the built-in skill builds");
+        let tool = SkillTool::new(
+            presented,
+            builtin,
+            context(),
+            session(),
+            8_000,
+            Arc::new(redactor),
+        )
+        .expect("the tool builds")
+        .with_semantic_index(index);
+        let text = answer(&tool, json!({"query": "Deploy canary-secret-7731"}))
+            .await
+            .expect("the search answers");
+        assert!(
+            !text.contains("canary-secret-7731"),
+            "the secret never comes out: {text}"
+        );
+        assert!(text.contains("*redacted secret*"), "the mask replaces it: {text}");
+    }
+}
+
+/// Without the feature `embedder`, the `skill` tool has no search argument and keeps its behaviour
+/// (`agent-sessions/toolsets#FR-18`, `agent-sessions/agents#AC-8`).
+#[cfg(test)]
+#[cfg(not(feature = "embedder"))]
+mod without_feature_tests {
+    use std::sync::Arc;
+
+    use serde_json::{Value, json};
+
+    use super::{SkillTool, skill_definition};
+    use crate::scratchpad::ScratchpadLimits;
+    use crate::session::{CancelHandle, NativeTool, Redactor};
+    use crate::toolsets::{ContextLevel, SessionMeta, Skill, ToolsetContext, builtin_rhai_pad_skill};
+
+    fn tool() -> SkillTool {
+        let presented = vec![(
+            "ops".to_owned(),
+            Skill::new(
+                "deploy".to_owned(),
+                "Deploy to prod".to_owned(),
+                "Run the rollout".to_owned(),
+            )
+            .expect("a valid skill"),
+        )];
+        let builtin = builtin_rhai_pad_skill(&ScratchpadLimits::new()).expect("the built-in skill builds");
+        let context = ToolsetContext::new("site".to_owned(), ContextLevel::Shared)
+            .expect("a context name")
+            .resolve(Vec::<(String, String, Value)>::new())
+            .expect("the context resolves");
+        let session = SessionMeta::new(
+            "main".to_owned(),
+            "2026-10-30T09:00:00Z".to_owned(),
+            Vec::new(),
+            Vec::new(),
+            None,
+        );
+        SkillTool::new(
+            presented,
+            builtin,
+            context,
+            session,
+            8_000,
+            Arc::new(Redactor::new()),
+        )
+        .expect("the tool builds")
+    }
+
+    #[tokio::test]
+    async fn the_definition_has_no_search_argument() {
+        let tool = tool();
+        let native: &dyn NativeTool = &tool;
+        assert_eq!(native.definition(), skill_definition());
+        assert!(
+            native.definition()["parameters"]["properties"]
+                .get("query")
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_query_argument_is_ignored_and_the_tool_lists_as_before() {
+        let tool = tool();
+        let native: &dyn NativeTool = &tool;
+        let cancel = CancelHandle::new();
+        let listed = native.call(&json!({}), &cancel).await;
+        let queried = native.call(&json!({"query": "deploy"}), &cancel).await;
+        assert_eq!(queried, listed, "without the feature the query is not read");
     }
 }

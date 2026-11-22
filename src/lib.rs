@@ -60,6 +60,8 @@ pub use modules::{
 };
 #[cfg(feature = "mcp-http")]
 pub use modules::{McpClientConfig, RmcpConnector};
+#[cfg(feature = "embedder")]
+pub use modules::{SemanticHit, SemanticIndex, memory_embedding_text, skill_embedding_text};
 pub use runtime::{
     RHAI_PAD_TOOL, RestoredSession, TurnConfig, TurnOutput, TurnRunner, UserInbox, restore_session,
     rhai_pad_definition,

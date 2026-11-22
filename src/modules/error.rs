@@ -22,6 +22,18 @@ pub enum ModulesError {
     /// The host storage of the Memory failed. The message is produced by the host.
     #[error("memory store failed: {0}")]
     Store(String),
+    /// No semantic index is provided for the scope of a Memory level, so its search is refused: the message names the level,
+    /// never an identifier or a body (`agent-sessions/modules#AC-12`).
+    #[cfg(feature = "embedder")]
+    #[error("no semantic index is provided for memory level `{level}`")]
+    NoIndex {
+        /// Level of the Memory search: user, shared or session.
+        level: String,
+    },
+    /// The semantic index of the host fails. The message is the one of the index, without the query.
+    #[cfg(feature = "embedder")]
+    #[error("semantic index failed: {0}")]
+    Index(String),
     /// An internal lock was poisoned.
     #[error("an internal lock was poisoned")]
     Poisoned,
@@ -92,6 +104,22 @@ mod tests {
         assert!(text.contains("grafana"), "the role must be named: {text}");
         assert!(text.contains("`a.b`"), "the first tool must be named: {text}");
         assert!(text.contains("`a_b`"), "the second tool must be named: {text}");
+    }
+
+    #[cfg(feature = "embedder")]
+    #[test]
+    fn semantic_errors_name_the_level_or_the_index_message() {
+        assert_eq!(
+            ModulesError::NoIndex {
+                level: "shared".to_owned()
+            }
+            .to_string(),
+            "no semantic index is provided for memory level `shared`"
+        );
+        assert_eq!(
+            ModulesError::Index("backend is down".to_owned()).to_string(),
+            "semantic index failed: backend is down"
+        );
     }
 
     #[test]

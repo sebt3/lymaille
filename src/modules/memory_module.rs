@@ -3,11 +3,17 @@
 //! and calls the asynchronous store through `vynil_core::rt::block_on`. A successful `create`, `update` or `delete` emits one
 //! `MemoryChanged` event that carries the level and the identifier, never the body; reading emits nothing.
 
+#[cfg(feature = "embedder")]
+use std::collections::BTreeMap;
+#[cfg(feature = "embedder")]
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use rhai::{Array, Dynamic, EvalAltResult, ImmutableString, Map, Module, Position};
 use vynil_core::rt::block_on;
 
+#[cfg(feature = "embedder")]
+use super::SemanticIndex;
 use super::{Memory, MemoryLevel, MemoryScope, MemoryStore, MemorySummary, ModulesError, ModulesResult};
 use crate::clock::Clock;
 use crate::session::{Event, EventKind, EventSink, SessionId};
@@ -20,6 +26,8 @@ pub struct MemoryScopes {
     shared: MemoryScope,
     session: MemoryScope,
     session_id: SessionId,
+    #[cfg(feature = "embedder")]
+    indexes: BTreeMap<MemoryLevel, SemanticIndex>,
 }
 
 impl MemoryScopes {
@@ -31,7 +39,24 @@ impl MemoryScopes {
             shared: MemoryScope::shared(shared),
             session: MemoryScope::session(session),
             session_id: session.clone(),
+            #[cfg(feature = "embedder")]
+            indexes: BTreeMap::new(),
         }
+    }
+
+    /// Gives the semantic index of the scope of one level, replacing the one given before. A level without an index answers
+    /// its `search` with an explicit error: no index is an error, never an empty result.
+    #[cfg(feature = "embedder")]
+    #[must_use]
+    pub fn with_index(mut self, level: MemoryLevel, index: SemanticIndex) -> Self {
+        let _previous = self.indexes.insert(level, index);
+        self
+    }
+
+    /// Returns the semantic index of a level, when one is given.
+    #[cfg(feature = "embedder")]
+    fn index_of(&self, level: MemoryLevel) -> Option<SemanticIndex> {
+        self.indexes.get(&level).cloned()
     }
 
     /// Gives the scope of one level and the session identifier, consuming the scopes.
@@ -69,6 +94,8 @@ struct Handle<S> {
     session: SessionId,
     sink: Arc<dyn EventSink>,
     clock: Arc<dyn Clock>,
+    #[cfg(feature = "embedder")]
+    index: Option<SemanticIndex>,
 }
 
 impl<S> Clone for Handle<S> {
@@ -80,6 +107,8 @@ impl<S> Clone for Handle<S> {
             session: self.session.clone(),
             sink: Arc::clone(&self.sink),
             clock: Arc::clone(&self.clock),
+            #[cfg(feature = "embedder")]
+            index: self.index.clone(),
         }
     }
 }
@@ -146,6 +175,26 @@ impl<S: MemoryStore> Handle<S> {
         self.store.put(&self.scope, &memory).await
     }
 
+    /// Searches the level through its index: the Memories closest to `query`, with the scores of the index, in the order of
+    /// the index. An identifier that the index holds and the store does not know is skipped, so the count can fall below
+    /// `limit`. The title comes from the store, never from the index.
+    #[cfg(feature = "embedder")]
+    async fn search(
+        &self,
+        index: &SemanticIndex,
+        query: &str,
+        limit: NonZeroUsize,
+    ) -> ModulesResult<Vec<(Memory, f64)>> {
+        let hits = index.search(query, limit).await?;
+        let mut found = Vec::with_capacity(hits.len());
+        for hit in hits {
+            if let Some(memory) = self.store.get(&self.scope, hit.id()).await? {
+                found.push((memory, hit.score()));
+            }
+        }
+        Ok(found)
+    }
+
     /// Deletes the Memory of the identifier, or refuses an unknown identifier.
     async fn delete(&self, id: &str) -> ModulesResult<()> {
         if self.store.delete(&self.scope, id).await? {
@@ -186,6 +235,31 @@ fn summary_value(summary: &MemorySummary) -> Dynamic {
     map_value([
         ("id", Dynamic::from(summary.id().to_owned())),
         ("title", Dynamic::from(summary.title().to_owned())),
+    ])
+}
+
+/// Reads the limit of a search: an integer of at least 1.
+#[cfg(feature = "embedder")]
+fn search_limit(limit: i64) -> Result<NonZeroUsize, Box<EvalAltResult>> {
+    usize::try_from(limit)
+        .ok()
+        .and_then(NonZeroUsize::new)
+        .ok_or_else(|| refusal("invalid argument `limit`: it must be an integer of at least 1").into())
+}
+
+/// Wraps a refusal of a call as a Rhai runtime error that carries its text.
+#[cfg(feature = "embedder")]
+fn refusal(text: &str) -> EvalAltResult {
+    EvalAltResult::ErrorRuntime(Dynamic::from(text.to_owned()), Position::NONE)
+}
+
+/// The map `#{id, title, score}` of a search hit: never the body.
+#[cfg(feature = "embedder")]
+fn search_value(memory: &Memory, score: f64) -> Dynamic {
+    map_value([
+        ("id", Dynamic::from(memory.id().to_owned())),
+        ("title", Dynamic::from(memory.title().to_owned())),
+        ("score", Dynamic::from(score)),
     ])
 }
 
@@ -245,6 +319,8 @@ fn handle_of<S>(
     sink: Arc<dyn EventSink>,
     clock: Arc<dyn Clock>,
 ) -> Handle<S> {
+    #[cfg(feature = "embedder")]
+    let index = scopes.index_of(level);
     let (scope, session) = scopes.into_scope(level);
     Handle {
         store,
@@ -253,6 +329,8 @@ fn handle_of<S>(
         session,
         sink,
         clock,
+        #[cfg(feature = "embedder")]
+        index,
     }
 }
 
@@ -267,6 +345,30 @@ where
         let summaries = bridge(list_handle.list())?;
         Ok(summaries.iter().map(summary_value).collect())
     });
+    #[cfg(feature = "embedder")]
+    {
+        let search_handle = handle.clone();
+        let _search = module.set_native_fn(
+            "search",
+            move |query: ImmutableString, limit: i64| -> Result<Array, Box<EvalAltResult>> {
+                let limit = search_limit(limit)?;
+                if query.trim().is_empty() {
+                    return Err(refusal("invalid argument `query`: the query is blank").into());
+                }
+                let Some(index) = search_handle.index.as_ref() else {
+                    let missing = ModulesError::NoIndex {
+                        level: search_handle.level.as_str().to_owned(),
+                    };
+                    return Err(runtime_error(&missing).into());
+                };
+                let found = bridge(search_handle.search(index, query.as_str(), limit))?;
+                Ok(found
+                    .iter()
+                    .map(|(memory, score)| search_value(memory, *score))
+                    .collect())
+            },
+        );
+    }
     let read_handle = handle.clone();
     let _read = module.set_native_fn(
         "read",
@@ -812,6 +914,358 @@ mod tests {
             memory_module_name(MemoryLevel::Session),
             "memory_session",
             "the session module"
+        );
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "embedder")]
+mod search_tests {
+    use std::sync::Arc;
+
+    use rhai::{Array, Engine as RhaiEngine, Map};
+
+    use super::super::semantic::test_support::index_of;
+    use super::{MemoryScopes, memory_module, memory_module_name, memory_module_read_only};
+    use crate::clock::{Clock, ManualClock, Timestamp};
+    use crate::modules::{InMemoryMemoryStore, Memory, MemoryLevel, SemanticIndex, memory_embedding_text};
+    use crate::session::{EventSink, NullSink, SessionId};
+
+    /// A current-thread runtime for building the test indexes, which are asynchronous.
+    fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("a current-thread runtime builds")
+    }
+
+    /// The index a host builds over the given Memories, with their embedding texts and identifiers.
+    fn host_index(memories: &[Memory]) -> SemanticIndex {
+        let documents: Vec<(&str, String)> = memories
+            .iter()
+            .map(|memory| (memory.id(), memory_embedding_text(memory)))
+            .collect();
+        let borrowed: Vec<(&str, &str)> = documents.iter().map(|(id, text)| (*id, text.as_str())).collect();
+        runtime().block_on(index_of(&borrowed))
+    }
+
+    /// A Memory built for the test; the store receives it through the Rhai functions of the modules.
+    fn memory(id: &str, title: &str, body: &str) -> Memory {
+        Memory::new(id, title, body).expect("a valid test memory")
+    }
+
+    /// The scopes of session `s-1` with the given semantic indexes per level.
+    fn scopes(indexes: Vec<(MemoryLevel, SemanticIndex)>) -> MemoryScopes {
+        let session = SessionId::new("s-1").expect("a non-empty identifier");
+        indexes.into_iter().fold(
+            MemoryScopes::new("alice", "alpha", &session),
+            |scopes, (level, index)| scopes.with_index(level, index),
+        )
+    }
+
+    /// A Rhai engine with the module of each given level over `store`, with write access or in read-only access.
+    fn engine(
+        store: &Arc<InMemoryMemoryStore>,
+        scopes: &MemoryScopes,
+        levels: &[MemoryLevel],
+        read_only: bool,
+    ) -> RhaiEngine {
+        let sink: Arc<dyn EventSink> = Arc::new(NullSink);
+        let clock: Arc<dyn Clock> = Arc::new(ManualClock::new(Timestamp::from_millis(1_000)));
+        let mut engine = RhaiEngine::new();
+        for level in levels {
+            let module = if read_only {
+                memory_module_read_only(
+                    *level,
+                    Arc::clone(store),
+                    scopes.clone(),
+                    Arc::clone(&sink),
+                    Arc::clone(&clock),
+                )
+            } else {
+                memory_module(
+                    *level,
+                    Arc::clone(store),
+                    scopes.clone(),
+                    Arc::clone(&sink),
+                    Arc::clone(&clock),
+                )
+            };
+            let _registered = engine.register_static_module(memory_module_name(*level), Arc::new(module));
+        }
+        engine
+    }
+
+    /// The hits of a search script, as maps. The script must succeed and return an array.
+    fn hits(engine: &RhaiEngine, script: &str) -> Vec<Map> {
+        let array: Array = engine
+            .eval(script)
+            .unwrap_or_else(|error| panic!("the search must succeed: {error}"));
+        array
+            .into_iter()
+            .map(|item| item.try_cast::<Map>().expect("each hit is a map"))
+            .collect()
+    }
+
+    /// The text of a field of a hit, empty when the field is missing or is not text.
+    fn text_of(hit: &Map, key: &str) -> String {
+        hit.get(key)
+            .and_then(|value| value.clone().into_string().ok())
+            .unwrap_or_default()
+    }
+
+    /// The error text of a script that must fail.
+    fn refusal(engine: &RhaiEngine, script: &str) -> String {
+        match engine.eval::<rhai::Dynamic>(script) {
+            Ok(value) => panic!("the script must fail, it returned {value}"),
+            Err(error) => error.to_string(),
+        }
+    }
+
+    #[test]
+    fn search_puts_the_close_memory_first() {
+        let store = Arc::new(InMemoryMemoryStore::new());
+        let memories = [
+            memory("a", "Vacances", "plage soleil"),
+            memory("b", "Courses", "pain lait"),
+            memory("c", "Reunion", "projet budget"),
+        ];
+        let index = host_index(&memories);
+        let scopes = scopes(vec![(MemoryLevel::User, index)]);
+        let engine = engine(&store, &scopes, &[MemoryLevel::User], false);
+        for memory in &memories {
+            let script = format!(
+                "memory_user::create(\"{}\", \"{}\", \"{}\");",
+                memory.id(),
+                memory.title(),
+                memory.body()
+            );
+            engine.run(&script).expect("the memory is created");
+        }
+        let found = hits(&engine, "memory_user::search(\"plage soleil\", 3)");
+        let first = found.first().expect("the index holds three memories");
+        assert_eq!(text_of(first, "id"), "a", "the close memory comes first");
+        assert_eq!(
+            text_of(first, "title"),
+            "Vacances",
+            "the title is read from the store"
+        );
+        assert!(first.get("score").is_some(), "the hit carries its score");
+        assert!(first.get("body").is_none(), "no hit carries the body");
+        assert_eq!(found.len(), 3, "the limit is met");
+    }
+
+    #[test]
+    fn search_never_uses_the_index_of_another_level() {
+        let store = Arc::new(InMemoryMemoryStore::new());
+        let user_index = host_index(&[
+            memory("note", "Titre utilisateur", "pain lait"),
+            memory("autre", "Autre", "plage soleil"),
+        ]);
+        let shared_index = host_index(&[memory("note", "Titre partage", "plage soleil")]);
+        let scopes = scopes(vec![
+            (MemoryLevel::User, user_index),
+            (MemoryLevel::Shared, shared_index),
+        ]);
+        let engine = engine(&store, &scopes, &[MemoryLevel::User, MemoryLevel::Shared], false);
+        engine
+            .run("memory_user::create(\"note\", \"Titre utilisateur\", \"pain lait\");")
+            .expect("the user note is created");
+        engine
+            .run("memory_user::create(\"autre\", \"Autre\", \"plage soleil\");")
+            .expect("the other user memory is created");
+        engine
+            .run("memory_shared::create(\"note\", \"Titre partage\", \"plage soleil\");")
+            .expect("the shared note is created");
+        let found = hits(&engine, "memory_user::search(\"plage soleil\", 2)");
+        assert_eq!(
+            text_of(&found[0], "id"),
+            "autre",
+            "the user index decides the rank, not the shared index"
+        );
+        assert!(
+            found.iter().all(|hit| text_of(hit, "title") != "Titre partage"),
+            "the shared memory never comes out of the user search"
+        );
+    }
+
+    #[test]
+    fn search_is_limited_to_the_scope_of_the_level() {
+        let store = Arc::new(InMemoryMemoryStore::new());
+        let user_index = host_index(&[memory("note", "Titre utilisateur", "plage soleil")]);
+        let scopes = scopes(vec![(MemoryLevel::User, user_index)]);
+        let engine = engine(&store, &scopes, &[MemoryLevel::User, MemoryLevel::Shared], false);
+        engine
+            .run("memory_user::create(\"note\", \"Titre utilisateur\", \"plage soleil\");")
+            .expect("the user memory is created");
+        engine
+            .run("memory_shared::create(\"note\", \"Titre partage\", \"plage soleil\");")
+            .expect("the shared memory is created");
+        let found = hits(&engine, "memory_user::search(\"plage soleil\", 3)");
+        assert_eq!(found.len(), 1, "only the user memory is in the user scope");
+        assert_eq!(
+            text_of(&found[0], "title"),
+            "Titre utilisateur",
+            "the shared memory does not come"
+        );
+    }
+
+    #[test]
+    fn search_of_a_level_without_index_is_an_explicit_error() {
+        let store = Arc::new(InMemoryMemoryStore::new());
+        let scopes = scopes(Vec::new());
+        let engine = engine(&store, &scopes, &[MemoryLevel::Shared], false);
+        let text = refusal(&engine, "memory_shared::search(\"x\", 3)");
+        assert!(
+            text.ends_with("no semantic index is provided for memory level `shared`"),
+            "the refusal is the typed no-index error of the level, behind the Rhai prefix: {text}"
+        );
+    }
+
+    #[test]
+    fn search_after_an_update_sees_the_store_title_and_the_host_reindex_decides_the_rank() {
+        let store = Arc::new(InMemoryMemoryStore::new());
+        let before = host_index(&[
+            memory("note", "Titre ancien", "chat chien"),
+            memory("autre", "Lecture", "roman policier"),
+        ]);
+        let scopes_before = scopes(vec![(MemoryLevel::User, before)]);
+        let engine_before = engine(&store, &scopes_before, &[MemoryLevel::User], false);
+        engine_before
+            .run("memory_user::create(\"note\", \"Titre ancien\", \"chat chien\");")
+            .expect("the memory is created");
+        engine_before
+            .run("memory_user::create(\"autre\", \"Lecture\", \"roman policier\");")
+            .expect("the other memory is created");
+        engine_before
+            .run("memory_user::update(\"note\", \"Titre neuf\", \"bateau voile\");")
+            .expect("the memory is updated without reindexing");
+        let stale = hits(&engine_before, "memory_user::search(\"bateau voile\", 2)");
+        let stale_note = stale
+            .iter()
+            .find(|hit| text_of(hit, "id") == "note")
+            .expect("the index still holds the note");
+        assert_eq!(
+            text_of(stale_note, "title"),
+            "Titre neuf",
+            "the title is read from the store"
+        );
+        let stale_score = stale_note
+            .get("score")
+            .and_then(|value| value.as_float().ok())
+            .expect("the hit carries its score");
+
+        let after = host_index(&[
+            memory("note", "Titre neuf", "bateau voile"),
+            memory("autre", "Lecture", "roman policier"),
+        ]);
+        let scopes_after = scopes(vec![(MemoryLevel::User, after)]);
+        let engine_after = engine(&store, &scopes_after, &[MemoryLevel::User], false);
+        let reindexed = hits(&engine_after, "memory_user::search(\"bateau voile\", 2)");
+        let first = reindexed.first().expect("the reindexed scope holds two memories");
+        assert_eq!(
+            text_of(first, "id"),
+            "note",
+            "after the host reindexes, the note comes first"
+        );
+        assert_eq!(text_of(first, "title"), "Titre neuf");
+        let reindexed_score = first
+            .get("score")
+            .and_then(|value| value.as_float().ok())
+            .expect("the hit carries its score");
+        assert!(
+            reindexed_score > stale_score,
+            "the reindex brings the note closer: {reindexed_score} {stale_score}"
+        );
+    }
+
+    #[test]
+    fn identifier_deleted_from_the_store_is_ignored_without_error() {
+        let store = Arc::new(InMemoryMemoryStore::new());
+        let index = host_index(&[
+            memory("note", "T", "plage soleil"),
+            memory("autre", "U", "pain lait"),
+        ]);
+        let scopes = scopes(vec![(MemoryLevel::User, index)]);
+        let engine = engine(&store, &scopes, &[MemoryLevel::User], false);
+        engine
+            .run("memory_user::create(\"note\", \"T\", \"plage soleil\");")
+            .expect("the memory is created");
+        engine
+            .run("memory_user::create(\"autre\", \"U\", \"pain lait\");")
+            .expect("the other memory is created");
+        engine
+            .run("memory_user::delete(\"note\");")
+            .expect("the memory is deleted");
+        let found = hits(&engine, "memory_user::search(\"plage soleil\", 2)");
+        assert!(
+            found.iter().all(|hit| text_of(hit, "id") != "note"),
+            "the deleted identifier is ignored"
+        );
+        assert_eq!(found.len(), 1, "the count drops below the limit");
+    }
+
+    #[test]
+    fn invalid_parameters_name_the_faulty_one() {
+        let store = Arc::new(InMemoryMemoryStore::new());
+        let index = host_index(&[memory("note", "T", "plage soleil")]);
+        let scopes = scopes(vec![(MemoryLevel::User, index)]);
+        let engine = engine(&store, &scopes, &[MemoryLevel::User], false);
+        let blank = refusal(&engine, "memory_user::search(\"   \", 3)");
+        assert!(blank.contains("query"), "the blank query is named: {blank}");
+        let zero = refusal(&engine, "memory_user::search(\"x\", 0)");
+        assert!(zero.contains("limit"), "the zero limit is named: {zero}");
+        let negative = refusal(&engine, "memory_user::search(\"x\", -1)");
+        assert!(
+            negative.contains("limit"),
+            "the negative limit is named: {negative}"
+        );
+    }
+
+    #[test]
+    fn read_only_level_searches_and_has_no_writing_function() {
+        let store = Arc::new(InMemoryMemoryStore::new());
+        let index = host_index(&[memory("note", "T", "plage soleil")]);
+        let scopes = scopes(vec![(MemoryLevel::User, index)]);
+        let writable = engine(&store, &scopes, &[MemoryLevel::User], false);
+        writable
+            .run("memory_user::create(\"note\", \"T\", \"plage soleil\");")
+            .expect("the memory is created");
+        let read_only = engine(&store, &scopes, &[MemoryLevel::User], true);
+        let found = hits(&read_only, "memory_user::search(\"plage soleil\", 1)");
+        assert_eq!(found.len(), 1, "the read-only level still searches");
+        let created = read_only.run("memory_user::create(\"k\", \"t\", \"c\");");
+        assert!(created.is_err(), "create is absent from the read-only level");
+    }
+}
+
+/// Without the feature `embedder`, the modules of Memory have no `search` function (`agent-sessions/modules#FR-14`).
+#[cfg(test)]
+#[cfg(not(feature = "embedder"))]
+mod without_feature_tests {
+    use std::sync::Arc;
+
+    use rhai::Engine as RhaiEngine;
+
+    use super::{MemoryScopes, memory_module, memory_module_name};
+    use crate::clock::{Clock, ManualClock, Timestamp};
+    use crate::modules::{InMemoryMemoryStore, MemoryLevel};
+    use crate::session::{EventSink, NullSink, SessionId};
+
+    #[test]
+    fn memory_module_has_no_search_function() {
+        let store = Arc::new(InMemoryMemoryStore::new());
+        let session = SessionId::new("s-1").expect("a non-empty identifier");
+        let scopes = MemoryScopes::new("alice", "alpha", &session);
+        let sink: Arc<dyn EventSink> = Arc::new(NullSink);
+        let clock: Arc<dyn Clock> = Arc::new(ManualClock::new(Timestamp::from_millis(1_000)));
+        let module = memory_module(MemoryLevel::User, store, scopes, sink, clock);
+        let mut engine = RhaiEngine::new();
+        let _registered =
+            engine.register_static_module(memory_module_name(MemoryLevel::User), Arc::new(module));
+        let outcome = engine.run("memory_user::search(\"x\", 3);");
+        assert!(
+            outcome.is_err(),
+            "the function does not exist without the feature"
         );
     }
 }

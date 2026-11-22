@@ -11,6 +11,7 @@ Structure:
   ./memory.rs: Memory, niveaux, trait de stockage et stockage mémoire
   ./native.rs: table des modules natifs d'une session par nature
   ./memory_module.rs: modules Rhai `memory_user`, `memory_shared` et `memory_session`
+  ./semantic.rs: recherche sémantique des Memory et des skills, index de `rig` que l'hôte fournit, textes à embeder, derrière la feature `embedder`
   ./mcp_name.rs: nom d'une fonction Rhai dérivé du nom d'un tool MCP
   ./mcp.rs: trait du connecteur MCP, tools, erreurs de connexion et connecteur scripté
   ./mcp_auth.rs: jeu d'en-têtes d'authentification et trait @McpAuth de l'hôte, sans la feature `mcp-http`
@@ -38,6 +39,7 @@ References:
   ./mcp_client.sdd
   ./mcp_auth.sdd
   ./native.sdd
+  ./semantic.sdd
 
 Must:
   Ne réaliser aucune E/S propre : le stockage des Memory est un trait que l'hôte implémente (`agent-sessions#CON-1`), le transport MCP est un trait de connecteur que l'hôte (ou un connecteur ultérieur) implémente.

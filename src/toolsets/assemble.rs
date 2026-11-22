@@ -278,6 +278,10 @@ mod tests {
                 | ToolsetsError::Forbidden { .. }
                 | ToolsetsError::Store(_)
                 | ToolsetsError::Poisoned => panic!("a failure must be InvalidToolset, got {failure:?}"),
+                #[cfg(feature = "embedder")]
+                ToolsetsError::InvalidArgument { .. } | ToolsetsError::NoIndex | ToolsetsError::Index(_) => {
+                    panic!("a failure must be InvalidToolset, got {failure:?}")
+                }
             })
             .collect()
     }

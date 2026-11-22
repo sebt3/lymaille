@@ -15,6 +15,8 @@ mod memory_module;
     reason = "rustfmt rewrites pub(in crate) into pub(crate), which this lint refuses: both are the crate visibility that unreachable_pub requires"
 )]
 pub(crate) mod native;
+#[cfg(feature = "embedder")]
+mod semantic;
 mod session_module;
 mod todo;
 
@@ -28,5 +30,7 @@ pub use mcp_name::{function_name, name_tools};
 pub use memory::{InMemoryMemoryStore, Memory, MemoryLevel, MemoryScope, MemoryStore, MemorySummary};
 pub use memory_module::{MemoryScopes, memory_module, memory_module_name, memory_module_read_only};
 pub use native::{MemoryAccess, NativeModule, native_modules};
+#[cfg(feature = "embedder")]
+pub use semantic::{SemanticHit, SemanticIndex, memory_embedding_text, skill_embedding_text};
 pub use session_module::session_module;
 pub use todo::{TodoItem, TodoList, TodoStatus, todo_module};

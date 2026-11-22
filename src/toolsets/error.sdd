@@ -20,6 +20,9 @@ Raises:
   @ToolsetsError::Incompatible: exigences non satisfaites du ToolsetContext ; porte la liste des écarts.
   @ToolsetsError::Forbidden: règle de définition d'agent violée (module de création de toolsets) ; le message nomme la règle.
   @ToolsetsError::Store: échec du stockage de l'hôte.
+  @ToolsetsError::InvalidArgument (feature `embedder`) : argument refusé du tool `skill` ; `name` porte le nom de l'argument, jamais sa valeur.
+  @ToolsetsError::NoIndex (feature `embedder`) : recherche de skills sans index fourni.
+  @ToolsetsError::Index (feature `embedder`) : échec de l'index sémantique de l'hôte ; le message est celui de l'index, sans la requête.
   @ToolsetsError::Poisoned: verrou interne d'un stockage mémoire empoisonné.
 
 Tasks:

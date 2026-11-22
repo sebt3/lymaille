@@ -49,6 +49,24 @@ pub enum ToolsetsError {
         /// Fixed reason of the refusal.
         reason: &'static str,
     },
+    /// An argument of the `skill` tool is refused: a blank or non-text query, a limit that is not an integer of at least 1, a
+    /// `limit` without a `query`, or a `query` combined with `name` or `document`. The name is the argument concerned.
+    #[cfg(feature = "embedder")]
+    #[error("invalid argument `{name}`: {reason}")]
+    InvalidArgument {
+        /// Name of the refused argument of the `skill` tool.
+        name: String,
+        /// Fixed reason of the refusal.
+        reason: &'static str,
+    },
+    /// No semantic index is provided for the skills, so a `query` is refused (`agent-sessions/modules#AC-12`).
+    #[cfg(feature = "embedder")]
+    #[error("no semantic index is provided for the skills")]
+    NoIndex,
+    /// The semantic index of the host fails. The message is the one of the index, without the query.
+    #[cfg(feature = "embedder")]
+    #[error("semantic index failed: {0}")]
+    Index(String),
     /// A skill body or an annex document exceeds the render cap.
     #[error("skill `{name}` exceeds the render cap of {cap_chars} characters")]
     SkillTooLarge {
@@ -109,6 +127,27 @@ fn known_note(known: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::ToolsetsError;
+
+    #[cfg(feature = "embedder")]
+    #[test]
+    fn semantic_errors_name_what_is_missing_or_failed() {
+        assert_eq!(
+            ToolsetsError::NoIndex.to_string(),
+            "no semantic index is provided for the skills"
+        );
+        assert_eq!(
+            ToolsetsError::Index("backend is down".to_owned()).to_string(),
+            "semantic index failed: backend is down"
+        );
+        let refused = ToolsetsError::InvalidArgument {
+            name: "limit".to_owned(),
+            reason: "the limit must be an integer of at least 1",
+        };
+        assert_eq!(
+            refused.to_string(),
+            "invalid argument `limit`: the limit must be an integer of at least 1"
+        );
+    }
 
     // Scenario: les messages cachent les valeurs
     #[test]

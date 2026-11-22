@@ -13,6 +13,9 @@ Can modify:
   ./memory_module.rs: fonction `search` des trois modules Memory, sous la feature `embedder` (Tasks #3).
   ../toolsets/native.rs: argument `query` du tool `skill`, sous la feature `embedder` (Tasks #4, ../toolsets/native.sdd).
   ../lib.rs: ré-export, sous la feature `embedder`.
+  ../toolsets/error.rs: variantes @ToolsetsError::NoIndex, @ToolsetsError::Index (sous la feature `embedder`), pour le tool `skill`.
+  ../toolsets/assemble.rs: bras cfg(feature `embedder`) du `match` de test `failed_names` qui couvre les variantes InvalidArgument, NoIndex et Index (exhaustivité, pas de logique).
+  ./error.rs: variantes @ModulesError::NoIndex et @ModulesError::Index (sous la feature `embedder`).
 
 References:
   ./memory.sdd
@@ -46,7 +49,8 @@ Returns:
   Fonction Rhai `search(query, limit)` de chaque module Memory (`memory_user`, `memory_shared`, `memory_session`), niveaux en lecture seule compris : un tableau de maps `#{id, title, score}`, par ordre de pertinence, jamais le corps.
 
 Raises:
-  Erreur Rhai d'exécution explicite, qui nomme le niveau, quand l'index de la portée est absent (`agent-sessions/modules#AC-12` : jamais un résultat vide) ; quand `limit` n'est pas un entier au moins égal à 1 ; quand `query` est vide ou blanche ; quand l'index échoue (message de l'index sans la requête).
+  @ModulesError::NoIndex (rendu en erreur Rhai d'exécution, qui nomme le niveau) quand l'index de la portée est absent (`agent-sessions/modules#AC-12` : jamais un résultat vide) ; erreur Rhai d'exécution qui nomme `limit` quand `limit` n'est pas un entier au moins égal à 1 ; erreur Rhai qui nomme `query` quand `query` est vide ou blanche ; @ModulesError::Index quand l'index échoue (message de l'index sans la requête).
+  `limit` est un entier Rhai : un autre type (flottant, texte) n'atteint pas la fonction, Rhai le refuse à l'appel (« function not found »). Aucune surcharge n'est ajoutée (décision XP du développeur principal).
   Un identifiant que l'index rend et que le stockage ne connaît plus est ignoré (index en retard d'une suppression : l'hôte réindexe, la librairie ne devine rien) et ne compte pas dans le nombre de résultats demandé ; le nombre de résultats peut donc être inférieur à `limit`.
 
 Must:
@@ -109,8 +113,9 @@ Scenario: sans la feature, la fonction n'existe pas
   Then il n'a pas de fonction `search` et @SemanticIndex n'existe pas
 
 Tasks:
-  [ ] #1 Après ../agents/embedder.sdd #2 à #4 (le @TestEmbedder et le @EmbedderModel servent aux tests). Tests puis implémentation de @SemanticIndex et @SemanticHit : adaptateur sur `VectorStoreIndex::top_n_ids` avec `VectorSearchRequest::builder().query(..).samples(..)` ; masquer le type associé par un objet interne (`Arc<dyn ...>` sur un trait privé à futur boxé : exception documentée à la règle « sans objet dynamique » car `VectorStoreIndex` n'est pas utilisable en objet ; justifier l'unique `#[expect]` éventuel par la raison précise). Déclaration et ré-export sous `#[cfg(feature = "embedder")]` (./mod.rs, ../lib.rs) ; ajouter `./semantic.rs` à la Structure et `./semantic.sdd` aux References de ./modules.sdd.
-  [ ] #2 Tests puis implémentation de @memory_embedding_text et @skill_embedding_text (Scenario 8).
-  [ ] #3 Tests puis implémentation de `search` dans ./memory_module.rs (Scenarios 1 à 7) et de @MemoryScopes::with_index. Le seuil d'arguments du harnais interdit un sixième paramètre de @memory_module (`#[expect]` refusé, voir ./memory_module.sdd) : les index passent par @MemoryScopes. Mettre à jour ./memory_module.sdd (Accepts, Returns, Raises, Must) dans la même tâche.
-  [ ] #4 Le tool `skill` : voir ../toolsets/native.sdd #6 (la recherche sémantique des skills s'y réalise, `agent-sessions/modules#FR-15`, `AC-11`).
-  [ ] #5 Test de bout en bout du lot (`agent-sessions/modules#AC-10` à `AC-12`) sous `--features embedder` : Memory trois niveaux, skills, index absent, réindexation explicite. Valide aussi la compilation et les tests sans la feature (`agent-sessions/agents#AC-8`).
+  [x] #1 Après ../agents/embedder.sdd #2 à #4 (le @TestEmbedder et le @EmbedderModel servent aux tests). Tests puis implémentation de @SemanticIndex et @SemanticHit : adaptateur sur `VectorStoreIndex::top_n_ids` avec `VectorSearchRequest::builder().query(..).samples(..)` ; masquer le type associé par un objet interne (`Arc<dyn ...>` sur un trait privé à futur boxé : exception documentée à la règle « sans objet dynamique » car `VectorStoreIndex` n'est pas utilisable en objet ; justifier l'unique `#[expect]` éventuel par la raison précise). Déclaration et ré-export sous `#[cfg(feature = "embedder")]` (./mod.rs, ../lib.rs) ; ajouter `./semantic.rs` à la Structure et `./semantic.sdd` aux References de ./modules.sdd.
+  [x] #2 Tests puis implémentation de @memory_embedding_text et @skill_embedding_text (Scenario 8).
+  [x] #3 Tests puis implémentation de `search` dans ./memory_module.rs (Scenarios 1 à 7) et de @MemoryScopes::with_index. Le seuil d'arguments du harnais interdit un sixième paramètre de @memory_module (`#[expect]` refusé, voir ./memory_module.sdd) : les index passent par @MemoryScopes. Mettre à jour ./memory_module.sdd (Accepts, Returns, Raises, Must) dans la même tâche.
+  [x] #4 Le tool `skill` : voir ../toolsets/native.sdd #6 (la recherche sémantique des skills s'y réalise, `agent-sessions/modules#FR-15`, `AC-11`).
+  [x] #5 Test de bout en bout du lot (`agent-sessions/modules#AC-10` à `AC-12`) sous `--features embedder` : Memory trois niveaux, skills, index absent, réindexation explicite. Valide aussi la compilation et les tests sans la feature (`agent-sessions/agents#AC-8`).
+      Validé le 2026-11-22 (validator, deux passes, mutations tuées) : variantes d'erreur dédiées sous la feature, bout en bout Memory et skills, `--no-default-features` vert, graphe par défaut inchangé.
