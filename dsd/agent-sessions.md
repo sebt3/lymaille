@@ -565,7 +565,8 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
   structuré.
 - **AC-5:** Une Memory de même identifiant existe aux niveaux utilisateur et projet ; chacune se lit indépendamment.
 - **AC-6:** La requête initiale envoyée au fournisseur pour un agent de travail ou un sous-agent contient exactement deux définitions de tool, `rhai_pad` et `skill`.
-- **AC-6bis:** Celle d'un agent de configuration en contient exactement trois, `rhai_pad`, `skill` et `rhai_prod_inspect` ; une fonction d'un module MCP appelée dans `rhai_prod_inspect` rend l'erreur d'inspection seule, sans connexion ni appel au serveur.
+- **AC-6bis:** Celle d'un agent de configuration en contient exactement trois, `rhai_pad`, `skill` et `rhai_prod_inspect` ; une fonction d'un module MCP ou d'une capacité brute appelée dans `rhai_prod_inspect` rend l'erreur d'inspection seule, sans connexion ni appel au serveur ni exécution de la fonction.
+    - **Source:** user instruction, 2026-10-29 ; capacités brutes, user instruction, 2026-11-22
 - **AC-7:** Après une session utilisant un serveur MCP et un moteur d'inférence authentifiés, aucun secret n'apparaît
   dans l'état persisté, les événements, les journaux ni les messages renvoyés au LLM.
 - **AC-8:** Avec un fournisseur simulé qui échoue deux fois puis répond, le tour aboutit, la session reste intacte, et
