@@ -1,7 +1,7 @@
 Spec: suggest
 
 Purpose:
-  Candidats les plus proches quand une fonction, un module ou une variable est introuvable, pris parmi les seuls éléments présentés. Rend les erreurs de Rhai
+  Candidats les plus proches quand une fonction, un module ou une variable est introuvable, pris parmi les seuls éléments que le catalogue liste (présentés ou enregistrés par une étape, ./introspect.sdd). Rend les erreurs de Rhai
     exploitables par le LLM sans jamais lui révéler un élément non présenté (`agent-sessions/scratchpad#FR-6`, `agent-sessions/scratchpad#AC-12`,
     `agent-sessions/scratchpad#FR-14`, `agent-sessions#BR-2`).
 
@@ -23,7 +23,7 @@ Exposes:
   @CandidateSet::with_usage
 
 Accepts:
-  @CandidateSet::new: les chemins d'appel des fonctions visibles (@Catalog et fonctions définies par le LLM, ./introspect.sdd), les noms des modules présentés et les noms des variables du scope. Aucun autre élément n'entre dans l'ensemble.
+  @CandidateSet::new: les chemins d'appel des fonctions visibles (@Catalog et fonctions définies par le LLM, ./introspect.sdd), les noms des modules du catalogue (@Catalog::module_names, ./introspect.sdd) et les noms des variables du scope. Aucun autre élément n'entre dans l'ensemble.
   @CandidateSet::with_usage: les lignes d'usage des fonctions visibles, des paires (chemin d'appel, texte d'usage) tirées de @FunctionEntry::usage (./introspect.sdd) ; un chemin qui n'est pas un candidat de fonction est ignoré. Rend l'ensemble, chaînable. @CandidateSet::new reste inchangé : sans cet appel, aucun usage.
   @nearest: un nom demandé, une liste de candidats (chaînes) et un nombre maximal de suggestions.
   @suggest_for: une @ScratchpadError::NotFound (genre, nom, nom de la fonction du script où elle est survenue) et un @CandidateSet.
@@ -33,8 +33,8 @@ Returns:
   @suggest_for: l'erreur reçue enrichie de ses suggestions (@ScratchpadError::with_suggestions), ou inchangée quand aucun candidat n'est assez proche ; pour une variable introuvable dans une fonction du script, l'erreur porte en plus l'indication décrite en `Must`.
 
 Must:
-  Les candidats sont choisis par genre : fonction introuvable parmi les chemins de fonctions visibles ; module introuvable parmi les noms de modules présentés (et, à défaut, les modules des chemins visibles) ; variable introuvable parmi les variables du scope.
-  Aucune suggestion ne nomme un élément absent de l'ensemble : une fonction d'un module non présenté, une dépendance de toolset ou une fonction d'un groupe non présenté n'est jamais suggérée, même si elle est la plus proche (`agent-sessions/scratchpad#AC-12`).
+  Les candidats sont choisis par genre : fonction introuvable parmi les chemins de fonctions visibles ; module introuvable parmi les noms de modules du catalogue (et, à défaut, les modules des chemins visibles) ; variable introuvable parmi les variables du scope.
+  Aucune suggestion ne nomme un élément absent de l'ensemble : une fonction d'un module non listé par le catalogue, une dépendance de toolset ou une fonction d'un groupe non présenté n'est jamais suggérée, même si elle est la plus proche (`agent-sessions/scratchpad#AC-12`).
   Distance : la distance d'édition de Levenshtein sur les caractères (valeurs scalaires Unicode), sensible à la casse. Pour un nom demandé non qualifié (sans `::`), elle se calcule aussi contre le dernier segment de chaque chemin candidat, et la plus petite des deux retient le candidat : `loki_querry` désigne `grafana::loki_query`. Pour un nom qualifié, la distance porte sur le chemin entier.
   Seuil : un candidat est retenu si sa distance est au plus `clamp(longueur du nom demandé / 3, 1, 3)`. Au plus trois suggestions sont rendues.
   Distance zéro (le nom existe mais l'appel a la mauvaise arité ou les mauvais types) : le candidat est rendu avec sa signature (`grafana::loki_query(query: string, range: string) -> map`) au lieu de son seul chemin, pour que le LLM voie les paramètres attendus. Si la fonction déclare une ligne d'usage (@CandidateSet::with_usage), le candidat est rendu `{signature}; call it as: {usage}` (`grafana::loki_query(arguments: Map); call it as: grafana::loki_query(#{ query: "…" })`), pour qu'un modèle qui ne connaît pas la syntaxe d'une table Rhai la voie dans l'erreur (`agent-sessions/scratchpad#FR-14`). Sans ligne d'usage, le rendu est celui d'avant. Le texte d'usage n'est jamais ajouté à un candidat de distance non nulle.

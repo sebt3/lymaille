@@ -423,12 +423,7 @@ mod tests {
             .iter()
             .map(|entry| (entry.path().to_owned(), entry.signature().to_owned()))
             .collect();
-        let modules = engine
-            .presentation()
-            .modules()
-            .iter()
-            .map(|module| module.name().to_owned())
-            .collect();
+        let modules = engine.catalog().module_names().to_vec();
         CandidateSet::new(functions, modules, Vec::new())
     }
 
@@ -912,6 +907,104 @@ mod tests {
             Ok(_) => panic!("a failing closure fails the build"),
             Err(error) => assert_eq!(error.class(), ScriptErrorClass::Engine, "an engine error"),
         }
+    }
+
+    /// A builder whose registration closure adds the module `tracker`, with `start()` documented: a native module of the
+    /// host, registered once the catalog is not built yet.
+    fn with_tracker(builder: EngineBuilder) -> EngineBuilder {
+        builder.with_registration(|engine| {
+            let _registered = engine.register_static_module("tracker", tracker_module());
+            Ok(())
+        })
+    }
+
+    /// The same module, registered after the catalog: callable, never listed.
+    fn with_unlisted_tracker(builder: EngineBuilder) -> EngineBuilder {
+        builder.with_unlisted_registration(|engine| {
+            let _registered = engine.register_static_module("tracker", tracker_module());
+            Ok(())
+        })
+    }
+
+    /// The module `tracker` with `start()`, documented.
+    fn tracker_module() -> Shared<Module> {
+        let mut module = Module::new();
+        let _hash = FuncRegistration::new("start")
+            .with_comments(["/// Starts a tracked run"])
+            .with_params_info(["string"])
+            .set_into_module(&mut module, || "started".to_owned());
+        Shared::new(module)
+    }
+
+    /// An engine built from this builder, which must build.
+    fn built_from(builder: EngineBuilder) -> ScratchpadEngine {
+        match builder.build() {
+            Ok(engine) => engine,
+            Err(error) => panic!("the engine must build: {error}"),
+        }
+    }
+
+    // Scenario: un module enregistré par une étape d'enregistrement est listé, cherchable et suggéré
+    #[test]
+    fn registered_module_is_listed_searched_and_suggested() {
+        let engine = built_from(with_tracker(ScratchpadEngine::builder(
+            ScratchpadLimits::new(),
+            Presentation::new(),
+        )));
+        assert!(
+            column(&engine, "modules()", "name").contains(&"tracker".to_owned()),
+            "modules() lists the registered module"
+        );
+        assert_eq!(
+            column(&engine, "functions(\"tracker\")", "path"),
+            vec!["tracker::start".to_owned()],
+            "functions(name) lists its functions"
+        );
+        assert!(
+            column(&engine, "find(\"tracker\")", "path").contains(&"tracker::start".to_owned()),
+            "find reaches the registered function"
+        );
+        let typo = failure(&engine, "tracker::strt()");
+        let message = suggest_for(typo, &candidates_of(&engine)).to_string();
+        assert!(
+            message.contains("tracker::start"),
+            "the typo suggests the registered function: {message}"
+        );
+        let module_typo = failure(&engine, "trackr::start()");
+        let module_message = suggest_for(module_typo, &candidates_of(&engine)).to_string();
+        assert!(
+            module_message.contains("tracker"),
+            "the typo suggests the registered module: {module_message}"
+        );
+    }
+
+    // Scenario: un module enregistré après le catalogue reste appelable mais hors de l'introspection
+    #[test]
+    fn unlisted_module_is_callable_but_never_listed() {
+        let engine = built_from(with_unlisted_tracker(ScratchpadEngine::builder(
+            ScratchpadLimits::new(),
+            Presentation::new(),
+        )));
+        assert_eq!(
+            value(&engine, "tracker::start()").to_string(),
+            "started",
+            "the unlisted module is callable"
+        );
+        assert!(
+            !column(&engine, "modules()", "name").contains(&"tracker".to_owned()),
+            "modules() does not list it"
+        );
+        assert!(
+            column(&engine, "find(\"tracker\")", "path").is_empty(),
+            "find does not reach it"
+        );
+        assert!(
+            engine.rhai().eval::<Array>("functions(\"tracker\")").is_err(),
+            "functions(name) refuses it as an unknown origin"
+        );
+        let typo = failure(&engine, "trackr::start()");
+        let message = suggest_for(typo, &candidates_of(&engine)).to_string();
+        assert!(!message.contains("tracker"), "no suggestion names it: {message}");
     }
 
     #[test]

@@ -25,12 +25,14 @@ Exposes:
   @NativeModule::name
   @native_modules
   @MemoryAccess
+  @NATIVE_MODULE_NAMES (`pub(crate)` : crate-only, non réexportée par ../lib.rs)
 
 Accepts:
   @native_modules: une nature (@AgentKind), un booléen « la session a une session parente » et un booléen « l'hôte fournit un niveau de Memory partagé à cette session ». Le second vient du `SessionState::parent` (`agent-sessions/session#FR-2`) ; le troisième est décidé par l'hôte (voir #3).
 
 Returns:
   @native_modules: la liste ordonnée des @NativeModule de la session. @NativeModule : `Todo`, `MemorySession`, `MemoryShared`, `MemoryUser(MemoryAccess)`, `Delegate`, `Result`, `Session`, `ToolsetBuilder`, `Contexts`, `Sessions`, `Inspect`. @MemoryAccess : `Read` ou `ReadWrite`. @NativeModule::name : le nom Rhai du module (`todo`, `memory_session`, `memory_shared`, `memory_user`, `delegate`, `result`, `session`, `toolset_builder`, `contexts`, `sessions`, `inspect`).
+  @NATIVE_MODULE_NAMES: les onze noms Rhai de @NativeModule::name, sans doublon, dans un tableau de taille fixe ; la liste ne dépend pas de la nature de la session. Un toolset ne peut pas prendre l'un de ces noms (`../toolsets/assemble.sdd`).
 
 Must:
   La table est la seule source des modules natifs ; aucune définition d'agent, aucun contexte ni aucun toolset n'en ajoute ou n'en retire (`agent-sessions#DEC-16`) :
@@ -68,6 +70,8 @@ Scenario: sans niveau partagé, pas de Memory partagée
   Then `MemoryShared` est absent
 
 Tasks:
+  [x] #4 Revue 0.4.0, point B : @NATIVE_MODULE_NAMES, la liste des onze noms natifs, source du refus des noms de toolset (`../toolsets/assemble.sdd` #5). Test de cohérence `the_name_list_holds_exactly_the_native_module_names` : chaque @NativeModule nomme un élément de la liste, et la liste n'a ni doublon ni nom en trop. Visibilité `pub(crate)` (`unreachable_pub` du harnais). Décision du développeur principal : les onze noms sont refusés quelle que soit la nature.
+      Validé le 2026-11-22 (validator : PASS ; trois retouches du développeur principal : libellés LLM « module », commentaires Scenario en français, visibilité crate documentée dans ./modules.sdd).
   [x] #1 Lot 0.4.0-F : tests puis implémentation de ./native.rs ; déclarer le module dans ./mod.rs et ré-exporter dans ../lib.rs. Remplace les règles retirées de ../toolsets/compat.sdd #10.
       Validé le 2026-11-21 (validator, tranche F groupée) : table exacte par nature, 5 Scenarios testés sur listes complètes, 100 % de couverture. ATTENTION relevée pour le branchement (G/H/I) : l'item `Delegation` (nom `delegation`) est faux au regard du domaine — le code enregistre `delegate` (principal) et `result` (sous-agent) ; à trancher avec #4, question #13 consignée.
   [x] #2 Lot 0.4.0-F : `MemoryAccess::Read` de `memory_module` n'expose que les fonctions de lecture (`list`, `read`, recherche) et aucune fonction d'écriture ; modifier ./memory_module.sdd #3 en conséquence (aujourd'hui la lecture seule se fait par un toolset de présentation). Aucune migration de l'ancien comportement : sans accès précisé, le module expose tout, comme avant.

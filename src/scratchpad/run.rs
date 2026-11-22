@@ -881,12 +881,7 @@ fn candidates_of(engine: &ScratchpadEngine, state: &PadState) -> CandidateSet {
                 )
             }),
     );
-    let modules = engine
-        .presentation()
-        .modules()
-        .iter()
-        .map(|module| module.name().to_owned())
-        .collect();
+    let modules = engine.catalog().module_names().to_vec();
     let variables = state
         .scope
         .iter()
@@ -1767,8 +1762,8 @@ mod tests {
         );
     }
 
-    // Scenario de bout en bout de run.sdd #18 : un script appelle `sandbox::read_file("p")` sur un moteur dont le module
-    // `sandbox` a une fonction à table et une ligne d'usage ; l'erreur rendue contient l'appel attendu.
+    // End-to-end scenario of run.sdd #18: a script calls `sandbox::read_file("p")` on an engine whose module
+    // `sandbox` has a table function and a usage line; the error given contains the expected call.
     #[tokio::test]
     async fn a_wrong_argument_to_a_map_function_shows_the_usage_line_in_the_error() {
         let presentation = Presentation::new().with_module(sandbox());

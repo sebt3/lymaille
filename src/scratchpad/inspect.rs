@@ -1152,9 +1152,9 @@ mod tests {
         );
     }
 
-    // Les noms, les paramètres et la documentation viennent des métadonnées de Rhai (feature `metadata` de
-    // `vynil-core`), comme les descripteurs du catalogue. Une fonction n'est décrite qu'une fois par
-    // (nom, arité) : les surcharges qu'une coquille ne peut pas distinguer ne sont pas listées deux fois.
+    // The names, the parameters and the documentation come from Rhai's metadata (`metadata` feature of
+    // `vynil-core`), as the descriptors of the catalog do. A function is described only once per
+    // (name, arity): overloads that a shell cannot tell apart are not listed twice.
     #[test]
     fn capabilities_descriptors_carry_signatures_and_documentation() {
         let mut described_module = Module::new();
@@ -1192,7 +1192,7 @@ mod tests {
         );
     }
 
-    // Un module sans fonction directe n'a pas de descripteur, comme dans le catalogue (inspect.sdd tâche #6).
+    // A module with no direct function has no descriptor, as in the catalog (inspect.sdd task #6).
     #[test]
     fn an_empty_capability_module_gives_no_descriptor() {
         let registry = Capabilities::compiled()
@@ -1205,8 +1205,8 @@ mod tests {
         );
     }
 
-    // Borne basse de la règle d'`Accepts` de @descriptors_from_capabilities (inspect.sdd tâche #8) : une seule fonction
-    // directe suffit à décrire un module brut. Zéro fonction ne rend rien (test ci-dessus), une en rend une.
+    // Lower bound of the `Accepts` rule of @descriptors_from_capabilities (inspect.sdd task #8): a single function
+    // directly suffices to describe a raw module. Zero functions give nothing (test above), one gives one.
     #[test]
     fn a_capability_module_with_one_function_is_described() {
         let mut described_module = Module::new();
@@ -1236,8 +1236,8 @@ mod tests {
         );
     }
 
-    // La capacité brute projetée en coquille : `host::get_env` se liste et tout appel échoue par l'erreur
-    // d'inspection seule, sans lire l'environnement du processus.
+    // The raw capability projected as a shell: `host::get_env` is listed, and every call fails with the
+    // inspection-only error, without reading the environment of the process.
     #[tokio::test]
     async fn a_capability_shell_refuses_get_env_without_reading_the_environment() {
         let descriptors = descriptors_from_capabilities(&Capabilities::compiled());
@@ -1276,7 +1276,7 @@ mod tests {
         );
     }
 
-    // `modules()` liste les capacités compilées…
+    // `modules()` lists the compiled capabilities…
     #[cfg(feature = "password")]
     #[tokio::test]
     async fn modules_list_the_compiled_capabilities() {
@@ -1298,7 +1298,7 @@ mod tests {
         );
     }
 
-    // … et jamais une feature non compilée.
+    // … and never a feature that is not compiled.
     #[cfg(not(feature = "password"))]
     #[tokio::test]
     async fn modules_never_list_an_uncompiled_feature() {

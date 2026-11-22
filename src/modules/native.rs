@@ -64,6 +64,26 @@ impl NativeModule {
     }
 }
 
+/// The Rhai names of every native module, whatever the nature of the session: a toolset can never take one of them, and a
+/// presented module of the same name would be replaced by the native one in the engine of the session.
+#[expect(
+    clippy::pub_with_shorthand,
+    reason = "rustfmt rewrites pub(in crate) into pub(crate), which this lint refuses: both are the crate visibility that unreachable_pub requires"
+)]
+pub(crate) const NATIVE_MODULE_NAMES: [&str; 11] = [
+    "todo",
+    "memory_session",
+    "memory_shared",
+    "memory_user",
+    "delegate",
+    "result",
+    "session",
+    "toolset_builder",
+    "contexts",
+    "sessions",
+    "inspect",
+];
+
 /// Lists the native modules of a session, in order: the nature of the session alone decides.
 ///
 /// `has_parent` says whether the session has a parent session (from `SessionState::parent`); `has_shared_memory` says
@@ -101,7 +121,7 @@ pub fn native_modules(kind: AgentKind, has_parent: bool, has_shared_memory: bool
 
 #[cfg(test)]
 mod tests {
-    use super::{MemoryAccess, NativeModule, native_modules};
+    use super::{MemoryAccess, NATIVE_MODULE_NAMES, NativeModule, native_modules};
     use crate::agents::AgentKind;
 
     /// Scenario: un agent de travail
@@ -206,6 +226,37 @@ mod tests {
             ],
             "MemoryShared is absent when the host provides no shared level"
         );
+    }
+
+    /// Every native module, in every nature, names a Rhai module listed in `NATIVE_MODULE_NAMES`, and the list holds no other
+    /// name: the list is the one a toolset cannot take.
+    #[test]
+    fn the_name_list_holds_exactly_the_native_module_names() {
+        let every = [
+            NativeModule::Todo,
+            NativeModule::MemorySession,
+            NativeModule::MemoryShared,
+            NativeModule::MemoryUser(MemoryAccess::Read),
+            NativeModule::Delegate,
+            NativeModule::Result,
+            NativeModule::Session,
+            NativeModule::ToolsetBuilder,
+            NativeModule::Contexts,
+            NativeModule::Sessions,
+            NativeModule::Inspect,
+        ];
+        for module in &every {
+            assert!(
+                NATIVE_MODULE_NAMES.contains(&module.name()),
+                "`{}` is listed for {module:?}",
+                module.name()
+            );
+        }
+        let mut names = NATIVE_MODULE_NAMES.to_vec();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), NATIVE_MODULE_NAMES.len(), "no name is listed twice");
+        assert_eq!(names.len(), every.len(), "one name per native module");
     }
 
     /// `Returns`: each native module names the Rhai module the host registers.

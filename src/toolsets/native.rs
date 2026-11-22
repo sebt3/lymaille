@@ -29,16 +29,16 @@ How a call works:
 - The result is the value of the last statement; a final `;` does not hide it (`1 + 1;` gives 2). A `let`, a loop, an `if` without `else` that is not taken, a `fn` definition and `print(...)` give `()`: end the script with the variable you want to read.
 - `let` variables and `fn` definitions persist to the next call of this session.
 - Text printed with `print` comes back before the result.
-- Call the functions of a presented module as `module::function(arguments)`.
+- Call the functions of a module as `module::function(arguments)`.
 - An error comes back as text: fix the script and call again.
 
 Discover what is available before you write a script:
 - `vars()`: the variables of the scope at the start of this run, as maps `#{name, type, preview}`.
-- `modules()`: the presented modules and the groups of built-in functions (for example `core`, `format` and `host`), as maps `#{name, kind, functions}`; `kind` is `module`, `core`, `format` or `host` and `functions` is the number of functions.
-- `functions()`: every function you can call, as maps `#{path, signature, doc, origin}`. `functions(\"global\")` lists the built-in groups, `functions(\"script\")` the functions you defined in this session, and `functions(\"name\")` the functions of one presented module; any other name is an error.
+- `modules()`: the modules and the groups of built-in functions (for example `core`, `format` and `host`), as maps `#{name, kind, functions}`; `kind` is `module`, `core`, `format` or `host` and `functions` is the number of functions.
+- `functions()`: every function you can call, as maps `#{path, signature, doc, origin}`. `functions(\"global\")` lists the built-in groups, `functions(\"script\")` the functions you defined in this session, and `functions(\"name\")` the functions of one module; any other name is an error.
 - `toolsets()`: the presented toolsets, as maps `#{name, description}`.
 - `skills()`: the presented skills, with their descriptions. Read the text of a skill with the `skill` tool, not with a script.
-- `find(\"words\")`: the functions, presented modules, toolsets and skills that hold every word of the query, in any case, in their name, path, signature, documentation or description, as maps `#{kind, name, path, text}`. The exact names come first; at most 50 results are returned.
+- `find(\"words\")`: the functions, modules, toolsets and skills that hold every word of the query, in any case, in their name, path, signature, documentation or description, as maps `#{kind, name, path, text}`. The exact names come first; at most 50 results are returned.
 - `rules()`: the sandbox rules and the limits.
 
 `session_context()` returns a copy of the toolset context of this session: `params` holds the shared parameters, `toolsets` holds the resolved parameters of each toolset, and `roles` holds the names of the bound roles. Changing the copy does not change the context. A `fn` can call it too.

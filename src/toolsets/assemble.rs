@@ -10,6 +10,7 @@ use rhai::module_resolvers::StaticModuleResolver;
 use rhai::{Module, Scope, Shared};
 
 use super::{ResolvedContext, Toolset, ToolsetsError};
+use crate::modules::native::NATIVE_MODULE_NAMES;
 use crate::scratchpad::{
     Capabilities, Presentation, PresentedModule, PresentedSkill, PresentedToolset, ScratchpadLimits,
     base_engine,
@@ -131,6 +132,9 @@ fn present(
     module: Module,
 ) -> Result<Presentation, ToolsetsError> {
     let taken = || failure(toolset, "a name is already presented", String::new());
+    if NATIVE_MODULE_NAMES.contains(&toolset.name()) {
+        return Err(failure(toolset, "a name is a native module", String::new()));
+    }
     let presented_module = PresentedModule::new(toolset.name(), Shared::new(module))
         .ok_or_else(|| failure(toolset, "the name is not a module name", String::new()))?;
     let presented_toolset = PresentedToolset::new(toolset.name(), toolset.description())
@@ -562,6 +566,38 @@ mod tests {
         let assembled = run_assemble(&toolsets, &capabilities());
         assert_eq!(failed_names(&assembled), ["b"]);
         assert_eq!(module_names(&assembled), ["a"], "not presented by halves");
+    }
+
+    // Scenario: un toolset ne peut pas prendre le nom d'un module natif, quelle que soit la nature de la session
+    #[test]
+    fn toolset_named_as_a_native_module_fails_whole() {
+        let native = [
+            "todo",
+            "memory_session",
+            "memory_shared",
+            "memory_user",
+            "delegate",
+            "result",
+            "session",
+            "toolset_builder",
+            "contexts",
+            "sessions",
+            "inspect",
+        ];
+        for name in native {
+            let toolsets = [toolset(name, "fn f() { 1 }"), toolset("other", "fn g() { 1 }")];
+            let assembled = run_assemble(&toolsets, &capabilities());
+            assert_eq!(
+                failed_names(&assembled),
+                [name],
+                "`{name}` is a native module name"
+            );
+            assert_eq!(
+                module_names(&assembled),
+                ["other"],
+                "the toolset named `{name}` is not presented, and the other one is"
+            );
+        }
     }
 
     // modules#AC-2: a read-only toolset over `memory_user`.

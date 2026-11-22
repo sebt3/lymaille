@@ -12,7 +12,7 @@ use serde::Deserialize;
 use super::error::{ScratchpadError, ScratchpadResult};
 use super::format::register;
 use super::limits::ScratchpadLimits;
-use super::presentation::{Presentation, PresentedModule};
+use super::presentation::Presentation;
 use super::render::render_value;
 
 /// Longest preview of a variable, in characters.
@@ -137,17 +137,19 @@ impl FunctionEntry {
     }
 }
 
-/// Functions of the presented surface, as read from the metadata of the engine.
+/// Functions and static modules of the session, as read from the metadata of the engine at the time the catalog is built.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Catalog {
     functions: Vec<FunctionEntry>,
+    modules: Vec<String>,
 }
 
 impl Catalog {
-    /// Catalog of the presented functions of an engine. Each global function is attributed to the step whose registration added
-    /// its signature; each function of a presented module is attributed to that module. Other modules are left out, and so are
-    /// the sub-modules, which are the dependencies of a toolset.
+    /// Catalog of an engine. Each global function is attributed to the step whose registration added its signature. Each
+    /// static module the engine holds when the catalog is built is listed under its name, its functions attributed to
+    /// that module: the presented modules, and the modules that the registration steps added. A module registered after
+    /// the catalog is not listed. The sub-modules are left out: they are the dependencies of a toolset.
     ///
     /// # Errors
     ///
@@ -167,27 +169,36 @@ impl Catalog {
                 functions.push(entry(function, function.name.clone(), origin.clone()));
             }
         }
+        let mut modules: BTreeSet<String> = presentation
+            .modules()
+            .iter()
+            .map(|presented| presented.name().to_owned())
+            .collect();
         for (name, module) in &metadata.modules {
-            if presentation
-                .modules()
-                .iter()
-                .any(|presented| presented.name() == name)
-            {
-                functions.extend(module_entries(name, module));
-            }
+            let _new = modules.insert(name.clone());
+            functions.extend(module_entries(name, module));
         }
         functions.sort_by(|left, right| {
             left.path
                 .cmp(&right.path)
                 .then_with(|| left.signature.cmp(&right.signature))
         });
-        Ok(Self { functions })
+        Ok(Self {
+            functions,
+            modules: modules.into_iter().collect(),
+        })
     }
 
     /// The functions of the catalog, sorted by call path.
     #[must_use]
     pub fn functions(&self) -> &[FunctionEntry] {
         &self.functions
+    }
+
+    /// The names of the static modules of the catalog, sorted. Every name here is a module the scripts can call by its path,
+    /// and the only module names introspection and the suggestions show.
+    pub(in crate::scratchpad) fn module_names(&self) -> &[String] {
+        &self.modules
     }
 
     /// Whether a function of this call path and this number of parameters is presented.
@@ -450,11 +461,11 @@ impl IntrospectionSource {
             .collect()
     }
 
-    /// `modules()`: the presented modules, with the functions of each, and the groups of functions of the catalog.
+    /// `modules()`: the modules of the catalog, with the functions of each, and the groups of functions of the catalog.
     fn modules(&self) -> Array {
         let mut counts: BTreeMap<(&'static str, String), usize> = BTreeMap::new();
-        for module in self.presentation.modules() {
-            let _count = counts.entry(("module", module.name().to_owned())).or_default();
+        for module in self.catalog.module_names() {
+            let _count = counts.entry(("module", module.clone())).or_default();
         }
         for view in Self::views(&self.snapshot(), &self.catalog) {
             let name = match &view.origin {
@@ -499,7 +510,7 @@ impl IntrospectionSource {
                 .into_iter()
                 .filter(|view| view.origin == Origin::Script)
                 .collect(),
-            name if self.is_presented_module(name) => views
+            name if self.is_listed_module(name) => views
                 .into_iter()
                 .filter(|view| view.origin == Origin::Module(name.to_owned()))
                 .collect(),
@@ -508,26 +519,17 @@ impl IntrospectionSource {
         Ok(function_rows(&selected))
     }
 
-    /// Whether a module of this name is presented.
-    fn is_presented_module(&self, name: &str) -> bool {
-        self.presentation
-            .modules()
-            .iter()
-            .any(|module| module.name() == name)
+    /// Whether a module of this name is listed by the catalog.
+    fn is_listed_module(&self, name: &str) -> bool {
+        self.catalog.module_names().iter().any(|module| module == name)
     }
 
     /// Error of `functions(origin)` for an origin that is not known: it lists what can be asked for.
     fn unknown_origin(&self, name: &str) -> EvalAltResult {
-        let modules: Vec<&str> = self
-            .presentation
-            .modules()
-            .iter()
-            .map(PresentedModule::name)
-            .collect();
         EvalAltResult::ErrorRuntime(
             Dynamic::from(format!(
-                "functions: unknown origin `{name}`; use \"global\", \"script\" or a presented module: {}",
-                modules.join(", ")
+                "functions: unknown origin `{name}`; use \"global\", \"script\" or a module: {}",
+                self.catalog.module_names().join(", ")
             )),
             rhai::Position::NONE,
         )
@@ -625,12 +627,12 @@ impl IntrospectionSource {
                     text,
                 }
             });
-        let modules = self.presentation.modules().iter().map(|module| Found {
+        let modules = self.catalog.module_names().iter().map(|module| Found {
             kind: "module",
-            name: module.name().to_owned(),
-            path: module.name().to_owned(),
-            text: format!("presented module {}", module.name()),
-            haystack: module.name().to_lowercase(),
+            name: module.clone(),
+            path: module.clone(),
+            text: format!("module {module}"),
+            haystack: module.to_lowercase(),
         });
         let toolsets = self.presentation.toolsets().iter().map(|toolset| Found {
             kind: "toolset",
@@ -759,7 +761,7 @@ pub(in crate::scratchpad) fn register_introspection(engine: &mut Engine, source:
         engine,
         "functions",
         &["origin: string", "array"],
-        "/// Functions of an origin: \"global\" for the built-in groups, \"script\" for the functions the LLM defined, or the name of a presented module. Fails on any other name.",
+        "/// Functions of an origin: \"global\" for the built-in groups, \"script\" for the functions the LLM defined, or the name of a module. Fails on any other name.",
         move |origin: ImmutableString| one.functions_of(origin.as_str()),
     );
     let toolsets = Arc::clone(source);
@@ -841,7 +843,6 @@ mod tests {
         let mut not_presented = Module::new();
         let _not_presented_hash =
             FuncRegistration::new("loki_secret").set_into_module(&mut not_presented, || "value".to_owned());
-        let _other = engine.register_static_module("other", Shared::new(not_presented));
         let presentation = Presentation::new()
             .with_module(PresentedModule::new("grafana", grafana).expect("valid name"))
             .and_then(|presentation| {
@@ -867,6 +868,8 @@ mod tests {
             ScratchpadLimits::new(),
         ));
         register_introspection(&mut engine, &source);
+        // Registered after the catalog, as an unlisted module: callable, but never listed nor searched.
+        let _other = engine.register_static_module("other", Shared::new(not_presented));
         (engine, source)
     }
 
@@ -1333,8 +1336,8 @@ mod tests {
         );
     }
 
-    // La branche « texte vide » du Must : `doc_of` tronque chaque ligne, la branche est injoignable par le pipeline,
-    // elle se vérifie sur `usage_of` directement.
+    // The empty-text branch of the Must: `doc_of` trims each line, so this branch cannot be reached through the pipeline,
+    // it is checked on `usage_of` directly.
     #[test]
     fn an_empty_usage_line_gives_nothing() {
         assert_eq!(usage_of("Usage: "), None, "a line that is only the prefix");
@@ -1399,7 +1402,7 @@ mod tests {
         }
     }
 
-    // Le catalogue ignore la fonction brute même quand la feature `fs` la compile dans ce build.
+    // The catalog ignores the raw function even when the `fs` feature compiles it in this build.
     #[cfg(feature = "fs")]
     #[test]
     fn no_file_function_is_in_the_session_catalog_under_the_fs_feature() {
@@ -1417,7 +1420,7 @@ mod tests {
         );
     }
 
-    // Le catalogue ignore `shell_run` même quand la feature `shell` la compile dans ce build.
+    // The catalog ignores `shell_run` even when the `shell` feature compiles it in this build.
     #[cfg(feature = "shell")]
     #[test]
     fn no_shell_function_is_in_the_session_catalog_under_the_shell_feature() {

@@ -10,7 +10,11 @@ mod mcp_module;
 mod mcp_name;
 mod memory;
 mod memory_module;
-mod native;
+#[expect(
+    clippy::pub_with_shorthand,
+    reason = "rustfmt rewrites pub(in crate) into pub(crate), which this lint refuses: both are the crate visibility that unreachable_pub requires"
+)]
+pub(crate) mod native;
 mod session_module;
 mod todo;
 

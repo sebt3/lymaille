@@ -60,7 +60,7 @@ const UNREADABLE_REASON: &str = "the outcome of the run could not be read";
 /// Host side of a sub-agent.
 ///
 /// The host assembles the sub-agent of a request (definition, profile, provider, the presentation of the toolsets that
-/// `select_toolsets` gives to this sub-agent, the native modules of `native_modules` — never `delegation` —, turn runner)
+/// `select_toolsets` gives to this sub-agent, the native modules of `native_modules` — never `delegate` —, turn runner)
 /// and runs it to its end: the library cannot build a sub-agent alone.
 pub trait SubagentLauncher: Send + Sync + 'static {
     /// Runs the sub-agent of `request` until its end and returns its outcome. Once the run is concluded, the registry

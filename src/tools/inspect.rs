@@ -42,17 +42,20 @@ pub trait InspectionHost: Send + Sync {
 /// that masks the output and the clock that dates the runs.
 ///
 /// It also carries the raw capabilities of the host, never executed: they feed the assembly of the toolsets and are
-/// projected as shells.
+/// projected as shells. The shells are read once, when the environment is built, since the capabilities do not change
+/// during a session.
 #[non_exhaustive]
 pub struct InspectEnv {
     base: ScratchpadEngine,
     redactor: Redactor,
     clock: Arc<dyn Clock>,
     capabilities: Capabilities,
+    capability_descriptors: Vec<ModuleDescriptor>,
 }
 
 impl InspectEnv {
-    /// Groups the base engine (limits), the redactor, the clock and the capabilities of the session.
+    /// Groups the base engine (limits), the redactor, the clock and the capabilities of the session. Reads the shells of
+    /// the capabilities once, here.
     #[must_use]
     pub fn new(
         base: ScratchpadEngine,
@@ -60,12 +63,19 @@ impl InspectEnv {
         clock: Arc<dyn Clock>,
         capabilities: Capabilities,
     ) -> Self {
+        let capability_descriptors = descriptors_from_capabilities(&capabilities);
         Self {
             base,
             redactor,
             clock,
             capabilities,
+            capability_descriptors,
         }
+    }
+
+    /// The shells of the raw capabilities, as read when the environment was built.
+    pub(crate) fn capability_descriptors(&self) -> &[ModuleDescriptor] {
+        &self.capability_descriptors
     }
 }
 
@@ -200,9 +210,11 @@ where
             .map(|descriptor| descriptor.name().to_owned())
             .collect();
         modules.extend(
-            descriptors_from_capabilities(&self.env.capabilities)
-                .into_iter()
-                .filter(|descriptor| !projected.contains(descriptor.name())),
+            self.env
+                .capability_descriptors()
+                .iter()
+                .filter(|descriptor| !projected.contains(descriptor.name()))
+                .cloned(),
         );
         InspectionPad::new(
             &self.env.base,
@@ -293,6 +305,7 @@ mod tests {
     use crate::clock::{ManualClock, Timestamp};
     use crate::scratchpad::{
         Capabilities, FunctionDescriptor, ModuleDescriptor, Presentation, ScratchpadEngine, ScratchpadLimits,
+        descriptors_from_capabilities,
     };
     use crate::session::{
         AgentRef, CancelHandle, InMemoryStore, InspectionTargetRef, NativeTool, Redactor, SessionId,
@@ -363,6 +376,28 @@ mod tests {
 
     fn fixture_with(redactor: Redactor) -> Fixture {
         fixture_backed_by(redactor, Capabilities::compiled())
+    }
+
+    // Review 0.4.0, point C2: the shells of the raw capabilities are read once, when the environment is built,
+    // and the inspection uses them without reading them again.
+    #[test]
+    fn capability_shells_are_read_once_when_the_environment_is_built() {
+        let capabilities = Capabilities::compiled();
+        let expected: Vec<ModuleDescriptor> = descriptors_from_capabilities(&capabilities);
+        let base = ScratchpadEngine::builder(ScratchpadLimits::new(), Presentation::new())
+            .build()
+            .expect("the base engine builds");
+        let env = InspectEnv::new(
+            base,
+            Redactor::new(),
+            Arc::new(ManualClock::new(Timestamp::from_millis(0))),
+            capabilities,
+        );
+        assert_eq!(
+            env.capability_descriptors(),
+            expected.as_slice(),
+            "the shells held by the environment are the ones the registry gives"
+        );
     }
 
     /// The same fixture over the capabilities the host injected in the registry.
@@ -548,10 +583,10 @@ mod tests {
         );
     }
 
-    // tools/inspect.sdd tâche #3 : la cible `Definition` assemble par `assemble(.., &Capabilities, ..)` avec les
-    // capacités brutes de l'hôte, pas avec `Capabilities::compiled()`. Un toolset dont la dépendance déclarée n'est
-    // que dans le module injecté par l'hôte s'assemble et se projette ; mué en `compiled()`, la dépendance manque,
-    // le toolset est omis sans signalement et le module disparaît de `modules()`.
+    // tools/inspect.sdd task #3: the `Definition` target assembles with `assemble(.., &Capabilities, ..)` and the
+    // raw capabilities of the host, not with `Capabilities::compiled()`. A toolset whose declared dependency is only
+    // in the module injected by the host assembles and is projected; with `compiled()` substituted, the dependency is missing,
+    // the toolset is left out without any signal and the module disappears from `modules()`.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_toolset_depending_on_an_injected_capability_is_assembled_and_projected() {
         let mut module = rhai::Module::new();
@@ -841,7 +876,7 @@ mod tests {
         );
     }
 
-    // Must (inspect.sdd) : la sortie est masquée
+    // Must (inspect.sdd): the output is masked
     #[tokio::test(flavor = "multi_thread")]
     async fn the_output_never_holds_a_declared_secret() {
         let mut redactor = Redactor::new();
@@ -852,7 +887,7 @@ mod tests {
         assert!(!shown.contains("tok-123456"), "the secret is masked: {shown}");
     }
 
-    // Must (inspect.sdd) : l'annulation du tour arrête le script
+    // Must (inspect.sdd): the cancellation of the turn stops the script
     #[tokio::test(flavor = "multi_thread")]
     async fn cancellation_stops_the_script() {
         let fixture = fixture();
@@ -871,7 +906,7 @@ mod tests {
         assert!(result.is_err(), "a cancelled script is an error text: {result:?}");
     }
 
-    // Must (inspect.sdd) : le nom et la définition sont ceux du tool
+    // Must (inspect.sdd): the name and the definition are those of the tool
     #[test]
     fn the_tool_answers_its_name_and_its_definition() {
         let fixture = fixture();

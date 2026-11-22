@@ -56,6 +56,9 @@ impl Capabilities {
 
     /// Registers the `prometheus` module over `client`, a [`vynil_core::query_client::QueryClient`] the
     /// host has built and configured. One instance per type: a second call replaces the first, without error.
+    /// It also replaces a module named `prometheus` that [`Capabilities::with_module`] added before this call,
+    /// without error. The order of the calls matters: a `with_module("prometheus", ..)` made after this call is
+    /// refused, since the name is then taken.
     #[cfg(feature = "prometheus")]
     #[must_use]
     pub fn with_prometheus(mut self, client: vynil_core::query_client::QueryClient) -> Self {
@@ -66,6 +69,9 @@ impl Capabilities {
 
     /// Registers the `loki` module over `client`, a [`vynil_core::query_client::QueryClient`] the host
     /// has built and configured. One instance per type: a second call replaces the first, without error.
+    /// It also replaces a module named `loki` that [`Capabilities::with_module`] added before this call,
+    /// without error. The order of the calls matters: a `with_module("loki", ..)` made after this call is
+    /// refused, since the name is then taken.
     #[cfg(feature = "loki")]
     #[must_use]
     pub fn with_loki(mut self, client: vynil_core::query_client::QueryClient) -> Self {
@@ -265,9 +271,9 @@ mod tests {
         }
     }
 
-    // Règle d'Accepts de capabilities.sdd : `with_module` accepte un nom qui est un identifiant Rhai
-    // valide, mêmes règles que `PresentedModule::new` : un premier caractère lettre ou `_`, puis des
-    // caractères alphanumériques ou `_` (règle rappelée en presentation.sdd, tâche #5).
+    // Accepts rule of capabilities.sdd: `with_module` accepts a name that is a valid Rhai identifier,
+    // same rules as `PresentedModule::new`: a first character that is a letter or `_`, then
+    // alphanumeric characters or `_` (rule restated in presentation.sdd, task #5).
     #[test]
     fn underscore_module_names_accepted() {
         for name in ["grafana_prod", "_priv"] {
@@ -280,8 +286,8 @@ mod tests {
         }
     }
 
-    // Même règle, côté refus : un nom qui commence par un chiffre ou contient `-` n'est pas un
-    // identifiant Rhai valide, `with_module` rend `None`.
+    // Same rule, on the refusal side: a name that starts with a digit or contains `-` is not a
+    // valid Rhai identifier, so `with_module` returns `None`.
     #[test]
     fn digit_start_and_hyphen_module_names_refused() {
         for name in ["1grafana", "grafana-prod"] {
@@ -395,7 +401,7 @@ mod tests {
         );
     }
 
-    // Must : le registre est Clone, Debug (noms seulement) et Send + Sync
+    // Must: the registry is Clone, Debug (names only) and Send + Sync
     #[test]
     fn registry_is_clone_and_send_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
@@ -407,9 +413,9 @@ mod tests {
         assert_eq!(names, clone_names, "the clone holds the same modules");
     }
 
-    // Tâche #2 : aucune E/S à la construction, observée sous chaque feature livrée (le harnais
-    // `disallowed-*` la fait déjà respecter ; ici le test construit seulement, il n'appelle aucune
-    // fonction de module qui ouvrirait une connexion, un fichier ou un processus).
+    // Task #2: no I/O at construction, observed under each shipped feature (the harness
+    // `disallowed-*` already enforces it; here the test only constructs, and calls no
+    // module function that would open a connection, a file or a process).
     #[cfg(feature = "fs")]
     #[test]
     fn constructing_with_fs_performs_no_io() {
@@ -417,7 +423,7 @@ mod tests {
         assert!(registry.get("host").is_some(), "host built with its fs functions");
     }
 
-    // Tâche #2 : construction sous la feature `shell`, sans processus lancé.
+    // Task #2: construction under the `shell` feature, with no process started.
     #[cfg(feature = "shell")]
     #[test]
     fn constructing_with_shell_performs_no_io() {
@@ -428,7 +434,7 @@ mod tests {
         );
     }
 
-    // Tâche #2 : construction sous la feature `password`.
+    // Task #2: construction under the `password` feature.
     #[cfg(feature = "password")]
     #[test]
     fn constructing_with_password_performs_no_io() {
@@ -436,7 +442,7 @@ mod tests {
         assert!(registry.get("password").is_some(), "password module built");
     }
 
-    // Tâche #2 : construction sous la feature `quantity` (module du groupe `core`, jamais du registre).
+    // Task #2: construction under the `quantity` feature (a module of the `core` group, never of the registry).
     #[cfg(feature = "quantity")]
     #[test]
     fn constructing_with_quantity_performs_no_io() {
@@ -447,7 +453,7 @@ mod tests {
         );
     }
 
-    // Tâche #2 : construction sous la feature `crypto`.
+    // Task #2: construction under the `crypto` feature.
     #[cfg(feature = "crypto")]
     #[test]
     fn constructing_with_crypto_performs_no_io() {
@@ -455,8 +461,8 @@ mod tests {
         assert!(registry.get("crypto").is_some(), "crypto module built");
     }
 
-    // Tâche #2 : construction sous la feature `http`, sans connexion ouverte (le module ne fait rien
-    // tant qu'un script ne l'appelle pas).
+    // Task #2: construction under the `http` feature, with no connection opened (the module does nothing
+    // until a script calls it).
     #[cfg(feature = "http")]
     #[test]
     fn constructing_with_http_performs_no_io() {
@@ -464,7 +470,7 @@ mod tests {
         assert!(registry.get("http").is_some(), "http module built, idle");
     }
 
-    // Tâche #2 : construction sous la feature `oci`, sans registre contacté.
+    // Task #2: construction under the `oci` feature, with no registry contacted.
     #[cfg(feature = "oci")]
     #[test]
     fn constructing_with_oci_performs_no_io() {
@@ -472,7 +478,7 @@ mod tests {
         assert!(registry.get("oci").is_some(), "oci module built, idle");
     }
 
-    // Tâche #2 : construction sous la feature `feeds`, sans flux récupéré.
+    // Task #2: construction under the `feeds` feature, with no feed fetched.
     #[cfg(feature = "feeds")]
     #[test]
     fn constructing_with_feeds_performs_no_io() {
@@ -480,8 +486,8 @@ mod tests {
         assert!(registry.get("feeds").is_some(), "feeds module built, idle");
     }
 
-    // Tâche #2 : construction sous la feature `prometheus` : `QueryClient::new` ne fait que valider
-    // la configuration de l'hôte, aucune connexion.
+    // Task #2: construction under the `prometheus` feature: `QueryClient::new` only validates
+    // the host configuration, with no connection.
     #[cfg(feature = "prometheus")]
     #[test]
     fn constructing_with_prometheus_performs_no_io() {
@@ -493,7 +499,7 @@ mod tests {
         );
     }
 
-    // Tâche #2 : construction sous la feature `loki`, même contrat que Prometheus.
+    // Task #2: construction under the `loki` feature, same contract as Prometheus.
     #[cfg(feature = "loki")]
     #[test]
     fn constructing_with_loki_performs_no_io() {

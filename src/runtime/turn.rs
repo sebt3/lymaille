@@ -2678,7 +2678,7 @@ mod tests {
         assert_eq!(output.response(), "done", "the model receives the final answer");
     }
 
-    // Must (native_tool.sdd #2) : le texte d'erreur d'un tool natif est rendu au modèle comme résultat d'outil
+    // Must (native_tool.sdd #2): the error text of a native tool is given to the model as a tool result
     #[tokio::test]
     async fn native_tool_error_is_given_to_the_model_as_a_result() {
         let provider = Arc::new(ScriptedProvider::new(vec![
@@ -2705,7 +2705,7 @@ mod tests {
         );
     }
 
-    // Must (native_tool.sdd #2) : l'annulation du tour est honorée pendant l'appel d'un tool natif
+    // Must (native_tool.sdd #2): the cancellation of the turn is honoured during the call of a native tool
     #[tokio::test]
     async fn cancel_during_a_native_tool_keeps_the_history_valid() {
         let provider = Arc::new(ScriptedProvider::new(vec![
@@ -2805,7 +2805,7 @@ mod tests {
         );
     }
 
-    // Must (turn.sdd) : le texte d'un tool natif est borné par le plafond de rendu de la Budget
+    // Must (turn.sdd): the text of a native tool is bounded by the render cap of the Budget
     #[tokio::test]
     async fn native_output_is_capped_by_the_budget_render_cap() {
         let provider = Arc::new(ScriptedProvider::new(vec![
@@ -3153,7 +3153,7 @@ mod tests {
         );
     }
 
-    // Test de non-régression (../session/history.sdd #4) : la branche `Discarded` des match de caractères compte zéro.
+    // Non-regression test (../session/history.sdd #4): the `Discarded` branch of the character matches counts zero.
     #[test]
     fn a_discarded_message_counts_zero_characters() {
         let discarded = Message::discarded(
@@ -3172,7 +3172,7 @@ mod tests {
         );
     }
 
-    // Test de non-régression (../session/history.sdd #4) : le décompte d'usage compte zéro pour `Discarded`, raisonnement et complétion.
+    // Non-regression test (../session/history.sdd #4): the usage count gives zero for `Discarded`, reasoning and completion.
     #[tokio::test]
     async fn a_discarded_response_counts_zero_in_the_usage() {
         let provider = Arc::new(ScriptedProvider::new(vec![Ok(InferenceResponse::new(

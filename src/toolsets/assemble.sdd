@@ -18,12 +18,13 @@ Returns:
   @Assembled: une @Presentation (modules de présentation, toolsets, skills) et la liste des toolsets en échec, avec la raison.
 
 Raises:
-  @ToolsetsError::InvalidToolset: le module d'un toolset ne s'évalue pas ; une dépendance déclarée n'existe pas dans les @Capabilities (feature non compilée, nom inconnu) ; un nom de toolset ou de skill est déjà pris ; un toolset en échec est retiré, les autres restent.
+  @ToolsetsError::InvalidToolset: le module d'un toolset ne s'évalue pas ; une dépendance déclarée n'existe pas dans les @Capabilities (feature non compilée, nom inconnu) ; un nom de toolset ou de skill est déjà pris ; un nom de toolset qui est celui d'un module natif (`../modules/native.sdd`, @NATIVE_MODULE_NAMES) ; un toolset en échec est retiré, les autres restent.
 
 Must:
   Les dépendances d'un toolset sont des noms de @Capabilities : elles lui sont accessibles à l'évaluation de son module, et seulement celles qu'il déclare ; elles n'apparaissent ni dans le scope, ni dans @Presentation, ni dans l'introspection, sans exception (`agent-sessions/toolsets#FR-2`, `AC-1`). Aucune dépendance ne devient présentée par le fait d'être déclarée.
   Le module d'un toolset est celui de ses fonctions publiques : les sous-modules d'import des dépendances, que l'export brut de Rhai expose, en sont retirés avant de le présenter (Observed in: spikes/rhai-1-25, `private_dependencies`).
   Un toolset dont une dépendance n'est pas disponible est en échec, pas présenté à moitié.
+  Un toolset ne peut pas prendre le nom d'un module natif, quelle que soit la nature de la session : les onze noms de @NATIVE_MODULE_NAMES sont refusés (erreur `a name is a native module`, toolset retiré entier). Sans ce refus, le module natif remplacerait le toolset dans le moteur de session, qui enregistre les natifs après la présentation (`../scratchpad/engine.sdd`).
   Les skills d'un toolset sont présentés avec lui (nom, description, nom du toolset) ; ceux d'un toolset en échec ne le sont pas.
   Aucune E/S ; l'évaluation du module n'ouvre aucune connexion.
 
@@ -34,6 +35,7 @@ Depends on:
   ../scratchpad/presentation.sdd
   ../scratchpad/capabilities.sdd
   ../scratchpad/engine.sdd
+  ../modules/native.sdd (la seule constante @NATIVE_MODULE_NAMES ; le domaine `modules` ne dépend pas de `toolsets`, pas de cycle)
   rhai
 
 Scenario: la dépendance fonctionne mais reste cachée
@@ -45,6 +47,11 @@ Scenario: une capacité de l'hôte reste cachée aussi
   Given un module `grafana` ajouté par l'hôte aux @Capabilities et un toolset qui le déclare
   When la session appelle `grafana::query` directement
   Then c'est une erreur de module introuvable, et le toolset qui l'utilise fonctionne
+
+Scenario: un toolset qui prend le nom d'un module natif est refusé entier
+  Given un toolset nommé `todo` (ou `delegate`, `contexts`, ... : les onze noms natifs) et un autre toolset `other`
+  When ils sont assemblés, quelle que soit la nature de la session
+  Then le toolset natif est signalé en échec (`a name is a native module`), `other` est présenté seul, et le module natif n'est jamais remplacé
 
 Scenario: dépendance indisponible
   Given un toolset qui dépend d'un module absent des @Capabilities, par exemple `k8s` sans la feature
@@ -62,6 +69,8 @@ Scenario: la fonction d'une capacité non compilée n'atteint pas le toolset
   Then l'assemblage réussit (`host` est dans les @Capabilities quelles que soient les features) et l'appel échoue par fonction introuvable
 
 Tasks:
+  [x] #5 Revue 0.4.0, point B : un toolset ne peut pas prendre le nom d'un module natif. @assemble refuse le toolset entier (erreur typée `a name is a native module`) ; la liste est @NATIVE_MODULE_NAMES (../modules/native.sdd #4, `pub(crate)`). Tests d'abord : `toolset_named_as_a_native_module_fails_whole` (les onze noms, avec un second toolset présenté). Décision du développeur principal : on refuse les onze noms quelle que soit la nature de la session (frontière de nommage).
+      Validé le 2026-11-22 (validator : PASS ; trois retouches du développeur principal : libellés LLM « module », commentaires Scenario en français, visibilité crate documentée dans ./modules.sdd).
   [x] #4 Lot 0.4.0-B (partie déplacée de ../scratchpad/engine.sdd #19, décision ./engine.sdd #20) : tests puis, si nécessaire, implémentation, dans ./assemble.rs — un toolset qui dépend de `host` s'assemble quelles que soient les features compilées (`host` est toujours au registre, ../scratchpad/capabilities.sdd Scenario 1) ; sous `#[cfg(not(feature = "fs"))]`, `host::file_read` appelé par le toolset échoue par fonction introuvable, et sous la feature compilée la fonction figure au module `host`. Vérifier la présence de la fonction par la liste des fonctions du module, sans jamais lire un fichier réel (`agent-sessions#CON-1`). Un toolset qui dépend d'un module absent du registre reste en échec entier (Scenario « dépendance indisponible »).
       Validé le 2026-11-22 (validator) : deux tests dans le module de tests de ./assemble.rs, aucun changement de code produit — le refus vient de la résolution d'appel de Rhai (`ErrorFunctionNotFound` → @ScratchpadError::NotFound → @ScriptErrorClass::NotFound). Discriminance vérifiée par deux mutations de ./scratchpad/capabilities.rs (fonction enregistrée hors de son `cfg`, module `host` vidé), chacune vue rouge puis fichier restauré. Mesure à lire avec ../../lymaille.sdd #22 : `scripts/check` teste en `--all-features`, donc seule la face avec `fs` y compile ; la face sans `fs` ne tourne que sous un `cargo test` lancé à la main aux features par défaut (`cargo hack --each-feature` passe `--no-dev-deps`).
   [x] #3 Lot 0.4.0-E : nouvelle signature de @assemble (plus de `granted_modules`, `&Capabilities` à la place de la table `dependencies`) ; migrer les appelants (../toolsets/config.rs, ../tools/inspect.rs, ../delegation, ../runtime, tests) ; tests des quatre Scenarios ; mettre à jour `agent-sessions/toolsets#AC-1`. Dépend de ../scratchpad/capabilities.sdd #1 et ../scratchpad/presentation.sdd #7.

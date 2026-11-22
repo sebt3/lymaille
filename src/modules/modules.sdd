@@ -45,6 +45,7 @@ Must:
   Les fonctions Rhai sont synchrones et appellent les traits asynchrones par `vynil_core::rt::block_on` ; sur un runtime `current_thread`, elles rendent l'erreur explicite de `vynil-core`.
   Les modules fournis par l'hôte (`agent-sessions/modules#FR-8`) ne demandent aucun code ici : un module de l'hôte entre dans les @Capabilities par `with_module` (mêmes règles d'unicité de nom, ../scratchpad/capabilities.sdd) et n'est atteignable que par les toolsets qui le déclarent en dépendance.
   Aucun événement, aucune erreur ni aucun enregistrement ne porte un secret ni le corps d'une Memory (`agent-sessions#CON-3`).
+  Visibilité : `native` est déclaré `pub(crate) mod` dans ./mod.rs, et la constante @NATIVE_MODULE_NAMES (les onze noms natifs) est `pub(crate)` dans ./native.rs ; ni l'un ni l'autre n'est réexporté par `lib.rs`, donc aucune surface publique n'est ajoutée. Les deux portent un `#[expect(clippy::pub_with_shorthand)]` motivé, car rustfmt réécrit `pub(in crate)` en `pub(crate)` (même raison que ./native.sdd). Le domaine `toolsets` lit la constante pour refuser un nom de toolset natif (`../toolsets/assemble.sdd`).
 
 Tasks:
   [x] #E4 Lot 0.4.0-F : spec fille ./native.sdd ; les modules MCP générés (./mcp_module.sdd) sont fournis aux @Capabilities, plus à @Presentation ; mettre à jour `mcp_name` (../modules/mcp_name.sdd) pour que la validation de nom de module MCP appelle @PresentedModule::new (inchangé) ou le contrôle de ../scratchpad/capabilities.sdd, au choix de l'implémentation, sans copie de règle.
