@@ -10,6 +10,7 @@ all-features = true
 # (lymaille.sdd #3, lymaille.sdd #1).
 ignore = [
   { id = "RUSTSEC-2026-0249", reason = "smartstring is unmaintained; pulled by rhai 1.27.0, no alternative short of replacing rhai; still accepted for now, temporarily accepted on 2026-11-01 (lymaille.sdd #1)" },
+  { id = "RUSTSEC-2026-0543", reason = "chrono 0.4.45 is unmaintained, without fix; pulled by rmcp 3.9.0 and vynil-core 0.10.0, no alternative short of replacing them; temporarily accepted on 2026-11-22, decision of the lead developer (lymaille.sdd #1)" },
 ]
 
 [licenses]
