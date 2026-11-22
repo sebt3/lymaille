@@ -255,13 +255,15 @@ Le mot « contexte » n'apparaît jamais seul dans les documents de ce domaine :
     - **Verified by:** `agent-sessions/agents#AC-8`
 
 - **NFR-6 - MUST:** Les capacités brutes de `vynil-core` que le scratchpad peut offrir aux toolsets se projettent en features Cargo de `lymaille`
-  qui relaient chacune la feature de même nom de `vynil-core` : `fs`, `shell`, `password`, `quantity`, `crypto`, `http`, `k8s`, `oci`,
-  `s3`, `feeds`, `prometheus` et `loki`. Aucune n'est dans les features par défaut (un hôte ne doit pas avoir à passer en `no-default`
+  qui relaient chacune la feature de même nom de `vynil-core` : `fs`, `shell`, `password`, `quantity`, `crypto`, `http`, `oci`,
+  `feeds`, `prometheus` et `loki`. `k8s` et `s3` ne sont pas relayées en 0.4.0 : leurs graphes de dépendances cassent l'un la résolution
+  (`kube-client` → `serde-saphyr` contre le `smallvec` de `rhai`), l'autre `cargo deny` (`RUSTSEC-2026-0542` via `object_store`) ; la
+  capacité reste dans le vocabulaire et se réévalue quand l'amont se résout. Aucune n'est dans les features par défaut (un hôte ne doit pas avoir à passer en `no-default`
   pour s'en défaire), et les features par défaut existantes ne changent pas. Une feature compilée rend ses fonctions disponibles
   comme dépendances des toolsets (`toolsets` FR-2), jamais au LLM directement (BR-2) ; une feature non compilée n'ajoute ni code ni
   fonction. L'hôte choisit donc ses capacités par ses features, et peut en ajouter par ses propres modules (`modules` FR-8).
   `prometheus` et `loki` demandent un client configuré que seul l'hôte construit : une instance par type, que l'hôte fournit et que le moteur de construction des toolsets enregistre en module `prometheus` et `loki`.
-    - **Source:** user instruction, 2026-11-21
+    - **Source:** user instruction, 2026-11-21 ; `k8s` et `s3` retirées de la version, user instruction, 2026-11-22
     - **Verified by:** `agent-sessions/scratchpad#AC-10`, `agent-sessions/toolsets#AC-1`
 
 - **CON-1:** La librairie est pure : elle n'effectue aucune E/S de stockage persistant et définit des traits que l'hôte
@@ -506,9 +508,9 @@ et `toolsets` ; `context-window` opère sur l'historique de `session`. Aucune d�
       la définition d'agent ne porte ni liste de toolsets (hors restriction de sous-agent) ni liste de modules ni droit de Memory.
       (4) Modules natifs : la nature de la session les détermine, sans liste. L'introspection du pad (variables, modules, fonctions, toolsets et skills ; metadata de Rhai, `scratchpad` FR-2 et FR-3) est offerte à toutes
       les natures : ce n'est pas un module.
-      Agent principal productif : `todo`, `memory_session` (chaque agent a les siens), `memory_shared` (selon le contexte),
-      `memory_user` en lecture, `delegation`, `session`. Sous-agent : `todo`, `memory_session`, `memory_user` en lecture, ce que le
-      contexte lui laisse de `memory_shared` et, seulement s'il a une session parente, `session` ; pas de `delegation`. Un sous-agent a deux
+      Agent principal productif : `todo`, `memory_session` (chaque agent a les siens), `memory_shared` (quand l'hôte fournit ce niveau à la session),
+      `memory_user` en lecture, `delegate` (le module de délégation : lancer et suivre des sous-agents), `session`. Sous-agent : `todo`,
+      `memory_session`, `memory_user` en lecture, `result` (rendre son résultat), `memory_shared` si l'hôte fournit ce niveau, et, seulement s'il a une session parente, `session` ; jamais `delegate`. Un sous-agent a deux
       usages : sous-agent d'un agent principal, il porte le titre de sa session et doit pouvoir le poser ; sous-agent d'un processus automatisé,
       il n'a pas de session humaine de rattachement, donc pas de titre à donner et pas de module `session`. Le critère est la présence d'une session
       parente (`session` FR-2) ; `session` est donné d'office aux agents de travail et de configuration. Agent de configuration : `todo`,

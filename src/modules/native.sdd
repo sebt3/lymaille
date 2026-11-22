@@ -30,13 +30,14 @@ Accepts:
   @native_modules: une nature (@AgentKind), un booléen « la session a une session parente » et un booléen « l'hôte fournit un niveau de Memory partagé à cette session ». Le second vient du `SessionState::parent` (`agent-sessions/session#FR-2`) ; le troisième est décidé par l'hôte (voir #3).
 
 Returns:
-  @native_modules: la liste ordonnée des @NativeModule de la session. @NativeModule : `Todo`, `MemorySession`, `MemoryShared`, `MemoryUser(MemoryAccess)`, `Delegation`, `Session`, `ToolsetBuilder`, `Contexts`, `Sessions`, `Inspect`. @MemoryAccess : `Read` ou `ReadWrite`. @NativeModule::name : le nom Rhai du module (`todo`, `memory_session`, `memory_shared`, `memory_user`, `delegation`, `session`, `toolset_builder`, `contexts`, `sessions`, `inspect`).
+  @native_modules: la liste ordonnée des @NativeModule de la session. @NativeModule : `Todo`, `MemorySession`, `MemoryShared`, `MemoryUser(MemoryAccess)`, `Delegate`, `Result`, `Session`, `ToolsetBuilder`, `Contexts`, `Sessions`, `Inspect`. @MemoryAccess : `Read` ou `ReadWrite`. @NativeModule::name : le nom Rhai du module (`todo`, `memory_session`, `memory_shared`, `memory_user`, `delegate`, `result`, `session`, `toolset_builder`, `contexts`, `sessions`, `inspect`).
 
 Must:
   La table est la seule source des modules natifs ; aucune définition d'agent, aucun contexte ni aucun toolset n'en ajoute ou n'en retire (`agent-sessions#DEC-16`) :
-  - agent de travail : `Todo`, `MemorySession`, `MemoryShared` (si le niveau est fourni), `MemoryUser(Read)`, `Delegation`, `Session` ;
-  - sous-agent : `Todo`, `MemorySession`, `MemoryShared` (si le niveau est fourni), `MemoryUser(Read)`, et `Session` seulement s'il a une session parente (un sous-agent d'un processus automatisé n'a pas de titre à donner) ; jamais `Delegation` ;
-  - agent de configuration : `Todo`, `MemorySession`, `MemoryUser(ReadWrite)`, `Session`, `ToolsetBuilder`, `Contexts`, `Sessions`, `Inspect` ; jamais `MemoryShared` ni `Delegation`.
+  - agent de travail : `Todo`, `MemorySession`, `MemoryShared` (si le niveau est fourni), `MemoryUser(Read)`, `Delegate`, `Session` ;
+  - sous-agent : `Todo`, `MemorySession`, `MemoryShared` (si le niveau est fourni), `MemoryUser(Read)`, `Result`, et `Session` seulement s'il a une session parente (un sous-agent d'un processus automatisé n'a pas de titre à donner) ; jamais `Delegate` ;
+  - agent de configuration : `Todo`, `MemorySession`, `MemoryUser(ReadWrite)`, `Session`, `ToolsetBuilder`, `Contexts`, `Sessions`, `Inspect` ; jamais `MemoryShared`, `Delegate` ni `Result`.
+  Les deux modules de délégation sont distincts et suivent le porteur : `Delegate` sous le nom `delegate` lance et suit des sous-agents, `Result` sous le nom `result` rend le résultat d'un sous-agent (`agent-sessions/delegation#FR-1`, `FR-2`). Aucun module ne s'enregistre sous `delegation`.
   `ToolsetBuilder`, `Contexts`, `Sessions` et `Inspect` ne sont donnés à aucune session productive, quels que soient la définition, le contexte et les toolsets (`agent-sessions/toolsets#FR-8`, `FR-19`, `agent-sessions#BR-8`).
   L'introspection du pad n'est pas un module natif : elle est offerte à toutes les natures par le moteur (`agent-sessions/scratchpad#FR-3`).
   Pure : aucune E/S ; `#[non_exhaustive]`, `Clone`, `Debug`, `PartialEq`.
@@ -44,22 +45,22 @@ Must:
 Scenario: un agent de travail
   Given la nature Work, aucune session parente, niveau partagé fourni
   When la table est lue
-  Then elle contient `Todo`, `MemorySession`, `MemoryShared`, `MemoryUser(Read)`, `Delegation` et `Session`, et aucun module de configuration
+  Then elle contient `Todo`, `MemorySession`, `MemoryShared`, `MemoryUser(Read)`, `Delegate` et `Session`, et aucun module de configuration ni `Result`
 
 Scenario: un sous-agent rattaché à un humain
   Given la nature Sub avec une session parente
   When la table est lue
-  Then elle contient `Session` et `MemoryUser(Read)`, et ni `Delegation` ni module de configuration
+  Then elle contient `Session`, `Result` et `MemoryUser(Read)`, et ni `Delegate` ni module de configuration
 
 Scenario: un sous-agent de processus automatisé
   Given la nature Sub sans session parente
   When la table est lue
-  Then elle ne contient pas `Session`
+  Then elle ne contient pas `Session` et contient `Result`
 
 Scenario: un agent de configuration
   Given la nature Config
   When la table est lue
-  Then elle contient `Todo`, `MemorySession`, `MemoryUser(ReadWrite)`, `Session`, `ToolsetBuilder`, `Contexts`, `Sessions` et `Inspect`, et ni `MemoryShared` ni `Delegation`
+  Then elle contient `Todo`, `MemorySession`, `MemoryUser(ReadWrite)`, `Session`, `ToolsetBuilder`, `Contexts`, `Sessions` et `Inspect`, et ni `MemoryShared`, `Delegate` ni `Result`
 
 Scenario: sans niveau partagé, pas de Memory partagée
   Given la nature Work et un hôte sans niveau partagé
@@ -71,6 +72,9 @@ Tasks:
       Validé le 2026-11-21 (validator, tranche F groupée) : table exacte par nature, 5 Scenarios testés sur listes complètes, 100 % de couverture. ATTENTION relevée pour le branchement (G/H/I) : l'item `Delegation` (nom `delegation`) est faux au regard du domaine — le code enregistre `delegate` (principal) et `result` (sous-agent) ; à trancher avec #4, question #13 consignée.
   [x] #2 Lot 0.4.0-F : `MemoryAccess::Read` de `memory_module` n'expose que les fonctions de lecture (`list`, `read`, recherche) et aucune fonction d'écriture ; modifier ./memory_module.sdd #3 en conséquence (aujourd'hui la lecture seule se fait par un toolset de présentation). Aucune migration de l'ancien comportement : sans accès précisé, le module expose tout, comme avant.
       Validé le 2026-11-21 (validator) : `memory_module_read_only` (seuil de cinq arguments : second constructeur, pas paramètre), écritures refusées à l'enregistrement ; `memory_module` inchangé ; spec `memory_module.sdd` mise à jour par l'orchestrateur. Le branchement table→moteur est aux tranches G/H/I.
-  [ ] #3 Lot 0.4.0-F : réponse à `agent-sessions/modules#FR-4` pour `memory_shared` : « dépend du contexte » est consigné, mais le DSD ne dit pas comment le ToolsetContext désigne le niveau partagé. Hypothèse de travail, sans rien inventer : un booléen fourni par l'hôte à @native_modules (XP : aucune clé nouvelle de contexte sans hôte demandeur). À valider.
+  [x] #3 Lot 0.4.0-F : réponse à `agent-sessions/modules#FR-4` pour `memory_shared` : « dépend du contexte » est consigné, mais le DSD ne dit pas comment le ToolsetContext désigne le niveau partagé. Hypothèse de travail, sans rien inventer : un booléen fourni par l'hôte à @native_modules (XP : aucune clé nouvelle de contexte sans hôte demandeur). À valider.
+      Validé le 2026-11-22 par le développeur principal : l'hypothèse de travail est la réponse. Le ToolsetContext ne désigne pas le niveau partagé ; l'hôte dit à @native_modules s'il fournit un niveau de Memory à cette session (`has_shared_memory`). `agent-sessions/modules#FR-4` amendé en ce sens ; aucune clé nouvelle de contexte. Le code est en place et validé le 2026-11-21 (`native_modules(.., has_shared_memory)`, test `no_shared_level_gives_no_shared_memory_module`).
   [?] #4 À trancher par le développeur principal : le nom du module de création est `toolset_builder` dans le code (../toolsets/builder.rs) et `toolset_creator` dans l'ancienne liste de noms réservés (../agents/definition.sdd #13) et le DSD (`agent-sessions/toolsets#FR-8`). Hypothèse de travail : le nom du code, `toolset_builder`, qui fait foi ; corriger le DSD en conséquence.
-  [?] #13 À trancher par le développeur principal (validation de #1, 2026-11-21) : la table nomme `Delegation` sous `delegation`, mais le code enregistre deux modules — `delegate` pour l'agent principal et `result` pour le sous-agent (../delegation/module.sdd) — et aucun module `delegation` n'existe. Un seul item est faux deux fois : nom inventé, et un sous-agent qui semblerait recevoir un module de délégation que le `Must` lui interdit. Bloque le branchement de la table (tranches G/H/I). Hypothèse de travail en l'absence de décision : deux items selon le porteur (`Delegate` sous `delegate` pour `Work` ; `Result` sous `result` pour `Sub`) ; le DSD (`agent-sessions/modules#FR-4`) est à corriger en conséquence.
+  [x] #13 La table nommait `Delegation` sous `delegation`, alors que le code enregistre deux modules — `delegate` pour l'agent principal et `result` pour le sous-agent (../delegation/module.sdd) — et qu'aucun module `delegation` n'existe.
+      Tranché le 2026-11-22 par le développeur principal : deux items selon le porteur, `Delegate` sous `delegate` pour @AgentKind::Work et `Result` sous `result` pour @AgentKind::Sub ; `agent-sessions#DEC-16` amendé en ce sens. La correction de la table est la tâche #14.
+  [ ] #14 Lot 0.4.0-F (suite de #13) : tests puis implémentation — @NativeModule perd `Delegation` et gagne `Delegate` (nom `delegate`, donné à @AgentKind::Work) et `Result` (nom `result`, donné à @AgentKind::Sub, avec ou sans session parente) ; signature de @native_modules inchangée ; les quatre Scenarios ci-dessus repris sur les listes complètes.

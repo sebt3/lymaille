@@ -30,10 +30,11 @@ d'extension pour les modules fournis par l'hôte.
     - **Source:** user instruction, 2026-10-24
 
 - **FR-4 - MUST:** La Memory est exposée par trois modules, un par niveau (utilisateur, partagé, session ; `memory_user`, `memory_shared`, `memory_session`). L'accès
-  d'un agent à un niveau se décide par la nature de sa session et son contexte (`agent-sessions#DEC-16`) : `memory_session` est celle de la
-  session de chaque agent ; `memory_shared` dépend du ToolsetContext et ne concerne que les agents productifs ; `memory_user` est en lecture
+  d'un agent à un niveau se décide par la nature de sa session et ce que l'hôte lui fournit (`agent-sessions#DEC-16`) : `memory_session` est celle de la
+  session de chaque agent ; `memory_shared` se donne quand l'hôte fournit un niveau de Memory partagé à cette session — l'hôte le dit à la table des
+  modules natifs (`src/modules/native.sdd`), aucune clé du ToolsetContext ne le désigne — et ne concerne que les agents productifs ; `memory_user` est en lecture
   pour tous et en écriture pour l'agent de configuration seul. La définition d'agent ne porte aucun droit de Memory.
-    - **Source:** agent-sessions#BR-2 ; user instruction, 2026-10-27 ; révisé, user instruction, 2026-11-21
+    - **Source:** agent-sessions#BR-2 ; user instruction, 2026-10-27 ; révisé, user instruction, 2026-11-21 ; niveau partagé dit par l'hôte, user instruction, 2026-11-22
 
 - **FR-5 - MUST:** Les changements de Memory émettent un événement.
     - **Source:** agent-sessions#BR-5

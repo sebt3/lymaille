@@ -56,7 +56,14 @@ Scenario: les skills suivent leur toolset
   When ils sont assemblés
   Then seul le skill du toolset réussi est présenté
 
+Scenario: la fonction d'une capacité non compilée n'atteint pas le toolset
+  Given un toolset qui dépend de `host` et appelle `host::file_read`, sans la feature `fs` compilée
+  When il est assemblé puis sa fonction appelée
+  Then l'assemblage réussit (`host` est dans les @Capabilities quelles que soient les features) et l'appel échoue par fonction introuvable
+
 Tasks:
+  [ ] #4 Lot 0.4.0-B (partie déplacée de ../scratchpad/engine.sdd #19, décision ./engine.sdd #20) : tests puis, si nécessaire, implémentation, dans ./assemble.rs — un toolset qui dépend de `host` s'assemble quelles que soient les features compilées (`host` est toujours au registre, ../scratchpad/capabilities.sdd Scenario 1) ; sous `#[cfg(not(feature = "fs"))]`, `host::file_read` appelé par le toolset échoue par fonction introuvable, et sous la feature compilée la fonction figure au module `host`. Vérifier la présence de la fonction par la liste des fonctions du module, sans jamais lire un fichier réel (`agent-sessions#CON-1`). Un toolset qui dépend d'un module absent du registre reste en échec entier (Scenario « dépendance indisponible »).
+      Les deux faces ne compilent pas dans la même configuration : lancer à la main `cargo test` avec et sans `--features fs` et en rendre compte (../../lymaille.sdd #22). Si l'assemblage d'un toolset dont la fonction appelée est absente se révélait en échec plutôt qu'en refus à l'appel, le signaler au lieu d'aligner l'assertion.
   [x] #3 Lot 0.4.0-E : nouvelle signature de @assemble (plus de `granted_modules`, `&Capabilities` à la place de la table `dependencies`) ; migrer les appelants (../toolsets/config.rs, ../tools/inspect.rs, ../delegation, ../runtime, tests) ; tests des quatre Scenarios ; mettre à jour `agent-sessions/toolsets#AC-1`. Dépend de ../scratchpad/capabilities.sdd #1 et ../scratchpad/presentation.sdd #7.
       Validé le 2026-11-21 (validator) : tout-ou-rien et non-présentation assertés, mutants 0 survivant ; appelants réels : tools/inspect.rs et native.rs (config.rs/delegation/runtime ne l'appellent pas) ; AC-1 du DSD vérifié en l'état, inchangé ; un test supprimé (module brut présenté par la définition, aboli par DEC-16), une branche Raises gardée renforcée.
   [x] #1 Tests puis implémentation.
