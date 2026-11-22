@@ -1,0 +1,149 @@
+Spec: embedder
+
+Purpose:
+  Port d'embedding de texte au même niveau que le fournisseur d'inférence : le trait @Embedder, ses erreurs typées sans fuite, le profil d'un modèle d'embedding, le découpage des lots, la troncature signée, une implémentation de test déterministe sans réseau,
+    le client de production au-dessus de `rig` et l'adaptateur qui rend un @Embedder utilisable comme modèle d'un index de `rig` (`agent-sessions/agents#FR-12`, `FR-13`, `FR-14`, `AC-6`, `AC-7`, `AC-8`,
+    `agent-sessions#DEC-15`, `agent-sessions#NFR-5`). Entièrement derrière la feature Cargo `embedder`, hors des features par défaut.
+
+Owns:
+  ./embedder.rs
+
+Can modify:
+  ./mod.rs: déclaration du module et ré-export, sous la feature `embedder`.
+  ../lib.rs: ré-export, sous la feature `embedder`.
+  ../../Cargo.toml: la feature `embedder` (voir Tasks #1, dépendance nouvelle : accord déjà donné pour `rig`, le développeur principal valide le diff).
+
+References:
+  ./inference.sdd
+  ./provider.sdd
+  ./rig.sdd
+  ./error.sdd
+
+Depends on:
+  ./provider.sdd
+  ./inference.sdd
+  rig-core (feature `embedder` : `dep:rig-core`, version épinglée `=0.43.0` comme la feature `rig`)
+
+Exposes:
+  @Embedder (implémenté aussi pour `Arc<E>` quand `E` l'implémente)
+  @Embedded
+  @EmbeddingProfile
+  @EmbedderError
+  @EmbedderErrorKind
+  @TestEmbedder
+  @RigEmbedder
+  @RigEmbedderConfig
+  @EmbedderModel
+
+Accepts:
+  @Embedder::model_id: rien ; l'identifiant du modèle (texte). Un vecteur persisté se stocke avec lui ; changer de modèle invalide l'index de l'hôte.
+  @Embedder::dimensions: rien ; la dimension des vecteurs (nombre).
+  @Embedder::embed: un lot de textes (`&[String]`) ; rend un @Embedded par texte, dans l'ordre des entrées.
+  @EmbeddingProfile::new: le nom du profil, le nom du fournisseur (@ProviderDefinition, `agent-sessions/agents#FR-6`), l'identifiant du modèle d'embedding, la dimension attendue, la taille maximale d'un lot (nombre de textes, au moins 1) et la limite d'entrée en caractères (au moins 1).
+  @TestEmbedder::new: une dimension (au moins 1) et une limite d'entrée en caractères ; l'identifiant du modèle est fixe (`test-embedder`).
+  @RigEmbedderConfig::new: un @EmbeddingProfile, l'adresse de base du fournisseur et la clé d'API optionnelle, déjà résolues par l'hôte (comme @RigConfig, ./rig.sdd : ce fichier ne résout aucune référence).
+  @RigEmbedder::new: une @RigEmbedderConfig ; construit le client `rig` sans appel réseau.
+  @EmbedderModel::new: un @Embedder partagé ; rend un modèle d'embedding `rig` (`DynModel`) que l'hôte passe à l'index de `rig` de son choix (`InMemoryVectorStore::index`, base vectorielle…). Les textes d'une requête et ceux de l'indexation passent ainsi par les garde-fous de l'@Embedder.
+
+Returns:
+  @Embedder::embed: autant de @Embedded que d'entrées, dans l'ordre des entrées, tous de la dimension annoncée. @Embedded porte le vecteur (`Vec<f64>`, le type de `rig`) et un indicateur `truncated` : vrai quand l'entrée dépassait la limite et a été tronquée.
+  @EmbedderModel::new: un `DynModel<Embedding>` de `rig` dont `id()` est le `model_id` de l'@Embedder et dont `capabilities().ndims` est sa dimension.
+
+Raises:
+  @EmbedderError, `#[non_exhaustive]`, porte un @EmbedderErrorKind et un message anglais sans adresse, sans clé et sans texte embedé :
+  - `Unavailable` : service injoignable, délai, statut 429 ou 5xx (transitoire : l'appelant peut réessayer) ;
+  - `Rejected` : statut 4xx permanent, y compris 400 qui signale une entrée trop longue côté serveur (lymaille tronque avant d'envoyer : ce cas n'arrive qu'avec une limite du profil trop haute) ;
+  - `Malformed` : corps illisible, enveloppe d'erreur, réponse sans `usage` exigé par le dialecte ;
+  - `UnexpectedDimension` : un vecteur n'a pas la dimension du profil (porte la dimension reçue et la dimension attendue, des nombres) ;
+  - `WrongCount` : le nombre de vecteurs n'est pas celui des entrées (porte les deux nombres).
+
+Must:
+  @Embedder est `Send + Sync`, à futur `Send`, sans macro ni objet dynamique (même forme que @InferenceProvider, ./inference.sdd) ; pour tout `E` qui l'implémente, `Arc<E>` l'implémente aussi.
+  Un lot vide rend un lot vide sans appel au service.
+  Dimension toujours vérifiée : `rig` ne compare que si elle est déclarée (`agent-sessions#DEC-15`) ; @RigEmbedder la déclare à `rig` ET compare lui-même chaque vecteur reçu à celle du profil, sinon `UnexpectedDimension`.
+  Nombre de vecteurs toujours vérifié : un décalage rend `WrongCount`, jamais un lot tronqué ou complété. `rig` couple les vecteurs aux entrées par la position et ignore le champ `index` de la réponse (mesuré) : l'ordre de la requête est donc le contrat, et un serveur qui répond en désordre n'est pas détectable (limite à documenter dans la rustdoc, non mesurée contre un serveur réel).
+  Découpage transparent : un lot plus grand que la taille maximale du profil part en plusieurs requêtes séquentielles de cette taille au plus, les vecteurs rendus dans l'ordre des entrées ; `rig` n'impose aucune taille de lot sur un appel, c'est cette spec qui la porte. Une erreur sur une tranche rend l'erreur, aucun résultat partiel.
+  Troncature explicite (décision du 2026-11-22) : une entrée de plus de `limite` caractères est coupée à la limite, sur une frontière de caractère (jamais au milieu d'un point de code), et son @Embedded porte `truncated = true` ; une entrée dans la limite porte `truncated = false` et n'est jamais modifiée. La limite se compte en caractères, comme l'indice de tokenisation du profil de chat (`agent-sessions/agents#FR-7`). Aucune troncature silencieuse. Le texte tronqué n'est jamais copié dans une erreur ni un journal.
+  Aucune fuite (`agent-sessions#CON-3`) : le `Display` et le `Debug` d'une erreur de `rig` contiennent l'adresse complète ou le corps de la réponse ; @RigEmbedder ne les relaie jamais, il construit son propre message à partir de la classe (`is_retryable()`, `kind()`, statut) et du statut seul, comme @RigProvider (./rig.sdd). Le `Debug` de @RigEmbedderConfig, de @RigEmbedder et de @EmbeddingProfile ne montre ni la clé ni l'adresse.
+  Classement : connexion refusée ou coupée, 429 et 5xx → `Unavailable` ; autres statuts 4xx → `Rejected` ; corps non JSON, enveloppe d'erreur en 2xx, `usage` absent ou vide → `Malformed`.
+  @TestEmbedder est déterministe et sans réseau : un vecteur dérivé du texte (mêmes entrées, mêmes vecteurs ; entrées différentes, vecteurs différents ; deux textes qui partagent des mots ont des vecteurs plus proches que deux textes qui n'en partagent aucun, pour que le test de recherche de `modules` AC-10 ait un sens). Il applique les mêmes garde-fous que le client de production : découpage, troncature signée, dimension.
+  @EmbedderModel : le faux transport qu'il fabrique passe par `driver::Local` et un `Transport` maison de `rig` (mesuré), appelle l'@Embedder, et ne relaie que les vecteurs ; une erreur de l'@Embedder devient une erreur de transport sans le texte des entrées. Le `capabilities().ndims` est la dimension de l'@Embedder et `max_documents` la taille maximale de lot du profil, sans plafond arbitraire.
+  Sans la feature `embedder`, rien de ce fichier n'est compilé et le comportement des features par défaut est inchangé (`agent-sessions/agents#AC-8`).
+  Aucun vecteur n'est stocké ici (`agent-sessions#CON-1`) : la persistance, la réindexation et l'invalidation sur changement de `model_id` sont à l'hôte (`agent-sessions#DEC-15`).
+
+Must not:
+  Détecter ou déclarer si le modèle est local ou externe : aucune notion de localité (Open Issues du 2026-11-20).
+  Porter une taille de contexte de discussion ni un paramètre d'échantillonnage dans @EmbeddingProfile (`agent-sessions/agents#FR-13`).
+  Réessayer, attendre ou limiter le débit : l'appelant (hôte, indexation) décide de la reprise d'un `Unavailable`.
+
+Scenario: un lot nominal rend un vecteur par entrée, dans l'ordre
+  Given un @TestEmbedder de dimension 8 et trois textes
+  When embed reçoit le lot
+  Then trois @Embedded de dimension 8 sont rendus, dans l'ordre des entrées, `truncated` faux
+
+Scenario: déterminisme
+  Given un @TestEmbedder
+  When embed reçoit deux fois le même texte puis un texte différent
+  Then les deux premiers vecteurs sont égaux et le troisième est différent
+
+Scenario: proximité lexicale
+  Given un @TestEmbedder et trois textes, dont deux partagent des mots et un n'en partage aucun avec eux
+  When embed rend les trois vecteurs
+  Then la similarité cosinus des deux premiers est strictement plus grande que celle de chacun avec le troisième
+
+Scenario: un lot vide
+  Given un @TestEmbedder
+  When embed reçoit un lot vide
+  Then un lot vide est rendu
+
+Scenario: le lot trop grand est découpé en conservant l'ordre
+  Given un faux serveur d'embedding, un profil de taille maximale de lot 2 et cinq textes
+  When le @RigEmbedder embede le lot
+  Then le faux serveur reçoit trois requêtes de 2, 2 et 1 textes, et les cinq vecteurs sont rendus dans l'ordre des entrées
+
+Scenario: une dimension inattendue
+  Given un faux serveur qui répond des vecteurs d'une autre dimension que celle du profil
+  When le @RigEmbedder embede
+  Then l'erreur est `UnexpectedDimension`, qui porte les deux dimensions, et son texte ne contient ni l'adresse du serveur, ni la clé, ni le texte embedé
+
+Scenario: un nombre de vecteurs erroné
+  Given un faux serveur qui répond deux vecteurs pour trois entrées, puis trois pour deux
+  When le @RigEmbedder embede
+  Then chaque cas rend `WrongCount` avec les deux nombres, sans fuite
+
+Scenario: un corps illisible
+  Given un faux serveur qui répond 200 avec un corps qui n'est pas du JSON, puis une enveloppe d'erreur en 200
+  When le @RigEmbedder embede
+  Then chaque cas rend `Malformed`, sans l'adresse ni le corps
+
+Scenario: un serveur injoignable ou en erreur
+  Given une adresse injoignable, puis un faux serveur qui répond 429, puis 500, puis 401
+  When le @RigEmbedder embede
+  Then les trois premiers cas rendent `Unavailable` et le quatrième `Rejected`, sans l'adresse ni la clé
+
+Scenario: une entrée trop longue est tronquée et signalée
+  Given un profil de limite 10 caractères, une entrée de 25 caractères dont des caractères multi-octets, et une entrée de 5 caractères
+  When embed reçoit les deux
+  Then le premier @Embedded porte `truncated` vrai et le second `truncated` faux, le texte envoyé au serveur est tronqué à 10 caractères sur une frontière de caractère, et le second est envoyé tel quel
+
+Scenario: le modèle d'index passe par les garde-fous
+  Given un @TestEmbedder enveloppé par @EmbedderModel, branché sur un index en mémoire de `rig` avec trois documents indexés par ce modèle
+  When l'index reçoit une requête
+  Then il rend d'abord le document proche, avec un score, et `id()` du modèle est le `model_id` de l'@Embedder
+
+Scenario: la clé n'est pas dans les affichages
+  Given une @RigEmbedderConfig avec une clé et une adresse
+  When son `Debug` et celui du @RigEmbedder sont formatés
+  Then ni la clé ni l'adresse n'y figurent
+
+Scenario: sans la feature, rien n'est compilé
+  Given la crate compilée sans la feature `embedder`
+  When les types @Embedder, @RigEmbedder et @EmbedderModel sont référencés
+  Then ils n'existent pas, et le comportement des features par défaut est inchangé
+
+Tasks:
+  [ ] #1 Feature Cargo `embedder = ["dep:rig-core"]` dans ../../Cargo.toml, hors `default`, `rig-core` déjà épinglé `=0.43.0` (la feature `rig` partage la même dépendance optionnelle : vérifier par `cargo tree` que les deux features ne divergent pas et que `cargo deny` passe) ; documenter la feature dans le commentaire de Cargo.toml et dans ../../lymaille.sdd. Aucune autre dépendance : si `cargo` en réclame une, STOP et rapporter.
+  [ ] #2 Tests puis implémentation de @Embedder, @Embedded, @EmbeddingProfile, @EmbedderError, @TestEmbedder, y compris le découpage et la troncature signée (Scenarios 1 à 4, 10) ; ré-exports sous `#[cfg(feature = "embedder")]` (./mod.rs, ../lib.rs). @EmbeddingProfile est un type distinct du @ModelProfile de chat (./profile.sdd), sans taille de contexte : il nomme un fournisseur comme lui. Sérialisable (serde) comme @ModelProfile.
+  [ ] #3 Tests puis implémentation de @RigEmbedder et @RigEmbedderConfig sur `rig-core` 0.43.0 : `OpenAIConfig::with_key(&LLAMACPP, clé).with_base_url(adresse)`, `client().embedding(id, Some(dimension))`, comptage strict, dimension comparée, classement des erreurs par `is_retryable()`/`kind()`/statut, `Display` de `rig` jamais relayé. Tests contre un faux serveur HTTP local (`tokio::net`, même style que les tests de ./rig.rs), jamais contre un vrai modèle (Scenarios 5 à 9, 11, 13). Reprendre les mesures de la sonde (`dsd/agent-sessions.md` DEC-15 ; la sonde `rig-embed-probe` est dans l'historique git, commit 50da73c) plutôt que de les refaire.
+  [ ] #4 Tests puis implémentation de @EmbedderModel (Scenario 12) : `Model::new(Local::<EmbeddingOp>::new(..).with_id(model_id).with_capabilities(..), transport maison).erase()` ; test avec `InMemoryVectorStore` de `rig`. `capabilities` : voir Must.
+  [ ] #5 Comportement sans la feature (Scenario 14) : `cargo check --no-default-features` et `cargo check` (features par défaut) restent verts et `cargo tree` par défaut ne contient pas de dépendance nouvelle ; les tests de la feature tournent sous `--features embedder`. Voir comment ../../scripts/check couvre déjà les features (`rig`, `mcp-http`) et l'étendre à `embedder` SANS toucher aux garde-fous : STOP et rapporter si `scripts/check` (fichier du harnais) doit changer.

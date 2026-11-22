@@ -18,6 +18,7 @@ Accepts:
   @SkillTool::new: les @Skill accordés (avec leur toolset), le skill intégré, un @ResolvedContext, un @SessionMeta, le plafond de rendu et le @Redactor de la session, partagé en `Arc<Redactor>` (décision du 2026-10-31, D-c).
   @skill_definition: aucun argument.
   @SkillTool::call: aucun argument (liste), un nom (corps rendu) ou un nom et un nom de document (document annexe).
+  @SkillTool::with_semantic_index (feature `embedder`) : un @SemanticIndex (../modules/semantic.sdd), l'index des skills que l'hôte fournit. @SkillTool::search (feature `embedder`) : une requête texte et un nombre maximal de résultats (au moins 1). Le tool natif `skill` gagne alors les arguments facultatifs `query` et `limit` (par défaut 5), exclusifs avec `name` et `document`.
   @session_context_registration: un @ResolvedContext et le @Redactor de la session (`Arc<Redactor>`) ; rend une étape d'enregistrement (@EngineBuilder::with_registration, ../scratchpad/engine.sdd).
 
 Returns:
@@ -120,6 +121,26 @@ Scenario: les exemples du skill intégré s'exécutent
   When ils s'exécutent l'un après l'autre
   Then le second voit la variable et la `fn` du premier, et chaque résultat annoncé par le texte se vérifie
 
+Scenario: la recherche sémantique des skills
+  Given deux skills `deploy` et `backup` dont la description de `deploy` est proche d'une requête, un index en mémoire de `rig` construit avec un @EmbedderModel sur un @TestEmbedder et indexé par l'hôte avec @skill_embedding_text, et le tool `skill` construit avec cet index
+  When il est appelé avec `query` puis, pour le premier résultat, avec `name`
+  Then la recherche rend d'abord `deploy`, avec son nom, sa description et un score, sans le corps ; la lecture par `name` rend le corps (`agent-sessions/modules#AC-11`)
+
+Scenario: les skills sans index fourni
+  Given le tool `skill` construit sans index sémantique, sous la feature `embedder`
+  When il est appelé avec `query`
+  Then l'erreur dit explicitement qu'aucun index n'est fourni pour les skills ; ce n'est pas une liste vide (`agent-sessions/modules#FR-16`, `AC-12`)
+
+Scenario: query et name ensemble, ou limite invalide
+  Given le tool `skill` avec index
+  When il est appelé avec `query` et `name`, puis avec `query` et `limit` de 0, puis avec `query` blanche
+  Then chaque appel est refusé par une erreur qui nomme le paramètre fautif
+
+Scenario: sans la feature, le tool n'a pas d'argument de recherche
+  Given la crate compilée sans la feature `embedder`
+  When la définition du tool `skill` est lue
+  Then elle ne déclare ni `query` ni `limit`, et le tool se comporte comme avant
+
 Tasks:
   [x] #5 Les quatre pièges de Rhai dans le corps du skill intégré `rhai-pad` (lot 0.2-B3, `agent-sessions/scratchpad#FR-9`, `AC-14`, `sebt3/lymaille#3`) : le Scenario « les pièges de Rhai … sont vrais » d'abord (rouge faute du texte), puis le texte, dans l'ordre fixé par `Must`. Le texte reste en anglais et chaque affirmation s'exécute (`built_in_claims_hold_in_the_scratchpad` est étendu ou doublé d'un test voisin). Le gabarit du skill ne change pas de forme.
       Validé le 2026-11-04 (validator, après un FAIL d'abord : la demie-affirmation « backtick ordinaire entre guillemets » est exécutée à son tour et discriminante ; ordre du Must respecté, les quatre pièges exécutés avec le verdict annoncé, mutants sans survivant).  [x] #1 Tests puis implémentation, vérifié le 2026-10-30.
@@ -135,3 +156,4 @@ Tasks:
   [x] #2 Texte exact du skill intégré sur `rhai_pad` : à rédiger avec le code ; le bloc @limits_notice de ../scratchpad/introspect.sdd est cité (`introspect.sdd` #6). Révisé le 2026-10-31 (correctif 7) : chaque affirmation est testée en l'exécutant ; la phrase « the host stops a runaway loop » ne vient pas de ce texte mais de `limits_notice` (../scratchpad/introspect.sdd, hors du périmètre de cette tâche) : à reformuler là-bas, ce que le modèle ne peut pas déclencher lui-même.
   [x] #3 Correctif du 2026-10-31 (validation indépendante, décision D-c) : `session_context()` et `skill` reçoivent le @Redactor de la session et masquent leur sortie (Scenarios « un secret déclaré … » ci-dessus) ; le constructeur de @SkillTool prend six paramètres, ce qui dépasse le seuil `too-many-arguments` du harnais : `#[expect(clippy::too_many_arguments)]` avec raison, à valider (un type public qui regrouperait les paramètres élargirait la surface publique). Tests : les textes du skill et la copie de session vus rouges avant correction ; les clés, les nombres et le texte du skill intégré ajoutés après, vus verts ; mutants manuels tués. En attente de validation par le validateur.
   [x] #4 Lot P2 (décisions du 2026-10-31) : @SkillTool implémente @NativeTool, @skill_definition, réécriture du corps du skill intégré (abrégé de Rhai, deux appels d'exemple, nombres lisibles dans @limits_notice) ; clôt #2 avec ../scratchpad/introspect.sdd #7.
+  [ ] #6 Recherche sémantique des skills (lot 0.4.0, `agent-sessions/modules#FR-15`, `AC-11`, `agent-sessions/toolsets#FR-18`) : après ../modules/semantic.sdd #1 et #2. Tests des quatre Scenarios ci-dessus vus échouer, puis @SkillTool::with_semantic_index, @SkillTool::search et les arguments `query` et `limit` de @skill_definition, sous `#[cfg(feature = "embedder")]` ; la recherche rend le nom et la description (rendus, masqués par le @Redactor, comme `list`) et le score, jamais le corps. Même plafond de rendu que le reste du tool. Sans la feature, @skill_definition et le comportement sont inchangés, vérifié par un test sans la feature. Le tool `skill` dépend de ../modules/semantic.sdd (sens de dépendance `toolsets` vers `modules`, déjà celui de ./assemble.sdd).

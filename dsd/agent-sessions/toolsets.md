@@ -129,9 +129,11 @@ uniquement) s'appliquent.
   document annexe. Un skill intégré, toujours disponible, enseigne l'usage de `rhai_pad`, l'introspection et les limites
   de `agent-sessions#CON-4`. Le corps d'un skill et chaque document annexe tiennent dans le plafond de rendu de
   `agent-sessions/scratchpad#FR-5` : un dépassement est refusé à l'enregistrement du toolset, ce qui garde valable la
-  réserve `T` de `agent-sessions/context-window#FR-2`.
-    - **Source:** user instruction, 2026-10-25 ; agent-sessions#DEC-1
-    - **Verified by:** `AC-11`
+  réserve `T` de `agent-sessions/context-window#FR-2`. Sous la feature `embedder` (`agent-sessions#NFR-5`), un argument `query` (et un nombre maximal de
+  résultats) lance la recherche sémantique des skills (`agent-sessions/modules#FR-15`) : nom, description et score, jamais le corps ; sans index fourni par
+  l'hôte pour les skills, une erreur explicite (`agent-sessions/modules#FR-16`). Sans la feature, l'argument n'existe pas.
+    - **Source:** user instruction, 2026-10-25 ; agent-sessions#DEC-1 ; user instruction, 2026-11-22 (recherche sémantique par le tool `skill`)
+    - **Verified by:** `AC-11`, `agent-sessions/modules#AC-11`
 
 - **FR-19 - MUST:** Un agent de configuration reçoit trois familles de modules, que sa nature de session lui donne (`agent-sessions#BR-2`, `DEC-16`) :
   `contexts` (`check(agent, contexte)` rend les écarts de compatibilité structurelle ; `resolve(agent, contexte)` rend les valeurs (défauts des toolsets de l'agent compris)

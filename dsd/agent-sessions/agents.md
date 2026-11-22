@@ -106,7 +106,7 @@ et ce que l'agent consomme.
 
 - **FR-14 - MUST:** Un lot plus grand que la taille maximale du profil est découpé de façon transparente, l'ordre des vecteurs suivant
   celui des entrées. Une entrée plus longue que ce que le modèle accepte suit une politique de troncature explicite et documentée, jamais
-  silencieuse : la troncature se signale à l'appelant (erreur ou indicateur, choix de la spec). Une implémentation de test déterministe,
+  silencieuse : la troncature se signale à l'appelant par un indicateur `truncated` rendu avec chaque vecteur (décision du 2026-11-22 : une Memory longue reste indexable, et l'hôte sait laquelle l'a été ; la limite se compte en caractères, comme l'indice de tokenisation de `FR-7`). Une implémentation de test déterministe,
   sans réseau, rend un vecteur dérivé du texte : mêmes entrées, mêmes vecteurs ; entrées différentes, vecteurs différents.
     - **Source:** `sebt3/lymaille#18`, 2026-11-20
     - **Verified by:** `AC-6`, `AC-7`
@@ -163,7 +163,7 @@ Specs dans `src/agents/`, implémentées (des tâches de durcissement restent li
 - `catalog.sdd` : traits de stockage, stockage mémoire et cascade `Layered` par niveau (FR-5).
 - `inference.sdd` : trait du fournisseur d'inférence, classement des erreurs, streaming de fragments, fournisseur scripté, partage par `Arc` (FR-11).
 - `summarizer.sdd` : résumeur de production au-dessus d'un fournisseur d'inférence (`context-window` FR-11).
-- `embedder.sdd` (lot 0.3.2, à écrire) : trait `Embedder`, erreurs typées, lots, troncature, implémentation de test, client de production sur `rig` et adaptateur vers le modèle d'un index de `rig` (FR-12 à FR-14, AC-6 à AC-8).
+- `embedder.sdd` (lot 0.4.0, à réaliser) : trait `Embedder`, erreurs typées, lots, troncature, implémentation de test, client de production sur `rig` et adaptateur vers le modèle d'un index de `rig` (FR-12 à FR-14, AC-6 à AC-8).
 - `error.sdd` : erreur typée du module.
 
 État au 2026-11-01 : tout est livré. La **sérialisation frontmatter + corps** d'une définition (FR-3, `agents.sdd` #5, `definition.sdd` #18 et #19, `yaml_serde`) ; le **manifeste de projet** (FR-4, `agents.sdd` #3, `manifest.sdd`, lot M1) ; l'**adaptateur `rig`** (`rig.sdd`, lots R0 à R3, derrière la feature Cargo `rig`) : clients OpenAI compatibles, `list_models` et détection des modèles, décodage et rejeu du raisonnement. Le TBD de détection des modèles est levé par les mesures de `spikes/rig-probe` et `spikes/rig-e2e`.

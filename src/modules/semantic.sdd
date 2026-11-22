@@ -1,0 +1,116 @@
+Spec: semantic
+
+Purpose:
+  Recherche sémantique des Memory et des skills : l'index que l'hôte fournit (un `VectorStoreIndex` de `rig`, par portée de Memory et pour les skills), la fonction Rhai `search` de chaque module Memory, les textes à embeder pour une Memory et pour un skill,
+    et l'erreur explicite d'un index absent. La librairie interroge l'index par identifiants, relit titre ou nom auprès du stockage de l'hôte, ne stocke aucun vecteur et ne réindexe rien d'elle-même
+    (`agent-sessions/modules#FR-14`, `FR-15`, `FR-16`, `AC-10`, `AC-11`, `AC-12`, `agent-sessions#DEC-15`, `agent-sessions#CON-1`). Entièrement derrière la feature Cargo `embedder` (`agent-sessions#NFR-5`).
+
+Owns:
+  ./semantic.rs
+
+Can modify:
+  ./mod.rs: déclaration du module et ré-export, sous la feature `embedder`.
+  ./memory_module.rs: fonction `search` des trois modules Memory, sous la feature `embedder` (Tasks #3).
+  ../toolsets/native.rs: argument `query` du tool `skill`, sous la feature `embedder` (Tasks #4, ../toolsets/native.sdd).
+  ../lib.rs: ré-export, sous la feature `embedder`.
+
+References:
+  ./memory.sdd
+  ./memory_module.sdd
+  ../agents/embedder.sdd
+  ../toolsets/native.sdd
+
+Depends on:
+  ./memory.sdd
+  ./error.sdd
+  rhai
+  rig-core (feature `embedder`)
+  vynil-core
+
+Exposes:
+  @SemanticIndex
+  @SemanticHit
+  @memory_embedding_text
+  @skill_embedding_text
+
+Accepts:
+  @SemanticIndex::new: un index de `rig` (`I: VectorStoreIndex` dont le filtre est celui par défaut, `Filter<serde_json::Value>`) ; rend un index partageable (`Arc`), `Clone`, `Send + Sync`, que l'hôte fournit. C'est la seule frontière avec `rig` côté recherche : le trait `VectorStoreIndex` n'est pas utilisable comme objet (type associé), l'adaptateur le masque.
+  @SemanticIndex::search: une requête texte et un nombre maximal de résultats (au moins 1) ; interroge `top_n_ids` de l'index (jamais `top_n`, la librairie n'impose aucun type de document) ; rend des @SemanticHit.
+  @MemoryScopes::with_index (./memory_module.sdd) : un @MemoryLevel et un @SemanticIndex ; l'index de la portée de ce niveau. Un niveau sans index n'en a pas.
+  @memory_embedding_text: une @Memory ; le texte à embeder, titre puis corps.
+  @skill_embedding_text: un nom, une description et un corps ; le texte à embeder, nom, description puis corps.
+
+Returns:
+  @SemanticHit: l'identifiant (le nom, pour un skill) et le score (`f64`, croissant avec la similarité, celui de l'index), dans l'ordre de pertinence décroissante.
+  @memory_embedding_text et @skill_embedding_text : un texte non tronqué ; la limite d'entrée de l'@Embedder (../agents/embedder.sdd) s'applique à l'indexation, côté hôte, et le texte rendu est celui que l'hôte donne à l'index.
+  Fonction Rhai `search(query, limit)` de chaque module Memory (`memory_user`, `memory_shared`, `memory_session`), niveaux en lecture seule compris : un tableau de maps `#{id, title, score}`, par ordre de pertinence, jamais le corps.
+
+Raises:
+  Erreur Rhai d'exécution explicite, qui nomme le niveau, quand l'index de la portée est absent (`agent-sessions/modules#AC-12` : jamais un résultat vide) ; quand `limit` n'est pas un entier au moins égal à 1 ; quand `query` est vide ou blanche ; quand l'index échoue (message de l'index sans la requête).
+  Un identifiant que l'index rend et que le stockage ne connaît plus est ignoré (index en retard d'une suppression : l'hôte réindexe, la librairie ne devine rien) et ne compte pas dans le nombre de résultats demandé ; le nombre de résultats peut donc être inférieur à `limit`.
+
+Must:
+  La recherche d'un niveau ne rend que les Memory de sa portée : l'index fourni pour un niveau est celui de la portée (`agent-sessions/modules#FR-2`) ; une Memory du même identifiant dans un autre niveau n'apparaît pas. Pour la portée de niveau session, l'index de la session ; deux sessions n'interfèrent pas.
+  Le titre vient du @MemoryStore (`get`), pas de l'index : la librairie ne stocke ni titre ni vecteur ni texte, et rend le titre à jour.
+  L'accès suit la table des modules natifs comme tout le reste (`agent-sessions/modules#FR-4`) : l'agent qui n'a pas le niveau n'a pas le module, donc pas la fonction (`agent-sessions/modules#AC-10`). Aucun module natif nouveau, aucun changement de ./native.sdd.
+  La librairie ne réindexe jamais d'elle-même (`agent-sessions#DEC-15` : un décorateur de stockage qui réindexe est écarté) : après `create`, `update` ou `delete` d'une Memory, le `search` ne reflète le changement qu'une fois l'hôte réindexé ; l'événement @EventKind::MemoryChanged (`agent-sessions/modules#FR-4`) est ce qui le prévient. La rustdoc de @SemanticIndex le dit.
+  Les fonctions sont synchrones et appellent l'index asynchrone par `vynil_core::rt::block_on` ; sur un runtime `current_thread`, elles rendent l'erreur explicite de `vynil-core` (même règle que ./memory_module.sdd).
+  Aucun événement, aucune erreur, aucun `Debug` ne porte le corps d'une Memory ni d'un skill ; le `Debug` de @SemanticIndex n'affiche rien de l'index.
+  Sans la feature `embedder`, ni @SemanticIndex, ni `search`, ni `query` du tool `skill` ne sont compilés, et le module Memory est identique à celui d'aujourd'hui (`agent-sessions/agents#AC-8`).
+
+Must not:
+  Dépendre de `toolsets` : le tool `skill` (../toolsets/native.sdd) dépend de ce fichier, pas l'inverse.
+  Rendre un corps, un vecteur ou le texte embedé.
+  Imposer un type de document à l'index de l'hôte.
+
+Scenario: la Memory proche de la requête vient en premier
+  Given trois Memory au niveau utilisateur, dont une proche d'une requête, un index en mémoire de `rig` construit avec un @EmbedderModel (../agents/embedder.sdd) sur un @TestEmbedder et indexé par l'hôte
+  When un script appelle `memory_user::search("requête", 3)`
+  Then le premier élément est la Memory proche, avec son identifiant, son titre et un score, et aucun élément ne porte de corps
+
+Scenario: la portée est respectée
+  Given une Memory `note` au niveau utilisateur et une autre `note` au niveau partagé, chacune dans l'index de sa portée
+  When `memory_user::search` est appelée avec la requête de la première
+  Then seule la Memory du niveau utilisateur est rendue ; l'identifiant `note` du niveau partagé n'apparaît pas
+
+Scenario: un niveau sans index
+  Given le module `memory_shared` sans index pour sa portée
+  When un script appelle `memory_shared::search("x", 3)`
+  Then l'erreur Rhai nomme le niveau `shared` et dit qu'aucun index n'est fourni ; ce n'est pas un tableau vide
+
+Scenario: l'hôte réindexe, la librairie non
+  Given une Memory `note` indexée, puis modifiée par `memory_user::update` sans réindexation
+  When une recherche porte sur le nouveau texte
+  Then `note` n'est pas trouvée par ce texte ; l'hôte réindexe, la même recherche la rend avec le titre à jour
+
+Scenario: un identifiant disparu du stockage est ignoré
+  Given une Memory indexée puis supprimée par `memory_user::delete`, sans réindexation
+  When une recherche rend cet identifiant côté index
+  Then il n'est pas dans le résultat et aucune erreur n'est levée
+
+Scenario: paramètres invalides
+  Given `memory_user::search` avec une requête blanche, puis avec une limite de 0
+  When chaque appel est fait
+  Then chacun rend une erreur Rhai qui nomme le paramètre fautif
+
+Scenario: la lecture seule cherche aussi
+  Given `memory_user` construit par @memory_module_read_only et un index fourni
+  When un script appelle `memory_user::search`
+  Then la recherche répond, et `create`, `update`, `delete` restent absentes
+
+Scenario: les textes à embeder
+  Given une Memory titre `T`, corps `C`, puis un skill nom `N`, description `D`, corps `B`
+  When @memory_embedding_text et @skill_embedding_text sont appelés
+  Then le premier contient `T` puis `C`, le second `N`, `D` puis `B`, dans cet ordre
+
+Scenario: sans la feature, la fonction n'existe pas
+  Given la crate compilée sans la feature `embedder`
+  When `memory_user` est construit
+  Then il n'a pas de fonction `search` et @SemanticIndex n'existe pas
+
+Tasks:
+  [ ] #1 Après ../agents/embedder.sdd #2 à #4 (le @TestEmbedder et le @EmbedderModel servent aux tests). Tests puis implémentation de @SemanticIndex et @SemanticHit : adaptateur sur `VectorStoreIndex::top_n_ids` avec `VectorSearchRequest::builder().query(..).samples(..)` ; masquer le type associé par un objet interne (`Arc<dyn ...>` sur un trait privé à futur boxé : exception documentée à la règle « sans objet dynamique » car `VectorStoreIndex` n'est pas utilisable en objet ; justifier l'unique `#[expect]` éventuel par la raison précise). Déclaration et ré-export sous `#[cfg(feature = "embedder")]` (./mod.rs, ../lib.rs) ; ajouter `./semantic.rs` à la Structure et `./semantic.sdd` aux References de ./modules.sdd.
+  [ ] #2 Tests puis implémentation de @memory_embedding_text et @skill_embedding_text (Scenario 8).
+  [ ] #3 Tests puis implémentation de `search` dans ./memory_module.rs (Scenarios 1 à 7) et de @MemoryScopes::with_index. Le seuil d'arguments du harnais interdit un sixième paramètre de @memory_module (`#[expect]` refusé, voir ./memory_module.sdd) : les index passent par @MemoryScopes. Mettre à jour ./memory_module.sdd (Accepts, Returns, Raises, Must) dans la même tâche.
+  [ ] #4 Le tool `skill` : voir ../toolsets/native.sdd #6 (la recherche sémantique des skills s'y réalise, `agent-sessions/modules#FR-15`, `AC-11`).
+  [ ] #5 Test de bout en bout du lot (`agent-sessions/modules#AC-10` à `AC-12`) sous `--features embedder` : Memory trois niveaux, skills, index absent, réindexation explicite. Valide aussi la compilation et les tests sans la feature (`agent-sessions/agents#AC-8`).

@@ -115,9 +115,7 @@ d'extension pour les modules fournis par l'hôte.
 
 ## Questions ouvertes
 
-- **Exposition de la recherche sémantique des skills** : fonction Rhai dans un module dédié, ou extension du tool natif `skill` (qui liste et lit
-  aujourd'hui sans passer par Rhai, `agent-sessions#FR-1`) ? À trancher dans `toolsets.md` et la spec, avant le lot. Recommandation : le tool
-  `skill`, qui est déjà le point d'accès aux skills ; un module Rhai séparé ne s'ajouterait que si un hôte le demande.
+- **Exposition de la recherche sémantique des skills** : tranché le 2026-11-22, extension du tool natif `skill` (`toolsets` FR-18), point d'accès déjà établi aux skills ; aucun module Rhai de plus. Un module séparé ne s'ajoutera que si un hôte le demande.
 
 
 ## Acceptation
